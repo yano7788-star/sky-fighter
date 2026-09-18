@@ -83,6 +83,48 @@
     }
 
     // ==========================================
+    // 초고대비 보스 스프라이트 아웃라인 생성기
+    // ==========================================
+    function createOutlinedBossCanvas(srcCanvas, strokeColor, glowColor) {
+      try {
+        const pad = 10;
+        const w = srcCanvas.width + pad * 2;
+        const h = srcCanvas.height + pad * 2;
+        const out = document.createElement('canvas');
+        out.width = w; out.height = h;
+        const octx = out.getContext('2d');
+
+        // 단색 실루엣 생성
+        const sil = document.createElement('canvas');
+        sil.width = w; sil.height = h;
+        const sctx = sil.getContext('2d');
+        sctx.drawImage(srcCanvas, pad, pad);
+        sctx.globalCompositeOperation = 'source-in';
+        sctx.fillStyle = strokeColor;
+        sctx.fillRect(0, 0, w, h);
+
+        // 12방향 오프셋 렌더링으로 굵고 뚜렷한 외곽 네온 테두리 생성
+        octx.shadowColor = glowColor;
+        octx.shadowBlur = 12;
+        const offsets = [
+          [-2.5, 0], [2.5, 0], [0, -2.5], [0, 2.5],
+          [-1.8, -1.8], [1.8, -1.8], [-1.8, 1.8], [1.8, 1.8],
+          [-3.2, 0], [3.2, 0], [0, -3.2], [0, 3.2]
+        ];
+        offsets.forEach(([ox, oy]) => {
+          octx.drawImage(sil, ox, oy);
+        });
+        octx.shadowBlur = 0;
+
+        // 중앙에 원본 비행기 스프라이트 안착
+        octx.drawImage(srcCanvas, pad, pad);
+        return out;
+      } catch(e) {
+        return srcCanvas;
+      }
+    }
+
+    // ==========================================
     // 이미지 로드 시스템
     // ==========================================
     const startScreenImg = new Image();
@@ -106,20 +148,30 @@
       isBombBtnLoaded = true;
     };
 
-    // 보스 1~5 이미지
+    // 보스 1~5 설정
+    const BOSS_CONFIGS = {
+      1: { name: 'STAGE 1: TANK BUSTER', hp: 90, color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
+      2: { name: 'STAGE 2: CYBER STEALTH', hp: 170, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
+      3: { name: 'STAGE 3: AEGIS FLAGSHIP', hp: 280, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
+      4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 440, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
+      5: { name: 'STAGE 5: VOID ARCHANGEL', hp: 680, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 }
+    };
+
+    // 보스 1~5 이미지 및 고대비 아웃라인 생성
     const bossData = {};
     for (let i = 1; i <= 5; i++) {
-      bossData[i] = { img: new Image(), cleanCanvas: null, loaded: false };
+      bossData[i] = { img: new Image(), cleanCanvas: null, cleanCanvasNormal: null, cleanCanvasPhase2: null, loaded: false };
       bossData[i].img.onload = () => {
-        bossData[i].cleanCanvas = removeFakeBackground(bossData[i].img);
+        const cleaned = removeFakeBackground(bossData[i].img);
+        bossData[i].cleanCanvas = cleaned;
+        bossData[i].cleanCanvasNormal = createOutlinedBossCanvas(cleaned, BOSS_CONFIGS[i].subColor, '#ffffff');
+        bossData[i].cleanCanvasPhase2 = createOutlinedBossCanvas(cleaned, '#f43f5e', '#ef4444');
         bossData[i].loaded = true;
       };
       bossData[i].img.src = `boss${i}.png`;
     }
 
-    // ==========================================
     // 스테이지별 배경 이미지 (bg1.png ~ bg5.png) 로드 시스템
-    // ==========================================
     const bgImages = {};
     const bgImgLoaded = {};
     for (let i = 1; i <= 5; i++) {
@@ -129,7 +181,6 @@
       bgImages[i].src = `bg${i}.png`;
     }
 
-    // 배경 스크롤 오프셋
     let bgScrollY = 0;
 
     // ==========================================
@@ -171,10 +222,10 @@
 
     function updateBgmScheduler() {
       if (!isBgmRunning || !audioCtx || gameState !== 'PLAYING') return;
-      const tempo = boss ? 155 : 130, stepDuration = 60 / tempo / 4;
+      const tempo = boss ? (boss.phase2 ? 168 : 152) : 130, stepDuration = 60 / tempo / 4;
       while (nextNoteTime < audioCtx.currentTime + 0.15) {
         const currentStep = (boss ? bossBgmNotes : normalBgmNotes)[bgmStep % normalBgmNotes.length];
-        playTone(currentStep.bass, 'triangle', stepDuration * 0.9, nextNoteTime, 0.22);
+        playTone(currentStep.bass, 'triangle', stepDuration * 0.9, nextNoteTime, boss && boss.phase2 ? 0.28 : 0.22);
         playTone(currentStep.lead, 'square', stepDuration * 0.6, nextNoteTime, 0.08);
         nextNoteTime += stepDuration; bgmStep++;
       }
@@ -189,6 +240,7 @@
         if (type === 'laser') { osc.type='square'; osc.frequency.setValueAtTime(820,t); osc.frequency.exponentialRampToValueAtTime(200,t+0.07); gain.gain.setValueAtTime(0.08,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.07); osc.start(t); osc.stop(t+0.07); }
         else if (type === 'missile') { osc.type='sawtooth'; osc.frequency.setValueAtTime(280,t); osc.frequency.exponentialRampToValueAtTime(600,t+0.1); gain.gain.setValueAtTime(0.1,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.1); osc.start(t); osc.stop(t+0.1); }
         else if (type === 'boom') { osc.type='sawtooth'; osc.frequency.setValueAtTime(140,t); osc.frequency.exponentialRampToValueAtTime(30,t+0.4); gain.gain.setValueAtTime(0.4,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.4); osc.start(t); osc.stop(t+0.4); }
+        else if (type === 'enrage') { osc.type='sawtooth'; osc.frequency.setValueAtTime(180,t); osc.frequency.linearRampToValueAtTime(540,t+0.35); gain.gain.setValueAtTime(0.35,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.4); osc.start(t); osc.stop(t+0.4); }
         else if (type === 'item') { osc.type='sine'; osc.frequency.setValueAtTime(440,t); osc.frequency.exponentialRampToValueAtTime(1100,t+0.16); gain.gain.setValueAtTime(0.18,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.16); osc.start(t); osc.stop(t+0.16); }
         else if (type === 'heal') { osc.type='sine'; osc.frequency.setValueAtTime(300,t); osc.frequency.exponentialRampToValueAtTime(800,t+0.25); gain.gain.setValueAtTime(0.2,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.25); osc.start(t); osc.stop(t+0.25); }
       } catch(e) {}
@@ -227,14 +279,6 @@
     let lives = 2;
     
     let bossTier = 1, boss = null, nextBossScore = 250, bossWarningTimer = 0;
-
-    const BOSS_CONFIGS = {
-      1: { name: 'STAGE 1: TANK BUSTER', hp: 80, color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 45 },
-      2: { name: 'STAGE 2: CYBER STEALTH', hp: 160, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 40 },
-      3: { name: 'STAGE 3: AEGIS FLAGSHIP', hp: 270, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 35 },
-      4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 420, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
-      5: { name: 'STAGE 5: VOID ARCHANGEL', hp: 650, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 }
-    };
 
     const player = { x: canvas.width/2, y: canvas.height-140, targetX: canvas.width/2, targetY: canvas.height-140, radius: 22, energy: 100, maxEnergy: 100, displayEnergy: 100, invincible: 0 };
     const bullets = [], missiles = [], enemyBullets = [], enemies = [], particles = [], items = [];
@@ -322,8 +366,28 @@
     }
 
     function spawnBoss(tier) {
-      bossWarningTimer = 110; const config = BOSS_CONFIGS[tier];
-      boss = { tier, name: config.name, x: canvas.width/2, y: -120, targetY: 135, width: config.w, height: config.h, vx: 2.3 + tier*0.25, hp: config.hp, maxHp: config.hp, displayHp: config.hp, shootCooldown: 0, attackMode: 1, color: config.color, subColor: config.subColor, shotCdMax: config.shotCd };
+      bossWarningTimer = 110; 
+      const config = BOSS_CONFIGS[tier];
+      boss = { 
+        tier, 
+        name: config.name, 
+        x: canvas.width/2, 
+        y: -120, 
+        targetY: 135, 
+        width: config.w, 
+        height: config.h, 
+        vx: 2.3 + tier*0.25, 
+        hp: config.hp, 
+        maxHp: config.hp, 
+        displayHp: config.hp, 
+        shootCooldown: 0, 
+        attackMode: 1, 
+        color: config.color, 
+        subColor: config.subColor, 
+        shotCdMax: config.shotCd,
+        phase2: false,
+        phase2Alert: 0
+      };
     }
 
     function restartGame() {
@@ -336,33 +400,26 @@
     }
 
     // =========================================================================
-    // 스테이지별 배경 시스템 (PNG 이미지 무한 스크롤 & 네온 폴백 듀얼 지원)
+    // 스테이지별 배경 시스템
     // =========================================================================
     function drawStageBackground(tier) {
       const w = canvas.width, h = canvas.height;
 
-      // 1. bg[tier].png 파일이 존재하고 정상 로드된 경우: 부드러운 무한 세로 롤링
       if (bgImgLoaded[tier] && bgImages[tier].naturalWidth > 0) {
         const img = bgImages[tier];
-        bgScrollY += 1.4; // 배경 흐름 속도
-
-        // 종횡비에 맞춰 캔버스 너비 기준 높이 계산
+        bgScrollY += 1.4;
         const drawH = w * (img.naturalHeight / img.naturalWidth);
         const yOffset = bgScrollY % drawH;
 
-        // 2개의 이미지를 위아래로 연속 배치하여 이음새 없는 무한 롤링 구현
         ctx.drawImage(img, 0, yOffset, w, drawH);
         ctx.drawImage(img, 0, yOffset - drawH, w, drawH);
         if (yOffset + drawH < h) {
           ctx.drawImage(img, 0, yOffset + drawH, w, drawH);
         }
 
-        // [중요: 탄환 시인성 보장 필터]
-        // 사용자가 업로드한 PNG가 밝더라도 적의 미사일이 묻히지 않도록 은은한 다크 틴트 오버레이 적용
         ctx.fillStyle = 'rgba(3, 5, 10, 0.42)';
         ctx.fillRect(0, 0, w, h);
 
-        // 은은한 심도용 별무리 레이어 블렌딩
         stars.forEach(s => {
           s.y += s.speed * 0.8;
           if (s.y > h) { s.y = 0; s.x = Math.random() * w; }
@@ -374,7 +431,6 @@
         return;
       }
 
-      // 2. PNG 이미지가 없는 경우: 탄환 시인성 극대화된 네온 다크 벡터 배경 폴백
       let bgGrad = ctx.createLinearGradient(0, 0, 0, h);
 
       if (tier === 1) {
@@ -479,42 +535,130 @@
       ctx.restore();
     }
 
+    // =========================================================================
+    // 초고대비 보스 렌더러 (스프라이트 네온 아웃라인 + SF 전술 타겟팅 브래킷)
+    // =========================================================================
     function drawBossEntity(b) {
       ctx.save(); ctx.translate(b.x, b.y);
-      if (bossData[b.tier] && bossData[b.tier].loaded && bossData[b.tier].cleanCanvas) {
-        const img = bossData[b.tier].cleanCanvas;
+
+      const mainColor = b.phase2 ? '#f43f5e' : b.subColor;
+      const glowColor = b.phase2 ? '#ef4444' : (b.color || '#38bdf8');
+      const boxW = b.width * 1.14;
+      const boxH = b.height * 1.14;
+      const halfW = boxW / 2;
+      const halfH = boxH / 2;
+
+      // 1. [SF 전술 타겟팅 브래킷] - 보스 4모서리 고선명 네온 브래킷 (┌ ┐ └ ┘)
+      ctx.save();
+      const bracketPulse = Math.sin(frame * 0.12) * 2.5;
+      const cornerLen = 16;
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = 10;
+      ctx.lineCap = 'round';
+
+      // 좌상단
+      ctx.beginPath();
+      ctx.moveTo(-halfW - bracketPulse, -halfH + cornerLen);
+      ctx.lineTo(-halfW - bracketPulse, -halfH - bracketPulse);
+      ctx.lineTo(-halfW + cornerLen, -halfH - bracketPulse);
+      ctx.stroke();
+
+      // 우상단
+      ctx.beginPath();
+      ctx.moveTo(halfW + bracketPulse - cornerLen, -halfH - bracketPulse);
+      ctx.lineTo(halfW + bracketPulse, -halfH - bracketPulse);
+      ctx.lineTo(halfW + bracketPulse, -halfH + cornerLen);
+      ctx.stroke();
+
+      // 좌하단
+      ctx.beginPath();
+      ctx.moveTo(-halfW - bracketPulse, halfH - cornerLen);
+      ctx.lineTo(-halfW - bracketPulse, halfH + bracketPulse);
+      ctx.lineTo(-halfW + cornerLen, halfH + bracketPulse);
+      ctx.stroke();
+
+      // 우하단
+      ctx.beginPath();
+      ctx.moveTo(halfW + bracketPulse - cornerLen, halfH + bracketPulse);
+      ctx.lineTo(halfW + bracketPulse, halfH + bracketPulse);
+      ctx.lineTo(halfW + bracketPulse, halfH + bracketPulse);
+      ctx.lineTo(halfW + bracketPulse, halfH - cornerLen);
+      ctx.stroke();
+      ctx.restore();
+
+      // 2. [2페이즈 각성 오라 이펙트] (보스 주변 펄스 에너지 링)
+      if (b.phase2) {
+        ctx.save();
+        const pulse = 12 + Math.sin(frame * 0.22) * 6;
+        ctx.strokeStyle = (Math.floor(frame / 5) % 2 === 0) ? '#f43f5e' : '#facc15';
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.arc(0, 0, (b.width / 2) + pulse, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 내부 서브 링
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.45)';
+        ctx.beginPath();
+        ctx.arc(0, 0, (b.width / 2) + pulse * 0.6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 3. [초고대비 보스 스프라이트 아웃라인 렌더링]
+      const bData = bossData[b.tier];
+      if (bData && bData.loaded && bData.cleanCanvas) {
+        // 2페이즈 또는 1페이즈 전용으로 사전 렌더링된 고휘도 아웃라인 캔버스 선택
+        const outlinedSprite = (b.phase2 && bData.cleanCanvasPhase2) ? bData.cleanCanvasPhase2 : (bData.cleanCanvasNormal || bData.cleanCanvas);
+        
         ctx.rotate(Math.PI);
-        const scale = Math.min(b.width / img.width, b.height / img.height);
-        const dw = img.width * scale, dh = img.height * scale;
+        const scale = Math.min(b.width / bData.cleanCanvas.width, b.height / bData.cleanCanvas.height);
+        const dw = outlinedSprite.width * scale;
+        const dh = outlinedSprite.height * scale;
+
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
+        ctx.drawImage(outlinedSprite, -dw / 2, -dh / 2, dw, dh);
         ctx.imageSmoothingEnabled = true;
       } else {
-        ctx.fillStyle = '#ef4444'; ctx.fillRect(-b.width/2, -b.height/2, b.width, b.height);
+        // 폴백
+        ctx.save();
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 12;
+        ctx.strokeRect(-b.width/2, -b.height/2, b.width, b.height);
+        ctx.fillStyle = b.phase2 ? '#f43f5e' : '#ef4444'; 
+        ctx.fillRect(-b.width/2, -b.height/2, b.width, b.height);
+        ctx.restore();
       }
+
       ctx.restore();
     }
 
     // ==========================================================
-    // 고대비 적 탄환 렌더러 (흰색 고휘도 코어 + 네온 + 블랙 아웃라인)
+    // 고대비 적 탄환 렌더러 (외곽 블랙 + 네온 + 백색 코어)
     // ==========================================================
     function drawHighVisibilityEnemyBullet(eb) {
       const r = eb.r || 4.5;
       ctx.save();
       
-      // 1. 외곽 블랙 아웃라인 (어떤 배경에서도 완벽하게 분리)
+      // 1. 외곽 블랙 테두리
       ctx.beginPath();
-      ctx.arc(eb.x, eb.y, r + 1.6, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      ctx.arc(eb.x, eb.y, r + 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
       ctx.fill();
 
-      // 2. 메인 네온 컬러 원체
+      // 2. 메인 네온 바디
       ctx.beginPath();
       ctx.arc(eb.x, eb.y, r, 0, Math.PI * 2);
       ctx.fillStyle = eb.color || '#fb7185';
       ctx.fill();
 
-      // 3. 중심부 초고휘도 백색 코어 (시선 집중 효과)
+      // 3. 중심 백색 코어
       ctx.beginPath();
       ctx.arc(eb.x, eb.y, Math.max(1.5, r * 0.45), 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
@@ -524,7 +668,7 @@
     }
 
     function drawHUD() {
-      // 1. 좌측 에너지 바
+      // 1. 에너지 바
       const barX = 16, barY = 80, barWidth = 14, barHeight = 150;
       player.displayEnergy += (player.energy - player.displayEnergy) * 0.15;
       const fillRatio = Math.max(0, Math.min(1, player.displayEnergy / player.maxEnergy)), currentFillH = barHeight * fillRatio;
@@ -596,7 +740,7 @@
       if (player.invincible > 0) player.invincible--;
       updateBgmScheduler();
 
-      // 스테이지별 배경 렌더링 (PNG 파일 또는 네온 벡터)
+      // 스테이지별 배경 렌더링
       drawStageBackground(bossTier);
 
       player.x += (player.targetX - player.x) * 0.25; player.y += (player.targetY - player.y) * 0.25;
@@ -642,47 +786,151 @@
         if (Math.floor(frame / 10) % 2 === 0) ctx.fillText(`⚠ WARNING: ${BOSS_CONFIGS[bossTier].name} ⚠`, canvas.width / 2, canvas.height / 2 - 80);
       }
 
-      // 보스 전투
+      // =========================================================================
+      // 보스 전투 로직 (체력 50% 이하 2페이즈 분기 및 고대비 렌더링)
+      // =========================================================================
       if (boss) {
-        if (boss.y < boss.targetY) boss.y += 1.5;
-        else {
-          boss.x += boss.vx; if (boss.x < boss.width / 2 + 10 || boss.x > canvas.width - boss.width / 2 - 10) boss.vx *= -1;
+        if (!boss.phase2 && boss.hp <= boss.maxHp * 0.5) {
+          boss.phase2 = true;
+          boss.phase2Alert = 80; 
+          boss.shotCdMax = Math.max(16, Math.round(boss.shotCdMax * 0.74)); // 공격 주기 26% 가속
+          boss.vx = (boss.vx > 0 ? 1 : -1) * (Math.abs(boss.vx) * 1.3);     // 이동 속도 30% 증속
+          playSound('enrage');
+          spawnExplosion(boss.x, boss.y, '#ef4444', 35);
+          bombFlash = 0.5;
+        }
+
+        if (boss.y < boss.targetY) {
+          boss.y += 1.5;
+        } else {
+          boss.x += boss.vx; 
+          if (boss.x < boss.width / 2 + 10 || boss.x > canvas.width - boss.width / 2 - 10) boss.vx *= -1;
+          
           boss.shootCooldown++;
           if (boss.shootCooldown > boss.shotCdMax) {
             boss.shootCooldown = 0;
             boss.attackMode = boss.attackMode === 1 ? 2 : 1; 
             
-            if (boss.tier === 1) {
-              if (boss.attackMode === 1) [-20, 20].forEach(ox => enemyBullets.push({ x: boss.x+ox, y: boss.y+35, vx: 0, vy: 3.5, color: '#facc15', r: 4.5 }));
-              else [-0.3, 0, 0.3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+35, vx: Math.sin(ang)*2.2, vy: Math.cos(ang)*2.2, color: '#fb923c', r: 5.5 }));
-            }
-            else if (boss.tier === 2) {
-              if (boss.attackMode === 1) [-0.3, 0, 0.3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+40, vx: Math.sin(ang)*4.5, vy: Math.cos(ang)*4.5, color: '#38bdf8', r: 4.5 }));
-              else [-0.5, -0.25, 0, 0.25, 0.5].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+40, vx: Math.sin(ang)*2.2, vy: Math.cos(ang)*2.2, color: '#06b6d4', r: 5.5 }));
-            }
-            else if (boss.tier === 3) {
-              if (boss.attackMode === 1) [-0.4, -0.2, 0, 0.2, 0.4].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+45, vx: Math.sin(ang)*3.8, vy: Math.cos(ang)*3.8, color: '#fde047', r: 4.5 }));
-              else [-0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+45, vx: Math.sin(ang)*1.8, vy: Math.cos(ang)*1.8, color: '#fef08a', r: 6.5 }));
-            }
-            else if (boss.tier === 4) {
-              if (boss.attackMode === 1) [-0.3, -0.1, 0.1, 0.3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+35, vx: Math.sin(ang)*4, vy: Math.cos(ang)*4, color: '#f87171', r: 4.5 }));
-              else for(let a=0; a<8; a++) { const ang = (Math.PI*2/8)*a; enemyBullets.push({ x: boss.x, y: boss.y+35, vx: Math.cos(ang)*2, vy: Math.sin(ang)*2, color: '#ef4444', r: 5.5 }); }
-            }
-            else if (boss.tier === 5) {
-              if (boss.attackMode === 1) {
-                for(let a=0; a<8; a++) { const ang = (Math.PI*2/8)*a + frame*0.05; enemyBullets.push({ x: boss.x, y: boss.y+20, vx: Math.cos(ang)*4, vy: Math.sin(ang)*4, color: '#c084fc', r: 4.5 }); }
-              } else {
-                for(let a=0; a<12; a++) { const ang = (Math.PI*2/12)*a - frame*0.02; enemyBullets.push({ x: boss.x, y: boss.y+20, vx: Math.cos(ang)*2, vy: Math.sin(ang)*2, color: '#f472b6', r: 6.5 }); }
+            const aimAngle = Math.atan2(player.y - boss.y, player.x - boss.x) - Math.PI / 2;
+
+            if (!boss.phase2) {
+              if (boss.tier === 1) {
+                if (boss.attackMode === 1) [-20, 20].forEach(ox => enemyBullets.push({ x: boss.x+ox, y: boss.y+35, vx: 0, vy: 3.4, color: '#facc15', r: 4.5 }));
+                else [-0.3, 0, 0.3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+35, vx: Math.sin(ang)*2.0, vy: Math.cos(ang)*2.0, color: '#fb923c', r: 5.5 }));
+              }
+              else if (boss.tier === 2) {
+                if (boss.attackMode === 1) [-0.3, 0, 0.3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+40, vx: Math.sin(ang)*4.2, vy: Math.cos(ang)*4.2, color: '#38bdf8', r: 4.5 }));
+                else [-0.5, -0.25, 0, 0.25, 0.5].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+40, vx: Math.sin(ang)*2.1, vy: Math.cos(ang)*2.1, color: '#06b6d4', r: 5.5 }));
+              }
+              else if (boss.tier === 3) {
+                if (boss.attackMode === 1) [-0.4, -0.2, 0, 0.2, 0.4].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+45, vx: Math.sin(ang)*3.6, vy: Math.cos(ang)*3.6, color: '#fde047', r: 4.5 }));
+                else [-0.6, -0.3, 0, 0.3, 0.6].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+45, vx: Math.sin(ang)*1.8, vy: Math.cos(ang)*1.8, color: '#fef08a', r: 6.5 }));
+              }
+              else if (boss.tier === 4) {
+                if (boss.attackMode === 1) [-0.3, -0.1, 0.1, 0.3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y+35, vx: Math.sin(ang)*3.8, vy: Math.cos(ang)*3.8, color: '#f87171', r: 4.5 }));
+                else for(let a=0; a<8; a++) { const ang = (Math.PI*2/8)*a; enemyBullets.push({ x: boss.x, y: boss.y+35, vx: Math.cos(ang)*2.0, vy: Math.sin(ang)*2.0, color: '#ef4444', r: 5.5 }); }
+              }
+              else if (boss.tier === 5) {
+                if (boss.attackMode === 1) {
+                  for(let a=0; a<8; a++) { const ang = (Math.PI*2/8)*a + frame*0.04; enemyBullets.push({ x: boss.x, y: boss.y+20, vx: Math.cos(ang)*3.8, vy: Math.sin(ang)*3.8, color: '#c084fc', r: 4.5 }); }
+                } else {
+                  for(let a=0; a<12; a++) { const ang = (Math.PI*2/12)*a - frame*0.02; enemyBullets.push({ x: boss.x, y: boss.y+20, vx: Math.cos(ang)*2.0, vy: Math.sin(ang)*2.0, color: '#f472b6', r: 6.5 }); }
+                }
+              }
+            } else {
+              if (boss.tier === 1) {
+                if (boss.attackMode === 1) {
+                  [-32, -12, 12, 32].forEach(ox => enemyBullets.push({ x: boss.x + ox, y: boss.y + 35, vx: 0, vy: 4.2, color: '#facc15', r: 4.8 }));
+                } else {
+                  [-0.22, 0, 0.22].forEach(off => {
+                    const ang = aimAngle + off;
+                    enemyBullets.push({ x: boss.x, y: boss.y + 35, vx: Math.sin(ang)*3.2, vy: Math.cos(ang)*3.2, color: '#ea580c', r: 6.5 });
+                  });
+                }
+              }
+              else if (boss.tier === 2) {
+                if (boss.attackMode === 1) {
+                  [-0.5, -0.33, -0.16, 0, 0.16, 0.33, 0.5].forEach(ang => {
+                    enemyBullets.push({ x: boss.x, y: boss.y + 40, vx: Math.sin(ang)*4.8, vy: Math.cos(ang)*4.8, color: '#38bdf8', r: 4.5 }));
+                  });
+                } else {
+                  for(let a=0; a<8; a++) {
+                    const ang = (Math.PI * 2 / 8) * a + (frame * 0.08);
+                    enemyBullets.push({ x: boss.x, y: boss.y + 40, vx: Math.cos(ang)*2.4, vy: Math.sin(ang)*2.4, color: '#06b6d4', r: 5.5 });
+                  }
+                }
+              }
+              else if (boss.tier === 3) {
+                if (boss.attackMode === 1) {
+                  for(let a=0; a<8; a++) {
+                    const ang = (Math.PI*2/8)*a + 0.39;
+                    enemyBullets.push({ x: boss.x, y: boss.y + 45, vx: Math.cos(ang)*3.4, vy: Math.sin(ang)*3.4, color: '#facc15', r: 5.0 });
+                  }
+                } else {
+                  [-0.35, -0.15, 0.15, 0.35].forEach(off => {
+                    const ang = aimAngle + off;
+                    enemyBullets.push({ x: boss.x, y: boss.y + 45, vx: Math.sin(ang)*2.2, vy: Math.cos(ang)*2.2, color: '#fef08a', r: 7.0 });
+                  });
+                }
+              }
+              else if (boss.tier === 4) {
+                if (boss.attackMode === 1) {
+                  [-40, -24, -8, 8, 24, 40].forEach(ox => {
+                    enemyBullets.push({ x: boss.x + ox, y: boss.y + 35, vx: (ox/40)*1.2, vy: 4.0, color: '#f87171', r: 4.8 }));
+                  });
+                } else {
+                  for(let a=0; a<10; a++) {
+                    const ang = (Math.PI * 2 / 10) * a;
+                    enemyBullets.push({ x: boss.x, y: boss.y + 35, vx: Math.cos(ang)*2.2, vy: Math.sin(ang)*2.2, color: '#ef4444', r: 6.0 });
+                  }
+                }
+              }
+              else if (boss.tier === 5) {
+                if (boss.attackMode === 1) {
+                  for(let a=0; a<12; a++) {
+                    const ang = (Math.PI*2/12)*a + frame*0.06;
+                    enemyBullets.push({ x: boss.x, y: boss.y + 20, vx: Math.cos(ang)*4.2, vy: Math.sin(ang)*4.2, color: '#c084fc', r: 4.8 });
+                  }
+                } else {
+                  [-0.18, 0, 0.18].forEach(off => {
+                    const ang = aimAngle + off;
+                    enemyBullets.push({ x: boss.x, y: boss.y + 20, vx: Math.sin(ang)*5.2, vy: Math.cos(ang)*5.2, color: '#f472b6', r: 6.0 });
+                  });
+                  for(let a=0; a<8; a++) {
+                    const ang = (Math.PI*2/8)*a - frame*0.03;
+                    enemyBullets.push({ x: boss.x, y: boss.y + 20, vx: Math.cos(ang)*1.8, vy: Math.sin(ang)*1.8, color: '#e879f9', r: 7.0 });
+                  }
+                }
               }
             }
           }
         }
+
+        // 고대비 테두리가 적용된 보스 렌더링 호출
         drawBossEntity(boss);
-        boss.displayHp += (boss.hp - boss.displayHp) * 0.15; const barW = canvas.width * 0.7, barX = (canvas.width - barW) / 2 + 10;
+
+        if (boss.phase2Alert > 0) {
+          boss.phase2Alert--;
+          ctx.save();
+          ctx.fillStyle = (frame % 8 < 4) ? '#ef4444' : '#facc15';
+          ctx.font = 'bold 20px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.shadowColor = '#000';
+          ctx.shadowBlur = 6;
+          ctx.fillText('⚡ PHASE 2: OVERDRIVE ⚡', canvas.width / 2, canvas.height * 0.38);
+          ctx.restore();
+        }
+
+        boss.displayHp += (boss.hp - boss.displayHp) * 0.15; 
+        const barW = canvas.width * 0.7, barX = (canvas.width - barW) / 2 + 10;
         ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'; ctx.fillRect(barX, 58, barW, 12);
-        ctx.fillStyle = boss.color; ctx.fillRect(barX, 58, barW * Math.max(0, boss.displayHp / boss.maxHp), 12);
-        ctx.strokeStyle = boss.subColor; ctx.lineWidth = 1.5; ctx.strokeRect(barX, 58, barW, 12);
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`${boss.name} (${Math.max(0, boss.hp)} / ${boss.maxHp})`, canvas.width / 2 + 10, 52);
+        ctx.fillStyle = boss.phase2 ? ((frame % 6 < 3) ? '#ef4444' : '#f59e0b') : boss.color; 
+        ctx.fillRect(barX, 58, barW * Math.max(0, boss.displayHp / boss.maxHp), 12);
+        ctx.strokeStyle = boss.phase2 ? '#f87171' : boss.subColor; ctx.lineWidth = 1.5; ctx.strokeRect(barX, 58, barW, 12);
+        
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; 
+        const phaseLabel = boss.phase2 ? ' [PHASE 2]' : '';
+        ctx.fillText(`${boss.name}${phaseLabel} (${Math.max(0, boss.hp)} / ${boss.maxHp})`, canvas.width / 2 + 10, 52);
 
         for (let j = bullets.length - 1; j >= 0; j--) {
           const b = bullets[j]; if (Math.hypot(b.x - boss.x, b.y - boss.y) < boss.width / 2) { bullets.splice(j, 1); boss.hp--; spawnExplosion(b.x, b.y, '#f59e0b', 3); }
@@ -703,7 +951,7 @@
         }
       }
 
-      // 적 미사일 업데이트 및 고대비 렌더링
+      // 적 탄환 업데이트
       for (let i = enemyBullets.length - 1; i >= 0; i--) {
         if (i >= enemyBullets.length) continue;
         const eb = enemyBullets[i]; 
@@ -722,6 +970,7 @@
         if (eb.y > canvas.height + 20 || eb.x < -20 || eb.x > canvas.width + 20 || eb.y < -20) enemyBullets.splice(i, 1);
       }
 
+      // 일반 적 스폰
       if (frame % (boss ? 70 : 32) === 0) enemies.push({ x: Math.random() * (canvas.width - 70) + 45, y: -30, hp: 1, speed: 3.2 + Math.random() * 1.5 });
       for (let i = enemies.length - 1; i >= 0; i--) {
         if (i >= enemies.length) continue;
@@ -759,6 +1008,7 @@
         if (e.y > canvas.height + 30) enemies.splice(i, 1);
       }
 
+      // 아이템 업데이트
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i]; it.y += 2.2;
         ctx.fillStyle = it.type === 'M' ? '#ec4899' : it.type === 'E' ? '#06b6d4' : it.type === 'B' ? '#ef4444' : '#10b981';
@@ -778,6 +1028,7 @@
         } else if (it.y > canvas.height + 20) items.splice(i, 1);
       }
 
+      // 파티클 업데이트
       for (let i = particles.length - 1; i >= 0; i--) {
         const pt = particles[i]; pt.x += pt.vx; pt.y += pt.vy; pt.alpha -= 0.035;
         if (pt.alpha <= 0) particles.splice(i, 1);
