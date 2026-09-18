@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -94,7 +93,6 @@
         out.width = w; out.height = h;
         const octx = out.getContext('2d');
 
-        // 단색 실루엣 생성
         const sil = document.createElement('canvas');
         sil.width = w; sil.height = h;
         const sctx = sil.getContext('2d');
@@ -103,7 +101,6 @@
         sctx.fillStyle = strokeColor;
         sctx.fillRect(0, 0, w, h);
 
-        // 12방향 오프셋 렌더링으로 굵고 뚜렷한 외곽 네온 테두리 생성
         octx.shadowColor = glowColor;
         octx.shadowBlur = 12;
         const offsets = [
@@ -116,12 +113,32 @@
         });
         octx.shadowBlur = 0;
 
-        // 중앙에 원본 비행기 스프라이트 안착
         octx.drawImage(srcCanvas, pad, pad);
         return out;
       } catch(e) {
         return srcCanvas;
       }
+    }
+
+    function getContentCenter(src) {
+      try {
+        const w = src.width, h = src.height;
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const cx = c.getContext('2d', { willReadFrequently: true });
+        cx.drawImage(src, 0, 0);
+        const d = cx.getImageData(0, 0, w, h).data;
+        let minX = w, minY = h, maxX = -1, maxY = -1;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            if (d[(y * w + x) * 4 + 3] > 40) {
+              if (x < minX) minX = x; if (x > maxX) maxX = x;
+              if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+          }
+        }
+        if (maxX < 0) return { x: 0.5, y: 0.5 };
+        return { x: (minX + maxX + 1) / 2 / w, y: (minY + maxY + 1) / 2 / h };
+      } catch (e) { return { x: 0.5, y: 0.5 }; }
     }
 
     // ==========================================
@@ -142,22 +159,22 @@
 
     const bombBtnImg = new Image();
     let cleanBombBtnCanvas = null, isBombBtnLoaded = false;
+    let bombContentCenter = { x: 0.5, y: 0.5 };
     bombBtnImg.src = 'bomb.png';
     bombBtnImg.onload = () => {
       cleanBombBtnCanvas = removeFakeBackground(bombBtnImg);
+      bombContentCenter = getContentCenter(cleanBombBtnCanvas);
       isBombBtnLoaded = true;
     };
 
-    // 보스 1~5 설정
     const BOSS_CONFIGS = {
-      1: { name: 'STAGE 1: TANK BUSTER', hp: 90, color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
-      2: { name: 'STAGE 2: CYBER STEALTH', hp: 170, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
-      3: { name: 'STAGE 3: AEGIS FLAGSHIP', hp: 280, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
-      4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 440, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
-      5: { name: 'STAGE 5: VOID ARCHANGEL', hp: 680, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 }
+      1: { name: 'STAGE 1: TANK BUSTER', hp: 200, color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
+      2: { name: 'STAGE 2: CYBER STEALTH', hp: 380, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
+      3: { name: 'STAGE 3: AEGIS FLAGSHIP', hp: 620, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
+      4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 970, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
+      5: { name: 'STAGE 5: VOID ARCHANGEL', hp: 1500, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 }
     };
 
-    // 보스 1~5 이미지 및 고대비 아웃라인 생성
     const bossData = {};
     for (let i = 1; i <= 5; i++) {
       bossData[i] = { img: new Image(), cleanCanvas: null, cleanCanvasNormal: null, cleanCanvasPhase2: null, loaded: false };
@@ -171,7 +188,6 @@
       bossData[i].img.src = `boss${i}.png`;
     }
 
-    // 스테이지별 배경 이미지 (bg1.png ~ bg5.png) 로드 시스템
     const bgImages = {};
     const bgImgLoaded = {};
     for (let i = 1; i <= 5; i++) {
@@ -183,10 +199,67 @@
 
     let bgScrollY = 0;
 
-    // ==========================================
-    // 사운드 엔진
-    // ==========================================
+    // =========================================================================
+    // 배경음악 & 하이브리드 오디오 엔진
+    // 일반 BGM: 'under heavy fire' (under_heavy_fire.mp3 또는 under heavy fire.mp3)
+    // 보스 BGM: bgm_boss.mp3 (또는 boss.mp3)
+    // =========================================================================
     let audioCtx = null, bgmGain = null, isMuted = false, bgmStep = 0, nextNoteTime = 0, isBgmRunning = false;
+
+    const normalAudio = new Audio();
+    normalAudio.loop = true;
+    normalAudio.volume = 0;
+    normalAudio.preload = 'auto';
+
+    const bossAudio = new Audio();
+    bossAudio.loop = true;
+    bossAudio.volume = 0;
+    bossAudio.preload = 'auto';
+
+    let hasNormalAudio = false;
+    let hasBossAudio = false;
+
+    // 다양한 파일명 포맷 지원 (공백, 언더바, 대소문자 등)
+    function attachAudioCandidates(audioElem, candidates, onSuccess) {
+      let idx = 0;
+      function tryNext() {
+        if (idx >= candidates.length) return;
+        const candidate = candidates[idx++];
+        audioElem.src = candidate;
+        audioElem.load();
+      }
+      audioElem.addEventListener('canplaythrough', () => {
+        onSuccess();
+      }, { once: true });
+      audioElem.addEventListener('error', () => {
+        tryNext();
+      });
+      tryNext();
+    }
+
+    // 일반 배경음악: under heavy fire
+    attachAudioCandidates(normalAudio, [
+      'under_heavy_fire.mp3',
+      'under heavy fire.mp3',
+      'Under_Heavy_Fire.mp3',
+      'Under Heavy Fire.mp3',
+      'underheavyfire.mp3',
+      'bgm_normal.mp3'
+    ], () => {
+      hasNormalAudio = true;
+    });
+
+    // 보스 배경음악
+    attachAudioCandidates(bossAudio, [
+      'bgm_boss.mp3',
+      'boss.mp3',
+      'boss_battle.mp3',
+      'Bgm_Boss.mp3'
+    ], () => {
+      hasBossAudio = true;
+    });
+
+    // 내장 칩튠 신디사이저 (MP3 파일이 없거나 로드 전일 때 자동 폴백)
     const NOTES = { C3:130.81, D3:146.83, E3:164.81, F3:174.61, G3:196.00, A3:220.00, B3:246.94, C4:261.63, D4:293.66, E4:329.63, F4:349.23, G4:392.00, A4:440.00, B4:493.88, C5:523.25, D5:587.33, E5:659.25, F5:698.46, G5:783.99, A5:880.00, REST:0 };
     const normalBgmNotes = [
       {bass:NOTES.A3, lead:NOTES.A4}, {bass:NOTES.A3, lead:NOTES.C5}, {bass:NOTES.A3, lead:NOTES.E5}, {bass:NOTES.A3, lead:NOTES.A4},
@@ -209,6 +282,13 @@
         bgmGain.connect(audioCtx.destination);
       }
       if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      // 모바일 자동재생 정책 해제: 터치 시점 최초 재생 시도 (무음 볼륨)
+      try {
+        if (normalAudio) normalAudio.play().catch(() => {});
+        if (bossAudio) bossAudio.play().catch(() => {});
+      } catch (e) {}
+
       if (!isBgmRunning) { isBgmRunning = true; nextNoteTime = audioCtx.currentTime + 0.05; }
     }
 
@@ -220,8 +300,49 @@
       osc.connect(gain); gain.connect(bgmGain); osc.start(startTime); osc.stop(startTime + duration);
     }
 
+    // BGM 스케줄러: 일반전(under heavy fire) ↔ 보스전(boss) 볼륨 크로스페이드
     function updateBgmScheduler() {
-      if (!isBgmRunning || !audioCtx || gameState !== 'PLAYING') return;
+      if (!isBgmRunning || gameState !== 'PLAYING') {
+        if (normalAudio) normalAudio.volume = Math.max(0, normalAudio.volume - 0.05);
+        if (bossAudio) bossAudio.volume = Math.max(0, bossAudio.volume - 0.05);
+        return;
+      }
+
+      // 보스전 구간 판별: 경고(WARNING) 단계부터 보스전(BOSS), 보스 폭발(BOSS_DYING) 단계까지
+      const isBossEncounter = (stagePhase === 'WARNING' || stagePhase === 'BOSS' || stagePhase === 'BOSS_DYING' || boss !== null);
+
+      let targetNormalVol = 0;
+      let targetBossVol = 0;
+
+      if (!isMuted) {
+        if (isBossEncounter) {
+          targetNormalVol = 0;
+          targetBossVol = (boss && boss.phase2) ? 0.65 : 0.52;
+        } else {
+          targetNormalVol = 0.55;
+          targetBossVol = 0;
+        }
+      }
+
+      // 1. 외부 MP3 음원 부드러운 볼륨 전환
+      if (normalAudio) {
+        const diffN = targetNormalVol - normalAudio.volume;
+        if (Math.abs(diffN) < 0.01) normalAudio.volume = targetNormalVol;
+        else normalAudio.volume += diffN * 0.05;
+      }
+      if (bossAudio) {
+        const diffB = targetBossVol - bossAudio.volume;
+        if (Math.abs(diffB) < 0.01) bossAudio.volume = targetBossVol;
+        else bossAudio.volume += diffB * 0.05;
+      }
+
+      // 실제 MP3 파일 중 하나라도 활성화되어 볼륨이 흘러나오고 있다면 내장 신디사이저는 정지
+      const isExternalBgmPlaying = (normalAudio && normalAudio.volume > 0.02) || (bossAudio && bossAudio.volume > 0.02);
+      if (isExternalBgmPlaying) return;
+
+      // 2. 외부 MP3 파일이 준비되지 않았을 때: 내장 Web Audio 신디사이저로 동적 연주 (폴백)
+      if (!audioCtx) return;
+      if (nextNoteTime < audioCtx.currentTime) nextNoteTime = audioCtx.currentTime + 0.05;
       const tempo = boss ? (boss.phase2 ? 168 : 152) : 130, stepDuration = 60 / tempo / 4;
       while (nextNoteTime < audioCtx.currentTime + 0.15) {
         const currentStep = (boss ? bossBgmNotes : normalBgmNotes)[bgmStep % normalBgmNotes.length];
@@ -278,7 +399,11 @@
     let bombs = 1, bombFlash = 0, lastBombTime = 0; 
     let lives = 2;
     
-    let bossTier = 1, boss = null, nextBossScore = 250, bossWarningTimer = 0;
+    let bossTier = 1, boss = null, nextBossScore = 250;
+
+    let stagePhase = 'FIGHT', phaseTimer = 0, clearBonus = 0;
+    const PHASE_FRAMES = { WARNING: 130, BOSS_DYING: 80, CLEAR: 120, INTRO: 150 };
+    let bgTier = 1, prevBgTier = 0, bgFade = 1;
 
     const player = { x: canvas.width/2, y: canvas.height-140, targetX: canvas.width/2, targetY: canvas.height-140, radius: 22, energy: 100, maxEnergy: 100, displayEnergy: 100, invincible: 0 };
     const bullets = [], missiles = [], enemyBullets = [], enemies = [], particles = [], items = [];
@@ -291,50 +416,77 @@
       if (Math.hypot(x - (canvas.width - 45), y - 30) < 25) {
         isMuted = !isMuted; 
         if (bgmGain) bgmGain.gain.setValueAtTime(isMuted ? 0 : 0.08, audioCtx.currentTime);
+        if (normalAudio) normalAudio.muted = isMuted;
+        if (bossAudio) bossAudio.muted = isMuted;
         return true;
       } return false;
     }
 
     function fireBomb() {
       if (bombs <= 0 || gameState !== 'PLAYING') return;
+      if (stagePhase === 'BOSS_DYING' || stagePhase === 'CLEAR') return;
       if (frame - lastBombTime < 20) return;
       lastBombTime = frame;
       bombs--; playSound('boom'); bombFlash = 1.0; 
       
       enemyBullets.length = 0; 
       enemies.forEach(e => { e.hp = 0; });
-      if (boss) {
+      if (boss && !boss.dying) {
         boss.hp -= 40; 
         spawnExplosion(boss.x, boss.y, '#ef4444', 30);
       }
     }
 
-    function handlePointer(x, y, isTap) {
-      if (gameState === 'START') {
-        if (isTap) { initAudio(); restartGame(); }
-        return;
-      }
-      if (gameState === 'GAMEOVER' || gameState === 'GAMECLEAR') { 
-        if (isTap && stateTimer <= 0) restartGame(); 
-        return; 
-      }
+    let isFiring = false;
+    let fireGrace = 0;
+    let fireCd = 0, missileCd = 0;
+    let activeInputId = null;
 
-      if (isTap) {
-        if (checkSoundButtonTap(x, y)) return;
-        if (isBombButtonHit(x, y)) { fireBomb(); return; }
-      } else {
-        if (Math.hypot(x - (canvas.width - 45), y - 30) < 30) return;
-        if (Math.hypot(x - (canvas.width - 55), y - (canvas.height - 65)) < 45) return;
-      }
+    function resetInput() { isFiring = false; fireGrace = 0; activeInputId = null; }
 
-      player.targetX = x;
-      player.targetY = y - 50;
+    function isUiZone(x, y) {
+      return Math.hypot(x - (canvas.width - 45), y - 30) < 30 ||
+             Math.hypot(x - (canvas.width - 55), y - (canvas.height - 65)) < 45;
     }
 
-    canvas.addEventListener('touchstart', e => { e.preventDefault(); handlePointer(e.touches[0].clientX, e.touches[0].clientY, true); }, { passive: false });
-    canvas.addEventListener('touchmove', e => { e.preventDefault(); if (gameState === 'PLAYING') handlePointer(e.touches[0].clientX, e.touches[0].clientY, false); }, { passive: false });
-    canvas.addEventListener('mousedown', e => { handlePointer(e.clientX, e.clientY, true); });
-    canvas.addEventListener('mousemove', e => { if (gameState === 'PLAYING' && e.buttons === 1) handlePointer(e.clientX, e.clientY, false); });
+    function handleMenuTap() {
+      if (gameState === 'START') { initAudio(); restartGame(); return true; }
+      if (gameState === 'GAMEOVER' || gameState === 'GAMECLEAR') {
+        if (stateTimer <= 0) { initAudio(); restartGame(); }
+        return true;
+      }
+      return false;
+    }
+
+    function pressAt(id, x, y) {
+      if (handleMenuTap()) return;
+      if (checkSoundButtonTap(x, y)) return;
+      if (isBombButtonHit(x, y)) { fireBomb(); return; }
+      if (activeInputId !== null) return;
+      activeInputId = id;
+      isFiring = true; fireGrace = 10;
+      player.targetX = x; player.targetY = y - 50;
+    }
+
+    function moveAt(id, x, y) {
+      if (gameState !== 'PLAYING' || id !== activeInputId || isUiZone(x, y)) return;
+      player.targetX = x; player.targetY = y - 50;
+    }
+
+    function releaseAt(id) {
+      if (id === activeInputId) { activeInputId = null; isFiring = false; }
+    }
+
+    function forTouches(e, fn) { for (let i = 0; i < e.changedTouches.length; i++) fn(e.changedTouches[i]); }
+
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); forTouches(e, t => pressAt(t.identifier, t.clientX, t.clientY)); }, { passive: false });
+    canvas.addEventListener('touchmove', e => { e.preventDefault(); forTouches(e, t => moveAt(t.identifier, t.clientX, t.clientY)); }, { passive: false });
+    canvas.addEventListener('touchend', e => { e.preventDefault(); forTouches(e, t => releaseAt(t.identifier)); }, { passive: false });
+    canvas.addEventListener('touchcancel', e => { forTouches(e, t => releaseAt(t.identifier)); });
+    canvas.addEventListener('mousedown', e => { pressAt('mouse', e.clientX, e.clientY); });
+    canvas.addEventListener('mousemove', e => { if (e.buttons === 1) moveAt('mouse', e.clientX, e.clientY); });
+    window.addEventListener('mouseup', () => releaseAt('mouse'));
+    window.addEventListener('blur', resetInput);
 
     function spawnExplosion(x, y, color, count=12) {
       for (let i = 0; i < count; i++) {
@@ -345,6 +497,7 @@
 
     function applyDamage(dmg) {
       if (player.invincible > 0 || gameState !== 'PLAYING') return;
+      if (stagePhase === 'BOSS_DYING' || stagePhase === 'CLEAR') return;
       player.energy = Math.max(0, player.energy - dmg);
       player.invincible = 40;
       playSound('boom'); spawnExplosion(player.x, player.y, '#ef4444', 16);
@@ -359,14 +512,13 @@
           bombFlash = 0.6;
           playSound('heal');
         } else {
-          gameState = 'GAMEOVER'; 
+          gameState = 'GAMEOVER'; resetInput(); 
           stateTimer = 90; 
         }
       }
     }
 
     function spawnBoss(tier) {
-      bossWarningTimer = 110; 
       const config = BOSS_CONFIGS[tier];
       boss = { 
         tier, 
@@ -386,43 +538,41 @@
         subColor: config.subColor, 
         shotCdMax: config.shotCd,
         phase2: false,
-        phase2Alert: 0
+        phase2Alert: 0,
+        dying: false,
+        deathTimer: 0
       };
     }
 
     function restartGame() {
       score = 0; bossTier = 1; player.energy = 100; player.displayEnergy = 100; player.invincible = 0;
-      weaponLevel = 1; hasHomingMissile = false; missileTimer = 0; boss = null; nextBossScore = 250; bossWarningTimer = 0; 
+      weaponLevel = 1; hasHomingMissile = false; missileTimer = 0; boss = null; nextBossScore = 250;
+      stagePhase = 'FIGHT'; phaseTimer = 0; clearBonus = 0; bgTier = 1; prevBgTier = 0; bgFade = 1; bgScrollY = 0;
+      resetInput(); fireCd = 0; missileCd = 0; 
       bombs = 1; bombFlash = 0; lastBombTime = 0; lives = 2;
       bullets.length=0; missiles.length=0; enemyBullets.length=0; enemies.length=0; particles.length=0; items.length=0;
       player.x = canvas.width/2; player.y = canvas.height-140; player.targetX = player.x; player.targetY = player.y;
       gameState = 'PLAYING';
     }
 
-    // =========================================================================
-    // 스테이지별 배경 시스템
-    // =========================================================================
-    function drawStageBackground(tier) {
+    function drawStageBackground(tier, advance = true) {
       const w = canvas.width, h = canvas.height;
 
       if (bgImgLoaded[tier] && bgImages[tier].naturalWidth > 0) {
         const img = bgImages[tier];
-        bgScrollY += 1.4;
-        const drawH = w * (img.naturalHeight / img.naturalWidth);
+        if (advance) bgScrollY += 1.4;
+        const drawH = Math.max(1, Math.ceil(w * (img.naturalHeight / img.naturalWidth)));
         const yOffset = bgScrollY % drawH;
 
-        ctx.drawImage(img, 0, yOffset, w, drawH);
-        ctx.drawImage(img, 0, yOffset - drawH, w, drawH);
-        if (yOffset + drawH < h) {
-          ctx.drawImage(img, 0, yOffset + drawH, w, drawH);
+        for (let y = yOffset - drawH; y < h; y += drawH) {
+          ctx.drawImage(img, 0, Math.floor(y), w, drawH + 1);
         }
 
         ctx.fillStyle = 'rgba(3, 5, 10, 0.42)';
         ctx.fillRect(0, 0, w, h);
 
         stars.forEach(s => {
-          s.y += s.speed * 0.8;
-          if (s.y > h) { s.y = 0; s.x = Math.random() * w; }
+          if (advance) { s.y += s.speed * 0.8; if (s.y > h) { s.y = 0; s.x = Math.random() * w; } }
           ctx.fillStyle = s.layer === 2 ? 'rgba(255, 255, 255, 0.7)' : 'rgba(148, 163, 184, 0.3)';
           ctx.beginPath();
           ctx.arc(s.x, s.y, s.r * 0.8, 0, Math.PI * 2);
@@ -455,8 +605,10 @@
         ctx.fillStyle = ionGrad; ctx.fillRect(0, 0, w, h);
         ctx.save();
         asteroids.forEach(ast => {
-          ast.y += ast.spd; ast.rot += ast.rotSpd;
-          if (ast.y > h + 40) { ast.y = -40; ast.x = Math.random() * w; }
+          if (advance) {
+            ast.y += ast.spd; ast.rot += ast.rotSpd;
+            if (ast.y > h + 40) { ast.y = -40; ast.x = Math.random() * w; }
+          }
           ctx.save(); ctx.translate(ast.x, ast.y); ctx.rotate(ast.rot);
           ctx.fillStyle = 'rgba(18, 14, 10, 0.65)'; ctx.strokeStyle = 'rgba(234, 179, 8, 0.15)'; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(0, 0, ast.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
@@ -467,9 +619,11 @@
         ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, w, h);
         ctx.save();
         embers.forEach(em => {
-          em.y -= em.spd; em.wobble += 0.03;
+          if (advance) {
+            em.y -= em.spd; em.wobble += 0.03;
+            if (em.y < -10) { em.y = h + 10; em.x = Math.random() * w; }
+          }
           const wx = em.x + Math.sin(em.wobble) * 6;
-          if (em.y < -10) { em.y = h + 10; em.x = Math.random() * w; }
           ctx.fillStyle = 'rgba(239, 68, 68, 0.22)'; ctx.beginPath(); ctx.arc(wx, em.y, em.r, 0, Math.PI * 2); ctx.fill();
         });
         ctx.restore();
@@ -487,16 +641,19 @@
       }
 
       stars.forEach(s => {
-        s.y += s.speed;
-        if (s.y > h) { s.y = 0; s.x = Math.random() * w; }
+        if (advance) { s.y += s.speed; if (s.y > h) { s.y = 0; s.x = Math.random() * w; } }
         ctx.fillStyle = s.layer === 2 ? 'rgba(241, 245, 249, 0.85)' : s.layer === 1 ? 'rgba(148, 163, 184, 0.45)' : 'rgba(100, 116, 139, 0.25)';
         ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
       });
     }
 
-    // ==========================================
-    // 렌더링 함수들
-    // ==========================================
+    function beginNextStage() {
+      bossTier++;
+      prevBgTier = bgTier; bgTier = bossTier; bgFade = 0;
+      nextBossScore = score + 450;
+      stagePhase = 'INTRO'; phaseTimer = PHASE_FRAMES.INTRO;
+    }
+
     function drawStartScreen() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (isStartScreenLoaded) {
@@ -535,11 +692,12 @@
       ctx.restore();
     }
 
-    // =========================================================================
-    // 초고대비 보스 렌더러 (스프라이트 네온 아웃라인 + SF 전술 타겟팅 브래킷)
-    // =========================================================================
     function drawBossEntity(b) {
       ctx.save(); ctx.translate(b.x, b.y);
+      if (b.dying) {
+        ctx.translate((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 6);
+        if (Math.floor(frame / 3) % 2 === 0) ctx.globalAlpha = 0.6;
+      }
 
       const mainColor = b.phase2 ? '#f43f5e' : b.subColor;
       const glowColor = b.phase2 ? '#ef4444' : (b.color || '#38bdf8');
@@ -548,48 +706,47 @@
       const halfW = boxW / 2;
       const halfH = boxH / 2;
 
-      // 1. [SF 전술 타겟팅 브래킷] - 보스 4모서리 고선명 네온 브래킷 (┌ ┐ └ ┘)
-      ctx.save();
-      const bracketPulse = Math.sin(frame * 0.12) * 2.5;
-      const cornerLen = 16;
-      ctx.strokeStyle = mainColor;
-      ctx.lineWidth = 2.5;
-      ctx.shadowColor = glowColor;
-      ctx.shadowBlur = 10;
-      ctx.lineCap = 'round';
+      if (!b.dying) {
+        ctx.save();
+        const bracketPulse = Math.sin(frame * 0.12) * 2.5;
+        const cornerLen = 16;
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 10;
+        ctx.lineCap = 'round';
 
-      // 좌상단
-      ctx.beginPath();
-      ctx.moveTo(-halfW - bracketPulse, -halfH + cornerLen);
-      ctx.lineTo(-halfW - bracketPulse, -halfH - bracketPulse);
-      ctx.lineTo(-halfW + cornerLen, -halfH - bracketPulse);
-      ctx.stroke();
+        // 좌상단
+        ctx.beginPath();
+        ctx.moveTo(-halfW - bracketPulse, -halfH + cornerLen);
+        ctx.lineTo(-halfW - bracketPulse, -halfH - bracketPulse);
+        ctx.lineTo(-halfW + cornerLen, -halfH - bracketPulse);
+        ctx.stroke();
 
-      // 우상단
-      ctx.beginPath();
-      ctx.moveTo(halfW + bracketPulse - cornerLen, -halfH - bracketPulse);
-      ctx.lineTo(halfW + bracketPulse, -halfH - bracketPulse);
-      ctx.lineTo(halfW + bracketPulse, -halfH + cornerLen);
-      ctx.stroke();
+        // 우상단
+        ctx.beginPath();
+        ctx.moveTo(halfW + bracketPulse - cornerLen, -halfH - bracketPulse);
+        ctx.lineTo(halfW + bracketPulse, -halfH - bracketPulse);
+        ctx.lineTo(halfW + bracketPulse, -halfH + cornerLen);
+        ctx.stroke();
 
-      // 좌하단
-      ctx.beginPath();
-      ctx.moveTo(-halfW - bracketPulse, halfH - cornerLen);
-      ctx.lineTo(-halfW - bracketPulse, halfH + bracketPulse);
-      ctx.lineTo(-halfW + cornerLen, halfH + bracketPulse);
-      ctx.stroke();
+        // 좌하단
+        ctx.beginPath();
+        ctx.moveTo(-halfW - bracketPulse, halfH - cornerLen);
+        ctx.lineTo(-halfW - bracketPulse, halfH + bracketPulse);
+        ctx.lineTo(-halfW + cornerLen, halfH + bracketPulse);
+        ctx.stroke();
 
-      // 우하단
-      ctx.beginPath();
-      ctx.moveTo(halfW + bracketPulse - cornerLen, halfH + bracketPulse);
-      ctx.lineTo(halfW + bracketPulse, halfH + bracketPulse);
-      ctx.lineTo(halfW + bracketPulse, halfH + bracketPulse);
-      ctx.lineTo(halfW + bracketPulse, halfH - cornerLen);
-      ctx.stroke();
-      ctx.restore();
+        // 우하단
+        ctx.beginPath();
+        ctx.moveTo(halfW + bracketPulse - cornerLen, halfH + bracketPulse);
+        ctx.lineTo(halfW + bracketPulse, halfH + bracketPulse);
+        ctx.lineTo(halfW + bracketPulse, halfH - cornerLen);
+        ctx.stroke();
+        ctx.restore();
+      }
 
-      // 2. [2페이즈 각성 오라 이펙트] (보스 주변 펄스 에너지 링)
-      if (b.phase2) {
+      if (b.phase2 && !b.dying) {
         ctx.save();
         const pulse = 12 + Math.sin(frame * 0.22) * 6;
         ctx.strokeStyle = (Math.floor(frame / 5) % 2 === 0) ? '#f43f5e' : '#facc15';
@@ -600,7 +757,6 @@
         ctx.arc(0, 0, (b.width / 2) + pulse, 0, Math.PI * 2);
         ctx.stroke();
 
-        // 내부 서브 링
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = 'rgba(244, 63, 94, 0.45)';
         ctx.beginPath();
@@ -609,10 +765,8 @@
         ctx.restore();
       }
 
-      // 3. [초고대비 보스 스프라이트 아웃라인 렌더링]
       const bData = bossData[b.tier];
       if (bData && bData.loaded && bData.cleanCanvas) {
-        // 2페이즈 또는 1페이즈 전용으로 사전 렌더링된 고휘도 아웃라인 캔버스 선택
         const outlinedSprite = (b.phase2 && bData.cleanCanvasPhase2) ? bData.cleanCanvasPhase2 : (bData.cleanCanvasNormal || bData.cleanCanvas);
         
         ctx.rotate(Math.PI);
@@ -624,7 +778,6 @@
         ctx.drawImage(outlinedSprite, -dw / 2, -dh / 2, dw, dh);
         ctx.imageSmoothingEnabled = true;
       } else {
-        // 폴백
         ctx.save();
         ctx.strokeStyle = mainColor;
         ctx.lineWidth = 3;
@@ -639,31 +792,81 @@
       ctx.restore();
     }
 
-    // ==========================================================
-    // 고대비 적 탄환 렌더러 (외곽 블랙 + 네온 + 백색 코어)
-    // ==========================================================
     function drawHighVisibilityEnemyBullet(eb) {
       const r = eb.r || 4.5;
       ctx.save();
       
-      // 1. 외곽 블랙 테두리
       ctx.beginPath();
       ctx.arc(eb.x, eb.y, r + 1.8, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
       ctx.fill();
 
-      // 2. 메인 네온 바디
       ctx.beginPath();
       ctx.arc(eb.x, eb.y, r, 0, Math.PI * 2);
       ctx.fillStyle = eb.color || '#fb7185';
       ctx.fill();
 
-      // 3. 중심 백색 코어
       ctx.beginPath();
       ctx.arc(eb.x, eb.y, Math.max(1.5, r * 0.45), 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
 
+      ctx.restore();
+    }
+
+    function drawTextCentered(text, cx, cy) {
+      ctx.save();
+      const m = ctx.measureText(text);
+      if (m.actualBoundingBoxAscent === undefined) {
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, cx, cy);
+      } else {
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        const x = cx - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+        const y = cy + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+        ctx.fillText(text, x, y);
+      }
+      ctx.restore();
+    }
+
+    function bannerAlpha(t, total, fadeIn = 18, fadeOut = 24) {
+      return Math.max(0, Math.min(1, t / fadeIn, (total - t) / fadeOut));
+    }
+
+    function drawStageOverlay() {
+      if (stagePhase !== 'WARNING' && stagePhase !== 'CLEAR' && stagePhase !== 'INTRO') return;
+      const cx = canvas.width / 2, cy = canvas.height * 0.36;
+      ctx.save();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 10;
+
+      if (stagePhase === 'WARNING') {
+        const total = PHASE_FRAMES.WARNING, t = total - phaseTimer;
+        const a = bannerAlpha(t, total, 12, 20);
+        ctx.fillStyle = `rgba(239, 68, 68, ${(0.06 + 0.05 * Math.sin(frame * 0.25)) * a})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = a;
+        if (Math.floor(frame / 10) % 2 === 0) {
+          ctx.fillStyle = '#ef4444'; ctx.font = 'bold 30px sans-serif';
+          ctx.fillText('⚠ WARNING ⚠', cx, cy);
+        }
+        ctx.fillStyle = '#fca5a5'; ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(BOSS_CONFIGS[bossTier].name, cx, cy + 34);
+      } else if (stagePhase === 'CLEAR') {
+        const total = PHASE_FRAMES.CLEAR, t = total - phaseTimer;
+        ctx.globalAlpha = bannerAlpha(t, total, 15, 25);
+        ctx.fillStyle = '#10b981'; ctx.font = 'bold 34px sans-serif';
+        ctx.fillText(`STAGE ${bossTier} CLEAR!`, cx, cy);
+        ctx.fillStyle = '#facc15'; ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(`BOSS BONUS +${clearBonus}`, cx, cy + 36);
+      } else {
+        const total = PHASE_FRAMES.INTRO - 15, t = PHASE_FRAMES.INTRO - phaseTimer - 15;
+        const cfg = BOSS_CONFIGS[bossTier];
+        ctx.globalAlpha = bannerAlpha(t, total, 20, 30);
+        ctx.fillStyle = cfg.subColor; ctx.font = 'bold 40px sans-serif';
+        ctx.fillText(`STAGE ${bossTier}`, cx, cy);
+        ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(cfg.name.replace(/^STAGE \d+:\s*/, ''), cx, cy + 34);
+      }
       ctx.restore();
     }
 
@@ -688,13 +891,15 @@
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(cleanBombBtnCanvas, bx - br, by - br, br * 2, br * 2);
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
-        ctx.font = 'bold 22px sans-serif'; ctx.fillText(`x${bombs}`, bx, by + 8);
+        ctx.font = 'bold 22px sans-serif';
+        drawTextCentered(`x${bombs}`, bx + (bombContentCenter.x - 0.5) * br * 2, by + (bombContentCenter.y - 0.5) * br * 2);
       } else {
         ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2);
         ctx.fillStyle = bombs > 0 ? 'rgba(6, 182, 212, 0.8)' : 'rgba(100, 116, 139, 0.5)'; ctx.fill();
         ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 11px sans-serif'; ctx.fillText('BOMB', bx, by - 2);
-        ctx.font = 'bold 16px sans-serif'; ctx.fillText(`x${bombs}`, bx, by + 16);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif'; drawTextCentered('BOMB', bx, by - 9);
+        ctx.font = 'bold 16px sans-serif'; drawTextCentered(`x${bombs}`, bx, by + 9);
       }
       ctx.restore();
 
@@ -717,6 +922,7 @@
     // ==========================================
     function loop() {
       frame++;
+      ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
       if (stateTimer > 0) stateTimer--;
       
       if (gameState === 'START') { drawStartScreen(); requestAnimationFrame(loop); return; }
@@ -740,14 +946,27 @@
       if (player.invincible > 0) player.invincible--;
       updateBgmScheduler();
 
-      // 스테이지별 배경 렌더링
-      drawStageBackground(bossTier);
+      // 배경 렌더링
+      if (prevBgTier && bgFade < 1) {
+        drawStageBackground(prevBgTier, true);
+        ctx.save(); ctx.globalAlpha = bgFade; drawStageBackground(bgTier, false); ctx.restore();
+        bgFade = Math.min(1, bgFade + 1 / 60);
+        if (bgFade >= 1) prevBgTier = 0;
+      } else {
+        drawStageBackground(bgTier, true);
+      }
 
       player.x += (player.targetX - player.x) * 0.25; player.y += (player.targetY - player.y) * 0.25;
       player.x = Math.max(38, Math.min(canvas.width - 38, player.x)); player.y = Math.max(45, Math.min(canvas.height - 45, player.y));
       drawPlayerFighter(player.x, player.y);
 
-      if (frame % 8 === 0) {
+      if (fireCd > 0) fireCd--;
+      if (missileCd > 0) missileCd--;
+      if (fireGrace > 0) fireGrace--;
+      const wantFire = isFiring || fireGrace > 0;
+
+      if (wantFire && fireCd <= 0) {
+        fireCd = 8;
         playSound('laser');
         if (weaponLevel === 1) { bullets.push({ x: player.x - 18, y: player.y - 25, vx: 0, vy: -13 }); bullets.push({ x: player.x + 18, y: player.y - 25, vx: 0, vy: -13 }); }
         else if (weaponLevel === 2) { bullets.push({ x: player.x - 22, y: player.y - 20, vx: -1, vy: -13 }); bullets.push({ x: player.x, y: player.y - 36, vx: 0, vy: -13 }); bullets.push({ x: player.x + 22, y: player.y - 20, vx: 1, vy: -13 }); }
@@ -756,7 +975,7 @@
 
       if (hasHomingMissile) {
         missileTimer--; if (missileTimer <= 0) hasHomingMissile = false;
-        if (frame % 18 === 0) { playSound('missile'); missiles.push({ x: player.x - 26, y: player.y, vx: -3, vy: -5, speed: 7.5 }); missiles.push({ x: player.x + 26, y: player.y, vx: 3, vy: -5, speed: 7.5 }); }
+        if (wantFire && missileCd <= 0) { missileCd = 18; playSound('missile'); missiles.push({ x: player.x - 26, y: player.y, vx: -3, vy: -5, speed: 7.5 }); missiles.push({ x: player.x + 26, y: player.y, vx: 3, vy: -5, speed: 7.5 }); }
       }
 
       ctx.fillStyle = '#fde047';
@@ -766,7 +985,7 @@
       }
 
       for (let i = missiles.length - 1; i >= 0; i--) {
-        const m = missiles[i]; let target = boss;
+        const m = missiles[i]; let target = (boss && !boss.dying) ? boss : null;
         if (!target && enemies.length > 0) { let minDist = Infinity; enemies.forEach(e => { const d = Math.hypot(e.x - m.x, e.y - m.y); if (d < minDist) { minDist = d; target = e; } }); }
         if (target) {
           const desired = Math.atan2(target.y - m.y, target.x - m.x), current = Math.atan2(m.vy, m.vx); let diff = desired - current;
@@ -780,27 +999,46 @@
         if (m.y < -30 || m.y > canvas.height + 30 || m.x < -30 || m.x > canvas.width + 30) missiles.splice(i, 1);
       }
 
-      if (!boss && score >= nextBossScore) spawnBoss(bossTier);
-      if (bossWarningTimer > 0) {
-        bossWarningTimer--; ctx.fillStyle = '#ef4444'; ctx.font = 'bold 22px sans-serif'; ctx.textAlign = 'center';
-        if (Math.floor(frame / 10) % 2 === 0) ctx.fillText(`⚠ WARNING: ${BOSS_CONFIGS[bossTier].name} ⚠`, canvas.width / 2, canvas.height / 2 - 80);
+      // 스테이지 진행 전환
+      if (stagePhase === 'FIGHT') {
+        if (!boss && score >= nextBossScore) { stagePhase = 'WARNING'; phaseTimer = PHASE_FRAMES.WARNING; }
+      } else if (stagePhase === 'WARNING') {
+        if (--phaseTimer <= 0) { spawnBoss(bossTier); stagePhase = 'BOSS'; }
+      } else if (stagePhase === 'BOSS_DYING') {
+        if (--phaseTimer <= 0) {
+          if (boss) { spawnExplosion(boss.x, boss.y, '#ffffff', 40); spawnExplosion(boss.x, boss.y, boss.subColor, 50); }
+          playSound('boom'); bombFlash = 0.9;
+          boss = null; stagePhase = 'CLEAR'; phaseTimer = PHASE_FRAMES.CLEAR;
+        }
+      } else if (stagePhase === 'CLEAR') {
+        if (--phaseTimer <= 0) {
+          if (bossTier >= 5) { gameState = 'GAMECLEAR'; stateTimer = 90; resetInput(); }
+          else beginNextStage();
+        }
+      } else if (stagePhase === 'INTRO') {
+        if (--phaseTimer <= 0) stagePhase = 'FIGHT';
       }
 
-      // =========================================================================
-      // 보스 전투 로직 (체력 50% 이하 2페이즈 분기 및 고대비 렌더링)
-      // =========================================================================
+      // 보스 전투 로직
       if (boss) {
-        if (!boss.phase2 && boss.hp <= boss.maxHp * 0.5) {
+        if (!boss.dying && !boss.phase2 && boss.hp <= boss.maxHp * 0.5) {
           boss.phase2 = true;
           boss.phase2Alert = 80; 
-          boss.shotCdMax = Math.max(16, Math.round(boss.shotCdMax * 0.74)); // 공격 주기 26% 가속
-          boss.vx = (boss.vx > 0 ? 1 : -1) * (Math.abs(boss.vx) * 1.3);     // 이동 속도 30% 증속
+          boss.shotCdMax = Math.max(16, Math.round(boss.shotCdMax * 0.74));
+          boss.vx = (boss.vx > 0 ? 1 : -1) * (Math.abs(boss.vx) * 1.3);
           playSound('enrage');
           spawnExplosion(boss.x, boss.y, '#ef4444', 35);
           bombFlash = 0.5;
         }
 
-        if (boss.y < boss.targetY) {
+        if (boss.dying) {
+          boss.deathTimer++;
+          if (boss.deathTimer % 5 === 0) {
+            spawnExplosion(boss.x + (Math.random() - 0.5) * boss.width * 0.9, boss.y + (Math.random() - 0.5) * boss.height * 0.9,
+                           Math.random() < 0.5 ? boss.subColor : '#f59e0b', 10);
+          }
+          if (boss.deathTimer % 16 === 1) playSound('boom');
+        } else if (boss.y < boss.targetY) {
           boss.y += 1.5;
         } else {
           boss.x += boss.vx; 
@@ -906,7 +1144,6 @@
           }
         }
 
-        // 고대비 테두리가 적용된 보스 렌더링 호출
         drawBossEntity(boss);
 
         if (boss.phase2Alert > 0) {
@@ -932,26 +1169,28 @@
         const phaseLabel = boss.phase2 ? ' [PHASE 2]' : '';
         ctx.fillText(`${boss.name}${phaseLabel} (${Math.max(0, boss.hp)} / ${boss.maxHp})`, canvas.width / 2 + 10, 52);
 
-        for (let j = bullets.length - 1; j >= 0; j--) {
-          const b = bullets[j]; if (Math.hypot(b.x - boss.x, b.y - boss.y) < boss.width / 2) { bullets.splice(j, 1); boss.hp--; spawnExplosion(b.x, b.y, '#f59e0b', 3); }
-        }
-        for (let m = missiles.length - 1; m >= 0; m--) {
-          const ms = missiles[m]; if (Math.hypot(ms.x - boss.x, ms.y - boss.y) < boss.width / 2) { missiles.splice(m, 1); boss.hp -= 3; playSound('boom'); spawnExplosion(ms.x, ms.y, '#ec4899', 10); }
-        }
-        if (Math.hypot(player.x - boss.x, player.y - boss.y) < boss.width / 2 + 10) applyDamage(50);
-        
-        if (boss.hp <= 0) {
-          playSound('boom'); spawnExplosion(boss.x, boss.y, boss.subColor, 50); score += 200 * boss.tier; 
-          
-          if (bossTier === 5) {
-            gameState = 'GAMECLEAR'; stateTimer = 90; boss = null;
-          } else {
-            nextBossScore = score + 450; bossTier++; boss = null;
+        if (!boss.dying) {
+          for (let j = bullets.length - 1; j >= 0; j--) {
+            const b = bullets[j]; if (Math.hypot(b.x - boss.x, b.y - boss.y) < boss.width / 2) { bullets.splice(j, 1); boss.hp--; spawnExplosion(b.x, b.y, '#f59e0b', 3); }
           }
+          for (let m = missiles.length - 1; m >= 0; m--) {
+            const ms = missiles[m]; if (Math.hypot(ms.x - boss.x, ms.y - boss.y) < boss.width / 2) { missiles.splice(m, 1); boss.hp -= 3; playSound('boom'); spawnExplosion(ms.x, ms.y, '#ec4899', 10); }
+          }
+          if (Math.hypot(player.x - boss.x, player.y - boss.y) < boss.width / 2 + 10) applyDamage(50);
+        }
+        
+        if (!boss.dying && boss.hp <= 0) {
+          boss.dying = true; boss.deathTimer = 0; boss.hp = 0; boss.phase2Alert = 0;
+          stagePhase = 'BOSS_DYING'; phaseTimer = PHASE_FRAMES.BOSS_DYING;
+          clearBonus = 200 * boss.tier; score += clearBonus;
+          playSound('boom'); spawnExplosion(boss.x, boss.y, boss.subColor, 30);
+          enemyBullets.length = 0;
+          enemies.forEach(e => { e.hp = 0; });
+          missiles.forEach(ms => spawnExplosion(ms.x, ms.y, '#ec4899', 6)); missiles.length = 0;
         }
       }
 
-      // 적 탄환 업데이트
+      // 적 탄환 이동
       for (let i = enemyBullets.length - 1; i >= 0; i--) {
         if (i >= enemyBullets.length) continue;
         const eb = enemyBullets[i]; 
@@ -970,8 +1209,9 @@
         if (eb.y > canvas.height + 20 || eb.x < -20 || eb.x > canvas.width + 20 || eb.y < -20) enemyBullets.splice(i, 1);
       }
 
-      // 일반 적 스폰
-      if (frame % (boss ? 70 : 32) === 0) enemies.push({ x: Math.random() * (canvas.width - 70) + 45, y: -30, hp: 1, speed: 3.2 + Math.random() * 1.5 });
+      // 일반 적 생성
+      const spawnOk = stagePhase === 'FIGHT' || stagePhase === 'BOSS' || (stagePhase === 'INTRO' && phaseTimer < PHASE_FRAMES.INTRO - 50);
+      if (spawnOk && frame % (boss ? 70 : 32) === 0) enemies.push({ x: Math.random() * (canvas.width - 70) + 45, y: -30, hp: 1, speed: 3.2 + Math.random() * 1.5 });
       for (let i = enemies.length - 1; i >= 0; i--) {
         if (i >= enemies.length) continue;
         const e = enemies[i]; 
@@ -1008,12 +1248,12 @@
         if (e.y > canvas.height + 30) enemies.splice(i, 1);
       }
 
-      // 아이템 업데이트
+      // 아이템
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i]; it.y += 2.2;
         ctx.fillStyle = it.type === 'M' ? '#ec4899' : it.type === 'E' ? '#06b6d4' : it.type === 'B' ? '#ef4444' : '#10b981';
         ctx.beginPath(); ctx.arc(it.x, it.y, 12, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(it.type, it.x, it.y);
+        ctx.save(); ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(it.type, it.x, it.y); ctx.restore();
 
         if (Math.hypot(player.x - it.x, player.y - it.y) < player.radius + 12) {
           if (it.type === 'P') weaponLevel = Math.min(3, weaponLevel + 1);
@@ -1028,13 +1268,14 @@
         } else if (it.y > canvas.height + 20) items.splice(i, 1);
       }
 
-      // 파티클 업데이트
+      // 파티클
       for (let i = particles.length - 1; i >= 0; i--) {
         const pt = particles[i]; pt.x += pt.vx; pt.y += pt.vy; pt.alpha -= 0.035;
         if (pt.alpha <= 0) particles.splice(i, 1);
         else { ctx.save(); ctx.globalAlpha = pt.alpha; ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
       }
 
+      drawStageOverlay();
       drawHUD();
       requestAnimationFrame(loop);
     }
@@ -1043,4 +1284,7 @@
   </script>
 </body>
 </html>
-```
+```eof
+
+---
+
