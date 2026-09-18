@@ -99,7 +99,6 @@
       isPlayerImgLoaded = true;
     };
 
-    // 첨부해주신 폭탄 버튼 이미지 로드
     const bombBtnImg = new Image();
     let cleanBombBtnCanvas = null;
     let isBombBtnLoaded = false;
@@ -183,11 +182,7 @@
     // 게임 데이터
     // ==========================================
     const stars = Array.from({length: 65}, () => ({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, r: Math.random() * 1.8 + 0.5, speed: Math.random() * 2 + 0.8 }));
-    let score = 0, weaponLevel = 1, hasHomingMissile = false, missileTimer = 0, frame = 0;
-    
-    // 폭탄 시스템 (최대 2개)
-    let bombs = 1, bombFlash = 0;
-    
+    let score = 0, weaponLevel = 1, hasHomingMissile = false, missileTimer = 0, frame = 0, bombs = 1, bombFlash = 0;
     let bossTier = 1, boss = null, nextBossScore = 250, bossWarningTimer = 0;
 
     const BOSS_CONFIGS = {
@@ -205,8 +200,8 @@
     // 조작 로직 (터치 & 폭탄 버튼 판정)
     // ==========================================
     function isBombButtonHit(x, y) {
-      const bx = canvas.width - 55, by = canvas.height - 65; // 폭탄 버튼 좌표
-      return Math.hypot(x - bx, y - by) < 45; // 터치 반경
+      const bx = canvas.width - 55, by = canvas.height - 65; 
+      return Math.hypot(x - bx, y - by) < 45; 
     }
 
     function checkSoundButtonTap(x, y) {
@@ -218,20 +213,14 @@
       return false;
     }
 
-    // 폭탄 사용 로직 (화면 내 모든 미사일 삭제 및 데미지 하향)
     function fireBomb() {
       if (bombs <= 0 || gameState !== 'PLAYING') return;
       bombs--;
       playSound('boom');
-      bombFlash = 1.0; // 하얗게 번쩍임 효과
+      bombFlash = 1.0; 
       
-      // 1. 모든 적 탄환 삭제
       enemyBullets.length = 0; 
-      
-      // 2. 화면 내 일반 적 모두 파괴
       enemies.forEach(e => { e.hp = 0; });
-      
-      // 3. 보스 대미지 하향 적용 (위력 약하게: 40 데미지)
       if (boss) {
         boss.hp -= 40;
         spawnExplosion(boss.x, boss.y, '#ef4444', 30);
@@ -245,7 +234,6 @@
         }
         return;
       }
-      // 게임 종료 또는 클리어 시 화면 탭으로 다시 시작
       if (gameState === 'GAMEOVER' || gameState === 'GAMECLEAR') { 
         if(isTap) restartGame(); 
         return; 
@@ -289,7 +277,7 @@
     function restartGame() {
       score = 0; bossTier = 1; player.energy = 100; player.displayEnergy = 100; player.invincible = 0;
       weaponLevel = 1; hasHomingMissile = false; missileTimer = 0; boss = null; nextBossScore = 250; bossWarningTimer = 0; 
-      bombs = 1; bombFlash = 0; // 초기 폭탄 1개
+      bombs = 1; bombFlash = 0; 
       bullets.length=0; missiles.length=0; enemyBullets.length=0; enemies.length=0; particles.length=0; items.length=0;
       player.x = canvas.width/2; player.y = canvas.height-140; player.targetX = player.x; player.targetY = player.y;
       gameState = 'PLAYING';
@@ -321,24 +309,18 @@
       }
     }
 
-    // 투명화된 아군 비행기 (비행기 크기 더욱 확대 targetWidth: 100)
     function drawPlayerFighter(x, y) {
       ctx.save(); ctx.translate(x, y);
       if (player.invincible > 0 && Math.floor(frame / 4) % 2 === 0) ctx.globalAlpha = 0.4;
 
       if (isPlayerImgLoaded && cleanPlayerCanvas) {
-        // 비행기 크기 확대 (기존 78 -> 100)
+        // 비행기 크기 확대 (100) 및 테두리 효과 삭제 완료
         const targetWidth = 100;
         const aspect = cleanPlayerCanvas.height / cleanPlayerCanvas.width;
         const targetHeight = targetWidth * aspect;
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(cleanPlayerCanvas, -targetWidth / 2, -targetHeight / 2, targetWidth, targetHeight);
         ctx.imageSmoothingEnabled = true;
-
-        if (hasHomingMissile) {
-          ctx.strokeStyle = '#ec4899'; ctx.lineWidth = 2;
-          ctx.strokeRect(-targetWidth/2 - 2, -targetHeight/2 - 2, targetWidth+4, targetHeight+4);
-        }
       } else {
         ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.moveTo(0,-20); ctx.lineTo(15,15); ctx.lineTo(-15,15); ctx.fill();
       }
@@ -358,7 +340,6 @@
     }
 
     function drawHUD() {
-      // 1. 에너지 바
       const barX = 16, barY = 80, barWidth = 14, barHeight = 150;
       player.displayEnergy += (player.energy - player.displayEnergy) * 0.15;
       const fillRatio = Math.max(0, Math.min(1, player.displayEnergy / player.maxEnergy)), currentFillH = barHeight * fillRatio;
@@ -370,19 +351,16 @@
       ctx.strokeStyle = energyColor; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(barX, barY, barWidth, barHeight, 7); ctx.stroke();
       ctx.restore();
 
-      // 2. 우측 하단 폭탄(BOMB) 이미지 버튼 렌더링
       const bx = canvas.width - 55, by = canvas.height - 65, br = 35;
       ctx.save();
       if (isBombBtnLoaded && cleanBombBtnCanvas) {
-        ctx.globalAlpha = bombs > 0 ? 1.0 : 0.4; // 폭탄 없을 시 반투명 처리
+        ctx.globalAlpha = bombs > 0 ? 1.0 : 0.4;
         ctx.drawImage(cleanBombBtnCanvas, bx - br, by - br, br * 2, br * 2);
         
-        // 폭탄 갯수 텍스트 오버레이
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
         ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
         ctx.font = 'bold 22px sans-serif'; ctx.fillText(`x${bombs}`, bx, by + 8);
       } else {
-        // 이미지 로딩 실패 시 폴백
         ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2);
         ctx.fillStyle = bombs > 0 ? 'rgba(6, 182, 212, 0.8)' : 'rgba(100, 116, 139, 0.5)'; ctx.fill();
         ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2; ctx.stroke();
@@ -392,24 +370,21 @@
       }
       ctx.restore();
 
-      // 3. 상단 HUD (스테이지 정보 추가)
-      ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`SCORE ${score}`, 50, 34);
-      
-      // 상단 중앙 현재 스테이지
-      ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center'; 
-      ctx.fillText(`STAGE ${bossTier}`, canvas.width / 2, 34);
-
-      if (hasHomingMissile) { ctx.fillStyle = '#ec4899'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`MISSILE (${Math.ceil(missileTimer / 60)}s)`, 50, 52); }
-      
-      // 음소거
-      ctx.fillStyle = isMuted ? '#64748b' : '#38bdf8'; ctx.font = '18px sans-serif'; ctx.textAlign = 'right'; ctx.fillText(isMuted ? '🔇' : '🔊', canvas.width - 25, 36);
-
-      // 폭탄 사용 시 화면 번쩍임 이펙트
       if (bombFlash > 0) {
         ctx.fillStyle = `rgba(255, 255, 255, ${bombFlash})`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         bombFlash -= 0.04;
       }
+
+      ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`SCORE ${score}`, 50, 34);
+      
+      // 현재 진행중인 스테이지 상단 표시
+      ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center'; 
+      ctx.fillText(`STAGE ${bossTier}`, canvas.width / 2, 34);
+
+      if (hasHomingMissile) { ctx.fillStyle = '#ec4899'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`MISSILE (${Math.ceil(missileTimer / 60)}s)`, 50, 52); }
+      
+      ctx.fillStyle = isMuted ? '#64748b' : '#38bdf8'; ctx.font = '18px sans-serif'; ctx.textAlign = 'right'; ctx.fillText(isMuted ? '🔇' : '🔊', canvas.width - 25, 36);
     }
 
     // ==========================================
@@ -420,7 +395,6 @@
       
       if (gameState === 'START') { drawStartScreen(); requestAnimationFrame(loop); return; }
       
-      // 게임 오버
       if (gameState === 'GAMEOVER') {
         ctx.fillStyle = 'rgba(5, 8, 17, 0.88)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#f87171'; ctx.font = 'bold 34px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('MISSION OVER', canvas.width / 2, canvas.height / 2 - 40);
@@ -429,7 +403,6 @@
         requestAnimationFrame(loop); return;
       }
 
-      // 게임 클리어 (STAGE 5 보스 격파 시)
       if (gameState === 'GAMECLEAR') {
         ctx.fillStyle = 'rgba(5, 8, 17, 0.9)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#10b981'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('MISSION CLEAR!', canvas.width / 2, canvas.height / 2 - 40);
@@ -518,12 +491,10 @@
         }
         if (Math.hypot(player.x - boss.x, player.y - boss.y) < boss.width / 2 + 10) applyDamage(50);
         
-        // 보스 격파 시 엔딩 분기 처리
         if (boss.hp <= 0) {
           playSound('boom'); spawnExplosion(boss.x, boss.y, boss.subColor, 50); score += 200 * boss.tier; 
           
           if (bossTier === 5) {
-            // STAGE 5 격파 시 게임 클리어 엔딩!
             gameState = 'GAMECLEAR';
             boss = null;
           } else {
@@ -554,12 +525,11 @@
         if (e.hp <= 0) {
           playSound('boom'); spawnExplosion(e.x, e.y, '#ef4444', 12); score += 10;
           
-          // 폭탄 랜덤 드롭 시스템 (드롭 확률 약 4%)
           const rand = Math.random();
-          if (rand < 0.08) items.push({ x: e.x, y: e.y, type: 'P' });
-          else if (rand < 0.16) items.push({ x: e.x, y: e.y, type: 'M' });
-          else if (rand < 0.24) items.push({ x: e.x, y: e.y, type: 'E' });
-          else if (rand < 0.28) items.push({ x: e.x, y: e.y, type: 'B' }); // B: 폭탄 추가 아이템
+          if (rand < 0.05) items.push({ x: e.x, y: e.y, type: 'P' });
+          else if (rand < 0.09) items.push({ x: e.x, y: e.y, type: 'M' });
+          else if (rand < 0.13) items.push({ x: e.x, y: e.y, type: 'E' });
+          else if (rand < 0.15) items.push({ x: e.x, y: e.y, type: 'B' }); 
 
           enemies.splice(i, 1); continue;
         }
@@ -579,7 +549,7 @@
           else if (it.type === 'E') { playSound('heal'); player.energy = Math.min(player.maxEnergy, player.energy + 30); spawnExplosion(player.x, player.y, '#06b6d4', 10); }
           else if (it.type === 'B') { 
             playSound('item'); 
-            bombs = Math.min(2, bombs + 1); // 최대 폭탄 소지 2개 제한
+            bombs = Math.min(2, bombs + 1); 
             spawnExplosion(player.x, player.y, '#ef4444', 10); 
           }
           items.splice(i, 1);
