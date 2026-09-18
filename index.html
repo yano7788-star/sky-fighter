@@ -1,747 +1,697 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Cyber Strike: Neon Warfare</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #050811; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    #gameCanvas { display: block; width: 100%; height: 100%; touch-action: none; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Cyber Strike: Neon Warfare</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #050811; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+#gameCanvas { display: block; width: 100%; height: 100%; touch-action: none; }
+</style>
 </head>
 <body>
-  <canvas id="gameCanvas"></canvas>
-
-  <script>
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-
-    function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    }
-    resize();
-    window.addEventListener('resize', resize);
-
-    // ==========================================
-    // 게임 상태 관리 ('START', 'PLAYING', 'GAMEOVER')
-    // ==========================================
-    let gameState = 'START';
-
-    // ==========================================
-    // 이미지 스프라이트 로더
-    // ==========================================
-    // 1. 시작 화면 이미지 (Startscreen.png)
-    const startScreenImg = new Image();
-    let isStartScreenLoaded = false;
-    startScreenImg.src = 'Startscreen.png';
-    startScreenImg.onload = () => { isStartScreenLoaded = true; };
-
-    // 2. 플레이어 비행기 (player.png)
-    const playerImg = new Image();
-    let isPlayerImgLoaded = false;
-    playerImg.src = 'player.png';
-    playerImg.onload = () => { isPlayerImgLoaded = true; };
-
-    // 3. 보스 1~5 이미지 (boss1.png ~ boss5.png)
-    const bossImages = {};
-    const bossImgLoaded = {};
-    for (let i = 1; i <= 5; i++) {
-      bossImages[i] = new Image();
-      bossImgLoaded[i] = false;
-      bossImages[i].onload = () => { bossImgLoaded[i] = true; };
-      bossImages[i].src = `boss${i}.png`;
-    }
-
-    // ==========================================
-    // Web Audio 신디사이저 엔진 (BGM & SFX)
-    // ==========================================
-    let audioCtx = null, bgmGain = null, isMuted = false, bgmStep = 0, nextNoteTime = 0, isBgmRunning = false;
-    const NOTES = {
-      C3:130.81, D3:146.83, E3:164.81, F3:174.61, G3:196.00, A3:220.00, B3:246.94,
-      C4:261.63, D4:293.66, E4:329.63, F4:349.23, G4:392.00, A4:440.00, B4:493.88,
-      C5:523.25, D5:587.33, E5:659.25, F5:698.46, G5:783.99, A5:880.00, REST:0
-    };
-    const normalBgmNotes = [
-      {bass:NOTES.A3, lead:NOTES.A4}, {bass:NOTES.A3, lead:NOTES.C5}, {bass:NOTES.A3, lead:NOTES.E5}, {bass:NOTES.A3, lead:NOTES.A4},
-      {bass:NOTES.F3, lead:NOTES.F4}, {bass:NOTES.F3, lead:NOTES.A4}, {bass:NOTES.F3, lead:NOTES.C5}, {bass:NOTES.F3, lead:NOTES.F5},
-      {bass:NOTES.G3, lead:NOTES.G4}, {bass:NOTES.G3, lead:NOTES.B4}, {bass:NOTES.G3, lead:NOTES.D5}, {bass:NOTES.G3, lead:NOTES.G5},
-      {bass:NOTES.E3, lead:NOTES.E4}, {bass:NOTES.E3, lead:NOTES.G4}, {bass:NOTES.E3, lead:NOTES.B4}, {bass:NOTES.E3, lead:NOTES.E5}
-    ];
-    const bossBgmNotes = [
-      {bass:NOTES.D3, lead:NOTES.D5}, {bass:NOTES.D3, lead:NOTES.REST}, {bass:NOTES.D3, lead:NOTES.F5}, {bass:NOTES.D3, lead:NOTES.D5},
-      {bass:NOTES.C3, lead:NOTES.C5}, {bass:NOTES.C3, lead:NOTES.REST}, {bass:NOTES.C3, lead:NOTES.E5}, {bass:NOTES.C3, lead:NOTES.C5},
-      {bass:NOTES.B3, lead:NOTES.B4}, {bass:NOTES.B3, lead:NOTES.REST}, {bass:NOTES.B3, lead:NOTES.D5}, {bass:NOTES.B3, lead:NOTES.B4},
-      {bass:NOTES.C3, lead:NOTES.C5}, {bass:NOTES.D3, lead:NOTES.D5}, {bass:NOTES.E3, lead:NOTES.E5}, {bass:NOTES.F3, lead:NOTES.F5}
-    ];
-
-    function initAudio() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        bgmGain = audioCtx.createGain();
-        bgmGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-        bgmGain.connect(audioCtx.destination);
-      }
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      if (!isBgmRunning) { isBgmRunning = true; nextNoteTime = audioCtx.currentTime + 0.05; }
-    }
-
-    function playTone(freq, type, duration, startTime, vol=0.1) {
-      if (!audioCtx || freq===0 || isMuted) return;
-      const osc=audioCtx.createOscillator(), gain=audioCtx.createGain();
-      osc.type=type; osc.frequency.setValueAtTime(freq, startTime);
-      gain.gain.setValueAtTime(vol, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime+duration);
-      osc.connect(gain); gain.connect(bgmGain); osc.start(startTime); osc.stop(startTime+duration);
-    }
-
-    function updateBgmScheduler() {
-      if (!isBgmRunning || !audioCtx || gameState !== 'PLAYING') return;
-      const tempo = boss ? 155 : 130;
-      const stepDuration = 60 / tempo / 4;
-      while (nextNoteTime < audioCtx.currentTime + 0.15) {
-        const pattern = boss ? bossBgmNotes : normalBgmNotes;
-        const currentStep = pattern[bgmStep % pattern.length];
-        playTone(currentStep.bass, 'triangle', stepDuration*0.9, nextNoteTime, 0.22);
-        playTone(currentStep.lead, 'square', stepDuration*0.6, nextNoteTime, 0.08);
-        nextNoteTime += stepDuration;
-        bgmStep++;
-      }
-    }
-
-    function playSound(type) {
-      if (!audioCtx || isMuted || gameState !== 'PLAYING') return;
-      try {
-        const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
-        osc.connect(gain); gain.connect(audioCtx.destination);
-        const t = audioCtx.currentTime;
-        if (type === 'laser') {
-          osc.type = 'square'; osc.frequency.setValueAtTime(820, t);
-          osc.frequency.exponentialRampToValueAtTime(200, t + 0.07);
-          gain.gain.setValueAtTime(0.08, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.07);
-          osc.start(t); osc.stop(t + 0.07);
-        } else if (type === 'missile') {
-          osc.type = 'sawtooth'; osc.frequency.setValueAtTime(280, t);
-          osc.frequency.exponentialRampToValueAtTime(600, t + 0.1);
-          gain.gain.setValueAtTime(0.1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
-          osc.start(t); osc.stop(t + 0.1);
-        } else if (type === 'boom') {
-          osc.type = 'sawtooth'; osc.frequency.setValueAtTime(140, t);
-          osc.frequency.exponentialRampToValueAtTime(30, t + 0.25);
-          gain.gain.setValueAtTime(0.25, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
-          osc.start(t); osc.stop(t + 0.25);
-        } else if (type === 'item') {
-          osc.type = 'sine'; osc.frequency.setValueAtTime(440, t);
-          osc.frequency.exponentialRampToValueAtTime(1100, t + 0.16);
-          gain.gain.setValueAtTime(0.18, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.16);
-          osc.start(t); osc.stop(t + 0.16);
-        } else if (type === 'heal') {
-          osc.type = 'sine'; osc.frequency.setValueAtTime(300, t);
-          osc.frequency.exponentialRampToValueAtTime(800, t + 0.25);
-          gain.gain.setValueAtTime(0.2, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
-          osc.start(t); osc.stop(t + 0.25);
-        }
-      } catch(e) {}
-    }
-
-    // ==========================================
-    // 게임 데이터 및 설정
-    // ==========================================
-    const stars = Array.from({length: 65}, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      r: Math.random() * 1.8 + 0.5,
-      speed: Math.random() * 2 + 0.8
-    }));
-
-    let score = 0, weaponLevel = 1, hasHomingMissile = false, missileTimer = 0, frame = 0;
-    let bossTier = 1, boss = null, nextBossScore = 250, bossWarningTimer = 0;
-
-    const BOSS_CONFIGS = {
-      1: { name: 'STAGE 1: TANK BUSTER', hp: 80, color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 40 },
-      2: { name: 'STAGE 2: CYBER STEALTH', hp: 160, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 34 },
-      3: { name: 'STAGE 3: AEGIS FLAGSHIP', hp: 270, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 28 },
-      4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 420, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 24 },
-      5: { name: 'STAGE 5: VOID ARCHANGEL', hp: 650, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 18 }
-    };
-
-    const player = {
-      x: canvas.width / 2,
-      y: canvas.height - 140,
-      targetX: canvas.width / 2,
-      targetY: canvas.height - 140,
-      radius: 22,
-      energy: 100,
-      maxEnergy: 100,
-      displayEnergy: 100,
-      invincible: 0
-    };
-
-    const bullets = [], missiles = [], enemyBullets = [], enemies = [], particles = [], items = [];
-
-    // ==========================================
-    // 조작 및 터치 이벤트 핸들러
-    // ==========================================
-    function checkSoundButtonTap(x, y) {
-      const btnX = canvas.width - 45, btnY = 30;
-      if (Math.hypot(x - btnX, y - btnY) < 25) {
-        isMuted = !isMuted;
-        if (bgmGain) bgmGain.gain.setValueAtTime(isMuted ? 0 : 0.08, audioCtx.currentTime);
-        return true;
-      }
-      return false;
-    }
-
-    function isTapToStartHit(x, y) {
-      // 시작 화면의 TAP TO START 버튼 판정 영역 (화면 하단 약 75% ~ 93%)
-      const btnTop = canvas.height * 0.78;
-      const btnBottom = canvas.height * 0.94;
-      const btnLeft = canvas.width * 0.12;
-      const btnRight = canvas.width * 0.88;
-      return (x >= btnLeft && x <= btnRight && y >= btnTop && y <= btnBottom) || y >= canvas.height * 0.75;
-    }
-
-    function handleStartScreenTouch(x, y) {
-      if (isTapToStartHit(x, y)) {
-        initAudio();
-        restartGame();
-      }
-    }
-
-    function handlePointer(x, y) {
-      if (gameState === 'START') {
-        handleStartScreenTouch(x, y);
-        return;
-      }
-      if (gameState === 'GAMEOVER') {
-        restartGame();
-        return;
-      }
-      if (checkSoundButtonTap(x, y)) return;
-      player.targetX = x;
-      player.targetY = y - 50;
-    }
-
-    canvas.addEventListener('touchstart', e => {
-      const t = e.touches[0];
-      handlePointer(t.clientX, t.clientY);
-    }, { passive: false });
-
-    canvas.addEventListener('touchmove', e => {
-      e.preventDefault();
-      if (gameState === 'PLAYING') {
-        const t = e.touches[0];
-        handlePointer(t.clientX, t.clientY);
-      }
-    }, { passive: false });
-
-    canvas.addEventListener('mousedown', e => {
-      handlePointer(e.clientX, e.clientY);
-    });
-
-    canvas.addEventListener('mousemove', e => {
-      if (gameState === 'PLAYING' && e.buttons === 1) {
-        handlePointer(e.clientX, e.clientY);
-      }
-    });
-
-    function spawnExplosion(x, y, color, count=12) {
-      for (let i = 0; i < count; i++) {
-        const angle = Math.random() * Math.PI * 2, spd = Math.random() * 5 + 2;
-        particles.push({ x, y, vx: Math.cos(angle)*spd, vy: Math.sin(angle)*spd, r: Math.random()*3+1.5, alpha: 1, color });
-      }
-    }
-
-    function applyDamage(dmg) {
-      if (player.invincible > 0 || gameState !== 'PLAYING') return;
-      player.energy = Math.max(0, player.energy - dmg);
-      player.invincible = 40;
-      playSound('boom');
-      spawnExplosion(player.x, player.y, '#ef4444', 16);
-      if (player.energy <= 0) gameState = 'GAMEOVER';
-    }
-
-    function spawnBoss(tier) {
-      bossWarningTimer = 110;
-      const config = BOSS_CONFIGS[tier];
-      boss = {
-        tier, name: config.name, x: canvas.width / 2, y: -120, targetY: 135,
-        width: config.w, height: config.h, vx: 2.3 + tier * 0.25,
-        hp: config.hp, maxHp: config.hp, displayHp: config.hp,
-        shootCooldown: 0, color: config.color, subColor: config.subColor, shotCdMax: config.shotCd
-      };
-    }
-
-    function restartGame() {
-      score = 0;
-      bossTier = 1;
-      player.energy = 100;
-      player.displayEnergy = 100;
-      player.invincible = 0;
-      weaponLevel = 1;
-      hasHomingMissile = false;
-      missileTimer = 0;
-      boss = null;
-      nextBossScore = 250;
-      bossWarningTimer = 0;
-      bullets.length = 0;
-      missiles.length = 0;
-      enemyBullets.length = 0;
-      enemies.length = 0;
-      particles.length = 0;
-      items.length = 0;
-      player.x = canvas.width / 2;
-      player.y = canvas.height - 140;
-      player.targetX = player.x;
-      player.targetY = player.y;
-      gameState = 'PLAYING';
-    }
-
-    // ==========================================
-    // 시작 화면 렌더링 (Startscreen.png)
-    // ==========================================
-    function drawStartScreen() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      if (isStartScreenLoaded) {
-        // 모바일 화면비에 맞추어 전체 화면 꽉 채움(Cover 모드)
-        const imgRatio = startScreenImg.naturalWidth / startScreenImg.naturalHeight;
-        const canvasRatio = canvas.width / canvas.height;
-        let dw, dh, dx, dy;
-        if (canvasRatio > imgRatio) {
-          dw = canvas.width;
-          dh = canvas.width / imgRatio;
-          dx = 0;
-          dy = (canvas.height - dh) / 2;
-        } else {
-          dh = canvas.height;
-          dw = canvas.height * imgRatio;
-          dx = (canvas.width - dw) / 2;
-          dy = 0;
-        }
-        ctx.drawImage(startScreenImg, dx, dy, dw, dh);
-
-        // TAP TO START 버튼 영역 인터랙티브 점멸 네온 글로우
-        const btnW = Math.min(canvas.width * 0.72, 320);
-        const btnH = 58;
-        const btnX = (canvas.width - btnW) / 2;
-        const btnY = canvas.height * 0.84;
-
-        ctx.save();
-        const pulse = 0.5 + Math.sin(frame * 0.1) * 0.5;
-        ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 + pulse * 0.6})`;
-        ctx.lineWidth = 3;
-        ctx.shadowColor = '#06b6d4';
-        ctx.shadowBlur = 14 * pulse;
-        ctx.beginPath();
-        ctx.roundRect(btnX, btnY, btnW, btnH, 12);
-        ctx.stroke();
-        ctx.restore();
-      } else {
-        // 이미지가 없을 때 세련된 사이버펑크 네온 시작 화면 폴백
-        ctx.fillStyle = '#050811';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // 배경 그리드
-        ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
-        ctx.lineWidth = 1;
-        for (let x = 0; x < canvas.width; x += 30) {
-          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-        }
-        for (let y = 0; y < canvas.height; y += 30) {
-          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-        }
-
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 26px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('CYBER STRIKE', canvas.width / 2, canvas.height * 0.35);
-
-        ctx.fillStyle = '#c084fc';
-        ctx.font = 'bold 18px sans-serif';
-        ctx.fillText('NEON WARFARE', canvas.width / 2, canvas.height * 0.41);
-
-        // TAP TO START 버튼
-        const btnW = Math.min(canvas.width * 0.72, 280);
-        const btnH = 54;
-        const btnX = (canvas.width - btnW) / 2;
-        const btnY = canvas.height * 0.82;
-
-        ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
-        ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 10); ctx.fill();
-
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 10); ctx.stroke();
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 20px sans-serif';
-        ctx.fillText('TAP TO START', canvas.width / 2, btnY + 34);
-      }
-    }
-
-    // ==========================================
-    // 플레이어 전투기 정밀 렌더링 (player.png 완벽 대응)
-    // ==========================================
-    function drawPlayerFighter(x, y) {
-      ctx.save();
-      ctx.translate(x, y);
-
-      if (player.invincible > 0 && Math.floor(frame / 4) % 2 === 0) {
-        ctx.globalAlpha = 0.4;
-      }
-
-      if (isPlayerImgLoaded && playerImg.naturalWidth > 0) {
-        // 원본 종횡비를 완벽히 유지하여 찌그러짐 없이 선명하게 출력
-        const targetWidth = 78;
-        const aspect = playerImg.naturalHeight / playerImg.naturalWidth;
-        const targetHeight = targetWidth * aspect;
-
-        // 픽셀 아트 선명도 보존
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(playerImg, -targetWidth / 2, -targetHeight / 2, targetWidth, targetHeight);
-        ctx.imageSmoothingEnabled = true;
-
-        if (hasHomingMissile) {
-          ctx.strokeStyle = '#ec4899';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(-targetWidth/2 - 2, -targetHeight/2 - 2, targetWidth + 4, targetHeight + 4);
-        }
-        ctx.restore();
-        return;
-      }
-
-      // 이미지 미로드 시 캔버스 벡터 전투기 폴백
-      const s = 1.05;
-      [-10, 10].forEach(ox => {
-        const fl = 18 + Math.random() * 8;
-        ctx.fillStyle = '#ff6b00'; ctx.beginPath(); ctx.moveTo((ox - 4)*s, 32*s); ctx.lineTo(ox*s, (32+fl)*s); ctx.lineTo((ox + 4)*s, 32*s); ctx.closePath(); ctx.fill();
-        ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.moveTo((ox - 2)*s, 32*s); ctx.lineTo(ox*s, (32+fl*0.65)*s); ctx.lineTo((ox + 2)*s, 32*s); ctx.closePath(); ctx.fill();
-      });
-      ctx.fillStyle = '#334155'; ctx.fillRect(-15*s, 26*s, 10*s, 6*s); ctx.fillRect(5*s, 26*s, 10*s, 6*s);
-      ctx.fillStyle = '#0284c7'; ctx.beginPath(); ctx.moveTo(0, 15*s); ctx.lineTo(-24*s, 30*s); ctx.lineTo(-14*s, 32*s); ctx.lineTo(0, 24*s); ctx.closePath(); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(0, 15*s); ctx.lineTo(24*s, 30*s); ctx.lineTo(14*s, 32*s); ctx.lineTo(0, 24*s); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#38bdf8'; ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.8; ctx.beginPath();
-      ctx.moveTo(0, -12*s); ctx.lineTo(-38*s, 14*s); ctx.lineTo(-33*s, 18*s); ctx.lineTo(-9*s, 18*s); ctx.lineTo(0, 22*s); ctx.lineTo(9*s, 18*s); ctx.lineTo(33*s, 18*s); ctx.lineTo(38*s, 14*s); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#0284c7'; ctx.beginPath(); ctx.moveTo(0, -36*s); ctx.lineTo(-11*s, -10*s); ctx.lineTo(-10*s, 26*s); ctx.lineTo(10*s, 26*s); ctx.lineTo(11*s, -10*s); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#cbd5e1'; ctx.beginPath(); ctx.moveTo(0, -36*s); ctx.lineTo(-5*s, -26*s); ctx.lineTo(5*s, -26*s); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#7dd3fc'; ctx.beginPath(); ctx.ellipse(0, -6*s, 6*s, 14.5*s, 0, 0, Math.PI*2); ctx.fill();
-
-      if (hasHomingMissile) {
-        ctx.strokeStyle = '#ec4899'; ctx.lineWidth = 2.5;
-        ctx.strokeRect(-22*s, -3*s, 5*s, 16*s); ctx.strokeRect(17*s, -3*s, 5*s, 16*s);
-      }
-      ctx.restore();
-    }
-
-    // ==========================================
-    // 보스 기체 렌더링
-    // ==========================================
-    function drawBossEntity(b) {
-      ctx.save();
-      ctx.translate(b.x, b.y);
-      if (bossImgLoaded[b.tier]) {
-        const img = bossImages[b.tier];
-        ctx.rotate(Math.PI);
-        const scale = Math.min(b.width / img.naturalWidth, b.height / img.naturalHeight);
-        const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-        ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-        ctx.restore();
-        return;
-      }
-      switch (b.tier) {
-        case 1: ctx.fillStyle='#4b5320'; ctx.beginPath(); ctx.ellipse(0,0,22,45,0,0,Math.PI*2); ctx.fill(); break;
-        case 2: ctx.fillStyle='#1e293b'; ctx.beginPath(); ctx.moveTo(0,48); ctx.lineTo(-b.width/2,-30); ctx.lineTo(b.width/2,-30); ctx.closePath(); ctx.fill(); break;
-        case 3: ctx.fillStyle='#78350f'; ctx.beginPath(); ctx.moveTo(0,52); ctx.lineTo(b.width/2,-15); ctx.lineTo(-b.width/2,-15); ctx.closePath(); ctx.fill(); break;
-        case 4: ctx.fillStyle='#1c1917'; ctx.fillRect(-18,-35,36,75); break;
-        case 5: ctx.fillStyle='#3b0764'; ctx.beginPath(); ctx.moveTo(0,55); ctx.lineTo(b.width/2,20); ctx.lineTo(-b.width/2,20); ctx.closePath(); ctx.fill(); break;
-      }
-      ctx.restore();
-    }
-
-    // ==========================================
-    // HUD 및 에너지 바
-    // ==========================================
-    function drawLeftEnergyBar() {
-      const barX = 16, barY = 80, barWidth = 14, barHeight = 150;
-      player.displayEnergy += (player.energy - player.displayEnergy) * 0.15;
-      const fillRatio = Math.max(0, Math.min(1, player.displayEnergy / player.maxEnergy));
-      const currentFillH = barHeight * fillRatio;
-
-      ctx.save();
-      ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('ENG', barX + barWidth / 2, barY - 14);
-      ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(`${Math.round(player.energy)}%`, barX + barWidth / 2, barY - 2);
-
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)'; ctx.beginPath(); ctx.roundRect(barX, barY, barWidth, barHeight, 7); ctx.fill();
-      let energyColor = player.energy <= 25 ? (frame % 8 < 4 ? '#ef4444' : '#fee2e2') : player.energy <= 55 ? '#f59e0b' : '#10b981';
-
-      if (currentFillH > 0) {
-        ctx.fillStyle = energyColor; ctx.beginPath();
-        ctx.roundRect(barX + 2, barY + (barHeight - currentFillH) + 2, barWidth - 4, currentFillH - 4, 5);
-        ctx.fill();
-      }
-      ctx.strokeStyle = energyColor; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(barX, barY, barWidth, barHeight, 7); ctx.stroke();
-      ctx.restore();
-    }
-
-    // ==========================================
-    // 메인 게임 루프
-    // ==========================================
-    function loop() {
-      frame++;
-
-      // 1. 시작 화면 처리
-      if (gameState === 'START') {
-        drawStartScreen();
-        requestAnimationFrame(loop);
-        return;
-      }
-
-      // 2. 게임 오버 처리
-      if (gameState === 'GAMEOVER') {
-        ctx.fillStyle = 'rgba(5, 8, 17, 0.88)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#f87171';
-        ctx.font = 'bold 34px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('MISSION OVER', canvas.width / 2, canvas.height / 2 - 40);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 22px sans-serif';
-        ctx.fillText(`최종 점수: ${score}`, canvas.width / 2, canvas.height / 2 + 10);
-        ctx.fillText(`최종 도달: STAGE ${bossTier}`, canvas.width / 2, canvas.height / 2 + 42);
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = '16px sans-serif';
-        ctx.fillText('화면을 탭하여 다시 출격', canvas.width / 2, canvas.height / 2 + 90);
-        requestAnimationFrame(loop);
-        return;
-      }
-
-      // 3. 인게임 플레이 로직
-      if (player.invincible > 0) player.invincible--;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      updateBgmScheduler();
-
-      // 배경 별 이동
-      ctx.fillStyle = '#94a3b8';
-      stars.forEach(s => {
-        s.y += s.speed;
-        if (s.y > canvas.height) { s.y = 0; s.x = Math.random() * canvas.width; }
-        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
-      });
-
-      // 플레이어 이동
-      player.x += (player.targetX - player.x) * 0.25;
-      player.y += (player.targetY - player.y) * 0.25;
-      player.x = Math.max(38, Math.min(canvas.width - 38, player.x));
-      player.y = Math.max(45, Math.min(canvas.height - 45, player.y));
-      drawPlayerFighter(player.x, player.y);
-
-      // 자동 사격 (플레이어 전투기 날개 총구 위치에 정밀 정렬)
-      if (frame % 8 === 0) {
-        playSound('laser');
-        if (weaponLevel === 1) {
-          bullets.push({ x: player.x - 22, y: player.y - 25, vx: 0, vy: -13 });
-          bullets.push({ x: player.x + 22, y: player.y - 25, vx: 0, vy: -13 });
-        } else if (weaponLevel === 2) {
-          bullets.push({ x: player.x - 24, y: player.y - 20, vx: -1, vy: -13 });
-          bullets.push({ x: player.x, y: player.y - 36, vx: 0, vy: -13 });
-          bullets.push({ x: player.x + 24, y: player.y - 20, vx: 1, vy: -13 });
-        } else {
-          bullets.push({ x: player.x - 26, y: player.y - 18, vx: -2.5, vy: -13 });
-          bullets.push({ x: player.x - 12, y: player.y - 30, vx: 0, vy: -13 });
-          bullets.push({ x: player.x + 12, y: player.y - 30, vx: 0, vy: -13 });
-          bullets.push({ x: player.x + 26, y: player.y - 18, vx: 2.5, vy: -13 });
-        }
-      }
-
-      // 유도 미사일 로직
-      if (hasHomingMissile) {
-        missileTimer--;
-        if (missileTimer <= 0) hasHomingMissile = false;
-        if (frame % 18 === 0) {
-          playSound('missile');
-          missiles.push({ x: player.x - 26, y: player.y, vx: -3, vy: -5, speed: 7.5 });
-          missiles.push({ x: player.x + 26, y: player.y, vx: 3, vy: -5, speed: 7.5 });
-        }
-      }
-
-      // 총알 이동
-      ctx.fillStyle = '#fde047';
-      for (let i = bullets.length - 1; i >= 0; i--) {
-        const b = bullets[i]; b.x += b.vx; b.y += b.vy;
-        ctx.beginPath(); ctx.arc(b.x, b.y, 3.5, 0, Math.PI * 2); ctx.fill();
-        if (b.y < -15 || b.x < 0 || b.x > canvas.width) bullets.splice(i, 1);
-      }
-
-      // 유도 미사일 추적
-      for (let i = missiles.length - 1; i >= 0; i--) {
-        const m = missiles[i];
-        let target = boss;
-        if (!target && enemies.length > 0) {
-          let minDist = Infinity;
-          enemies.forEach(e => {
-            const d = Math.hypot(e.x - m.x, e.y - m.y);
-            if (d < minDist) { minDist = d; target = e; }
-          });
-        }
-        if (target) {
-          const desired = Math.atan2(target.y - m.y, target.x - m.x), current = Math.atan2(m.vy, m.vx);
-          let diff = desired - current;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          const newAng = current + diff * 0.14;
-          m.vx = Math.cos(newAng) * m.speed; m.vy = Math.sin(newAng) * m.speed;
-        }
-        m.x += m.vx; m.y += m.vy;
-        if (frame % 2 === 0) particles.push({ x: m.x, y: m.y, vx: (Math.random() - 0.5)*1.5, vy: (Math.random() - 0.5)*1.5, r: 2, alpha: 0.8, color: '#ec4899' });
-        ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(Math.atan2(m.vy, m.vx) + Math.PI / 2);
-        ctx.fillStyle = '#f43f5e'; ctx.fillRect(-2.5, -7, 5, 14);
-        ctx.fillStyle = '#fbcfe8'; ctx.fillRect(-1.5, -9, 3, 4);
-        ctx.restore();
-        if (m.y < -30 || m.y > canvas.height + 30 || m.x < -30 || m.x > canvas.width + 30) missiles.splice(i, 1);
-      }
-
-      // 보스 스폰 및 전투 패턴
-      if (!boss && score >= nextBossScore) spawnBoss(bossTier);
-      if (bossWarningTimer > 0) {
-        bossWarningTimer--;
-        ctx.fillStyle = '#ef4444'; ctx.font = 'bold 22px sans-serif'; ctx.textAlign = 'center';
-        if (Math.floor(frame / 10) % 2 === 0) ctx.fillText(`⚠ WARNING: ${BOSS_CONFIGS[bossTier].name} ⚠`, canvas.width / 2, canvas.height / 2 - 80);
-      }
-
-      if (boss) {
-        if (boss.y < boss.targetY) boss.y += 1.5;
-        else {
-          boss.x += boss.vx;
-          if (boss.x < boss.width / 2 + 10 || boss.x > canvas.width - boss.width / 2 - 10) boss.vx *= -1;
-          boss.shootCooldown++;
-          if (boss.shootCooldown > boss.shotCdMax) {
-            boss.shootCooldown = 0;
-            if (boss.tier === 1) [-20, 20].forEach(ox => enemyBullets.push({ x: boss.x + ox, y: boss.y + 35, vx: 0, vy: 5, color: '#facc15' }));
-            else if (boss.tier === 2) [-.35, 0, .35].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y + 40, vx: Math.sin(ang)*6.5, vy: Math.cos(ang)*6.5, color: '#38bdf8' }));
-            else if (boss.tier === 3) [-.45, -.22, 0, .22, .45].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y + 45, vx: Math.sin(ang)*5.2, vy: Math.cos(ang)*5.2, color: '#fbbf24' }));
-            else if (boss.tier === 4) [-.3, -.1, .1, .3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y + 35, vx: Math.sin(ang)*5, vy: Math.cos(ang)*5, color: '#f87171' }));
-            else for (let a = 0; a < 8; a++) {
-              const ang = Math.PI * 2 / 8 * a + frame * 0.05;
-              enemyBullets.push({ x: boss.x, y: boss.y + 20, vx: Math.cos(ang)*4.5, vy: Math.sin(ang)*4.5, color: '#c084fc' });
-            }
-          }
-        }
-
-        drawBossEntity(boss);
-        boss.displayHp += (boss.hp - boss.displayHp) * 0.15;
-        const barW = canvas.width * 0.7, barX = (canvas.width - barW) / 2 + 10;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'; ctx.fillRect(barX, 58, barW, 12);
-        ctx.fillStyle = boss.color; ctx.fillRect(barX, 58, barW * Math.max(0, boss.displayHp / boss.maxHp), 12);
-        ctx.strokeStyle = boss.subColor; ctx.lineWidth = 1.5; ctx.strokeRect(barX, 58, barW, 12);
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText(`${boss.name} (${Math.max(0, boss.hp)} / ${boss.maxHp})`, canvas.width / 2 + 10, 52);
-
-        for (let j = bullets.length - 1; j >= 0; j--) {
-          const b = bullets[j];
-          if (Math.hypot(b.x - boss.x, b.y - boss.y) < boss.width / 2) {
-            bullets.splice(j, 1); boss.hp--; spawnExplosion(b.x, b.y, '#f59e0b', 3);
-          }
-        }
-        for (let m = missiles.length - 1; m >= 0; m--) {
-          const ms = missiles[m];
-          if (Math.hypot(ms.x - boss.x, ms.y - boss.y) < boss.width / 2) {
-            missiles.splice(m, 1); boss.hp -= 3; playSound('boom'); spawnExplosion(ms.x, ms.y, '#ec4899', 10);
-          }
-        }
-        if (Math.hypot(player.x - boss.x, player.y - boss.y) < boss.width / 2 + 10) applyDamage(50);
-        if (boss.hp <= 0) {
-          playSound('boom'); spawnExplosion(boss.x, boss.y, boss.subColor, 50);
-          score += 200 * boss.tier; nextBossScore = score + 450;
-          if (bossTier < 5) bossTier++;
-          else BOSS_CONFIGS[5].hp = Math.round(BOSS_CONFIGS[5].hp * 1.3);
-          boss = null;
-        }
-      }
-
-      // 적 탄환 이동
-      for (let i = enemyBullets.length - 1; i >= 0; i--) {
-        const eb = enemyBullets[i]; eb.x += eb.vx; eb.y += eb.vy;
-        ctx.fillStyle = eb.color || '#fb7185'; ctx.beginPath(); ctx.arc(eb.x, eb.y, 4, 0, Math.PI * 2); ctx.fill();
-        if (Math.hypot(player.x - eb.x, player.y - eb.y) < player.radius + 4) {
-          enemyBullets.splice(i, 1); applyDamage(20); continue;
-        }
-        if (eb.y > canvas.height + 20 || eb.x < -20 || eb.x > canvas.width + 20) enemyBullets.splice(i, 1);
-      }
-
-      // 일반 적 스폰
-      if (frame % (boss ? 70 : 32) === 0) enemies.push({ x: Math.random() * (canvas.width - 70) + 45, y: -30, hp: 1, speed: 3.2 + Math.random() * 1.5 });
-      for (let i = enemies.length - 1; i >= 0; i--) {
-        const e = enemies[i]; e.y += e.speed;
-        ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(Math.PI); ctx.fillStyle = '#f43f5e';
-        ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(18, 10); ctx.lineTo(-18, 10); ctx.closePath(); ctx.fill();
-        ctx.restore();
-
-        for (let j = bullets.length - 1; j >= 0; j--) {
-          const b = bullets[j];
-          if (Math.hypot(b.x - e.x, b.y - e.y) < 20) { bullets.splice(j, 1); e.hp = 0; break; }
-        }
-        for (let m = missiles.length - 1; m >= 0; m--) {
-          const ms = missiles[m];
-          if (Math.hypot(ms.x - e.x, ms.y - e.y) < 22) { missiles.splice(m, 1); e.hp = 0; break; }
-        }
-        if (e.hp <= 0) {
-          playSound('boom'); spawnExplosion(e.x, e.y, '#ef4444', 12); score += 10;
-          const rand = Math.random();
-          if (rand < 0.10) items.push({ x: e.x, y: e.y, type: 'P' });
-          else if (rand < 0.20) items.push({ x: e.x, y: e.y, type: 'M' });
-          else if (rand < 0.30) items.push({ x: e.x, y: e.y, type: 'E' });
-          enemies.splice(i, 1); continue;
-        }
-        if (Math.hypot(player.x - e.x, player.y - e.y) < player.radius + 14) {
-          enemies.splice(i, 1); applyDamage(35); continue;
-        }
-        if (e.y > canvas.height + 30) enemies.splice(i, 1);
-      }
-
-      // 아이템 처리
-      for (let i = items.length - 1; i >= 0; i--) {
-        const it = items[i]; it.y += 2.2;
-        ctx.fillStyle = it.type === 'M' ? '#ec4899' : it.type === 'E' ? '#06b6d4' : '#10b981';
-        ctx.beginPath(); ctx.arc(it.x, it.y, 12, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(it.type, it.x, it.y);
-
-        if (Math.hypot(player.x - it.x, player.y - it.y) < player.radius + 12) {
-          if (it.type === 'P') weaponLevel = Math.min(3, weaponLevel + 1);
-          else if (it.type === 'M') { hasHomingMissile = true; missileTimer = 500; }
-          else { playSound('heal'); player.energy = Math.min(player.maxEnergy, player.energy + 30); spawnExplosion(player.x, player.y, '#06b6d4', 10); }
-          items.splice(i, 1);
-        } else if (it.y > canvas.height + 20) items.splice(i, 1);
-      }
-
-      // 파티클 처리
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const pt = particles[i]; pt.x += pt.vx; pt.y += pt.vy; pt.alpha -= 0.035;
-        if (pt.alpha <= 0) particles.splice(i, 1);
-        else {
-          ctx.save(); ctx.globalAlpha = pt.alpha; ctx.fillStyle = pt.color;
-          ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-        }
-      }
-
-      drawLeftEnergyBar();
-      ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText(`SCORE ${score}`, 50, 34);
-      if (hasHomingMissile) {
-        ctx.fillStyle = '#ec4899'; ctx.font = 'bold 12px sans-serif';
-        ctx.fillText(`MISSILE (${Math.ceil(missileTimer / 60)}s)`, 50, 52);
-      }
-      ctx.fillStyle = isMuted ? '#64748b' : '#38bdf8'; ctx.font = '18px sans-serif';
-      ctx.fillText(isMuted ? '🔇' : '🔊', canvas.width - 25, 36);
-
-      requestAnimationFrame(loop);
-    }
-
-    requestAnimationFrame(loop);
-  </script>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// 게임 상태 관리 ('START', 'PLAYING', 'GAMEOVER')
+let gameState = 'START';
+
+// 이미지 스프라이트 로더
+const startScreenImg = new Image();
+let isStartScreenLoaded = false;
+startScreenImg.src = 'Startscreen.png';
+startScreenImg.onload = () => { isStartScreenLoaded = true; };
+
+const playerImg = new Image();
+let isPlayerImgLoaded = false;
+playerImg.src = 'player.png';
+playerImg.onload = () => { isPlayerImgLoaded = true; };
+
+const bossImages = {};
+const bossImgLoaded = {};
+for (let i = 1; i <= 5; i++) {
+bossImages[i] = new Image();
+bossImgLoaded[i] = false;
+bossImages[i].onload = () => { bossImgLoaded[i] = true; };
+bossImages[i].src = boss${i}.png`;
+}
+
+// Web Audio 신디사이저 엔진 (BGM & SFX)
+let audioCtx = null, bgmGain = null, isMuted = false, bgmStep = 0, nextNoteTime = 0, isBgmRunning = false;
+const NOTES = {
+C3:130.81, D3:146.83, E3:164.81, F3:174.61, G3:196.00, A3:220.00, B3:246.94,
+C4:261.63, D4:293.66, E4:329.63, F4:349.23, G4:392.00, A4:440.00, B4:493.88,
+C5:523.25, D5:587.33, E5:659.25, F5:698.46, G5:783.99, A5:880.00, REST:0
+};
+const normalBgmNotes = [
+{bass:NOTES.A3, lead:NOTES.A4}, {bass:NOTES.A3, lead:NOTES.C5}, {bass:NOTES.A3, lead:NOTES.E5}, {bass:NOTES.A3, lead:NOTES.A4},
+{bass:NOTES.F3, lead:NOTES.F4}, {bass:NOTES.F3, lead:NOTES.A4}, {bass:NOTES.F3, lead:NOTES.C5}, {bass:NOTES.F3, lead:NOTES.F5},
+{bass:NOTES.G3, lead:NOTES.G4}, {bass:NOTES.G3, lead:NOTES.B4}, {bass:NOTES.G3, lead:NOTES.D5}, {bass:NOTES.G3, lead:NOTES.G5},
+{bass:NOTES.E3, lead:NOTES.E4}, {bass:NOTES.E3, lead:NOTES.G4}, {bass:NOTES.E3, lead:NOTES.B4}, {bass:NOTES.E3, lead:NOTES.E5}
+ ];
+const bossBgmNotes = [
+{bass:NOTES.D3, lead:NOTES.D5}, {bass:NOTES.D3, lead:NOTES.REST}, {bass:NOTES.D3, lead:NOTES.F5}, {bass:NOTES.D3, lead:NOTES.D5},
+{bass:NOTES.C3, lead:NOTES.C5}, {bass:NOTES.C3, lead:NOTES.REST}, {bass:NOTES.C3, lead:NOTES.E5}, {bass:NOTES.C3, lead:NOTES.C5},
+{bass:NOTES.B3, lead:NOTES.B4}, {bass:NOTES.B3, lead:NOTES.REST}, {bass:NOTES.B3, lead:NOTES.D5}, {bass:NOTES.B3, lead:NOTES.B4},
+{bass:NOTES.C3, lead:NOTES.C5}, {bass:NOTES.D3, lead:NOTES.D5}, {bass:NOTES.E3, lead:NOTES.E5}, {bass:NOTES.F3, lead:NOTES.F5}
+ ];
+
+function initAudio() {
+if (!audioCtx) {
+audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+bgmGain = audioCtx.createGain();
+bgmGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+bgmGain.connect(audioCtx.destination);
+}
+if (audioCtx.state === 'suspended') audioCtx.resume();
+if (!isBgmRunning) { isBgmRunning = true; nextNoteTime = audioCtx.currentTime + 0.05; }
+}
+
+function playTone(freq, type, duration, startTime, vol=0.1) {
+if (!audioCtx || freq===0 || isMuted) return;
+const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+osc.type = type; osc.frequency.setValueAtTime(freq, startTime);
+gain.gain.setValueAtTime(vol, startTime);
+gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+osc.connect(gain); gain.connect(bgmGain); osc.start(startTime); osc.stop(startTime + duration);
+}
+
+function updateBgmScheduler() {
+if (!isBgmRunning || !audioCtx || gameState !== 'PLAYING') return;
+const tempo = boss ? 155 : 130;
+const stepDuration = 60 / tempo / 4;
+while (nextNoteTime < audioCtx.currentTime + 0.15) {
+const pattern = boss ? bossBgmNotes : normalBgmNotes;
+const currentStep = pattern[bgmStep % pattern.length];
+playTone(currentStep.bass, 'triangle', stepDuration * 0.9, nextNoteTime, 0.22);
+playTone(currentStep.lead, 'square', stepDuration * 0.6, nextNoteTime, 0.08);
+nextNoteTime += stepDuration;
+bgmStep++;
+}
+}
+
+function playSound(type) {
+if (!audioCtx || isMuted || gameState !== 'PLAYING') return;
+try {
+const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+osc.connect(gain); gain.connect(audioCtx.destination);
+const t = audioCtx.currentTime;
+if (type === 'laser') {
+osc.type = 'square'; osc.frequency.setValueAtTime(820, t);
+osc.frequency.exponentialRampToValueAtTime(200, t + 0.07);
+gain.gain.setValueAtTime(0.08, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.07);
+osc.start(t); osc.stop(t + 0.07);
+} else if (type === 'missile') {
+osc.type = 'sawtooth'; osc.frequency.setValueAtTime(280, t);
+osc.frequency.exponentialRampToValueAtTime(600, t + 0.1);
+gain.gain.setValueAtTime(0.1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+osc.start(t); osc.stop(t + 0.1);
+} else if (type === 'boom') {
+osc.type = 'sawtooth'; osc.frequency.setValueAtTime(140, t);
+osc.frequency.exponentialRampToValueAtTime(30, t + 0.25);
+gain.gain.setValueAtTime(0.25, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+osc.start(t); osc.stop(t + 0.25);
+} else if (type === 'item') {
+osc.type = 'sine'; osc.frequency.setValueAtTime(440, t);
+osc.frequency.exponentialRampToValueAtTime(1100, t + 0.16);
+gain.gain.setValueAtTime(0.18, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.16);
+osc.start(t); osc.stop(t + 0.16);
+} else if (type === 'heal') {
+osc.type = 'sine'; osc.frequency.setValueAtTime(300, t);
+osc.frequency.exponentialRampToValueAtTime(800, t + 0.25);
+gain.gain.setValueAtTime(0.2, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+osc.start(t); osc.stop(t + 0.25);
+}
+} catch(e) {}
+}
+
+// 게임 데이터 및 설정
+const stars = Array.from({length: 65}, () => ({
+x: Math.random() * canvas.width,
+y: Math.random() * canvas.height,
+r: Math.random() * 1.8 + 0.5,
+speed: Math.random() * 2 + 0.8
+}));
+
+let score = 0, weaponLevel = 1, hasHomingMissile = false, missileTimer = 0, frame = 0;
+let bossTier = 1, boss = null, nextBossScore = 250, bossWarningTimer = 0;
+
+const BOSS_CONFIGS = {
+1: { name: 'STAGE 1: TANK BUSTER', hp: 80, color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 40 },
+2: { name: 'STAGE 2: CYBER STEALTH', hp: 160, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 34 },
+3: { name: 'STAGE 3: AEGIS FLAGSHIP', hp: 270, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 28 },
+4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 420, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 24 },
+5: { name: 'STAGE 5: VOID ARCHANGEL', hp: 650, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 18 }
+};
+
+const player = {
+x: canvas.width / 2,
+y: canvas.height - 140,
+targetX: canvas.width / 2,
+targetY: canvas.height - 140,
+radius: 22,
+energy: 100,
+maxEnergy: 100,
+displayEnergy: 100,
+invincible: 0
+};
+
+const bullets = [], missiles = [], enemyBullets = [], enemies = [], particles = [], items = [];
+
+function checkSoundButtonTap(x, y) {
+const btnX = canvas.width - 45, btnY = 30;
+if (Math.hypot(x - btnX, y - btnY) < 25) {
+isMuted = !isMuted;
+if (bgmGain) bgmGain.gain.setValueAtTime(isMuted ? 0 : 0.08, audioCtx.currentTime);
+return true;
+}
+return false;
+}
+
+function isTapToStartHit(x, y) {
+const btnTop = canvas.height * 0.78;
+const btnBottom = canvas.height * 0.94;
+const btnLeft = canvas.width * 0.12;
+const btnRight = canvas.width * 0.88;
+return (x >= btnLeft && x <= btnRight && y >= btnTop && y <= btnBottom) || y >= canvas.height * 0.75;
+}
+
+function handleStartScreenTouch(x, y) {
+if (isTapToStartHit(x, y)) {
+initAudio();
+restartGame();
+}
+}
+
+function handlePointer(x, y) {
+if (gameState === 'START') {
+handleStartScreenTouch(x, y);
+return;
+}
+if (gameState === 'GAMEOVER') {
+restartGame();
+return;
+}
+if (checkSoundButtonTap(x, y)) return;
+player.targetX = x;
+player.targetY = y - 50;
+}
+
+canvas.addEventListener('touchstart', e => {
+const t = e.touches[0];
+handlePointer(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+e.preventDefault();
+if (gameState === 'PLAYING') {
+const t = e.touches[0];
+handlePointer(t.clientX, t.clientY);
+}
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+handlePointer(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('mousemove', e => {
+if (gameState === 'PLAYING' && e.buttons === 1) {
+handlePointer(e.clientX, e.clientY);
+}
+});
+
+function spawnExplosion(x, y, color, count=12) {
+for (let i = 0; i < count; i++) {
+const angle = Math.random() * Math.PI * 2, spd = Math.random() * 5 + 2;
+particles.push({ x, y, vx: Math.cos(angle)*spd, vy: Math.sin(angle)*spd, r: Math.random()*3+1.5, alpha: 1, color });
+}
+}
+
+function applyDamage(dmg) {
+if (player.invincible > 0 || gameState !== 'PLAYING') return;
+player.energy = Math.max(0, player.energy - dmg);
+player.invincible = 40;
+playSound('boom');
+spawnExplosion(player.x, player.y, '#ef4444', 16);
+if (player.energy <= 0) gameState = 'GAMEOVER';
+}
+
+function spawnBoss(tier) {
+bossWarningTimer = 110;
+const config = BOSS_CONFIGS[tier];
+boss = {
+tier, name: config.name, x: canvas.width / 2, y: -120, targetY: 135,
+width: config.w, height: config.h, vx: 2.3 + tier * 0.25,
+hp: config.hp, maxHp: config.hp, displayHp: config.hp,
+shootCooldown: 0, color: config.color, subColor: config.subColor, shotCdMax: config.shotCd
+};
+}
+
+function restartGame() {
+score = 0;
+bossTier = 1;
+player.energy = 100;
+player.displayEnergy = 100;
+player.invincible = 0;
+weaponLevel = 1;
+hasHomingMissile = false;
+missileTimer = 0;
+boss = null;
+nextBossScore = 250;
+bossWarningTimer = 0;
+bullets.length = 0;
+missiles.length = 0;
+enemyBullets.length = 0;
+enemies.length = 0;
+particles.length = 0;
+items.length = 0;
+player.x = canvas.width / 2;
+player.y = canvas.height - 140;
+player.targetX = player.x;
+player.targetY = player.y;
+gameState = 'PLAYING';
+}
+
+// 시작 화면 렌더링 (Startscreen.png)
+function drawStartScreen() {
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+if (isStartScreenLoaded) {
+const imgRatio = startScreenImg.naturalWidth / startScreenImg.naturalHeight;
+const canvasRatio = canvas.width / canvas.height;
+let dw, dh, dx, dy;
+if (canvasRatio > imgRatio) {
+dw = canvas.width;
+dh = canvas.width / imgRatio;
+dx = 0;
+dy = (canvas.height - dh) / 2;
+} else {
+dh = canvas.height;
+dw = canvas.height * imgRatio;
+dx = (canvas.width - dw) / 2;
+dy = 0;
+}
+ctx.drawImage(startScreenImg, dx, dy, dw, dh);
+
+const btnW = Math.min(canvas.width * 0.72, 320);
+const btnH = 58;
+const btnX = (canvas.width - btnW) / 2;
+const btnY = canvas.height * 0.84;
+
+ctx.save();
+const pulse = 0.5 + Math.sin(frame * 0.1) * 0.5;
+ctx.strokeStyle = rgba(56, 189, 248,${0.4 + pulse * 0.6})`;
+ctx.lineWidth = 3;
+ctx.shadowColor = '#06b6d4';
+ctx.shadowBlur = 14 * pulse;
+ctx.beginPath();
+ctx.roundRect(btnX, btnY, btnW, btnH, 12);
+ctx.stroke();
+ctx.restore();
+} else {
+ctx.fillStyle = '#050811';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
+ctx.lineWidth = 1;
+for (let x = 0; x < canvas.width; x += 30) {
+ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+}
+for (let y = 0; y < canvas.height; y += 30) {
+ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+}
+
+ctx.fillStyle = '#38bdf8';
+ctx.font = 'bold 26px sans-serif';
+ctx.textAlign = 'center';
+ctx.fillText('CYBER STRIKE', canvas.width / 2, canvas.height * 0.35);
+
+ctx.fillStyle = '#c084fc';
+ctx.font = 'bold 18px sans-serif';
+ctx.fillText('NEON WARFARE', canvas.width / 2, canvas.height * 0.41);
+
+const btnW = Math.min(canvas.width * 0.72, 280);
+const btnH = 54;
+const btnX = (canvas.width - btnW) / 2;
+const btnY = canvas.height * 0.82;
+
+ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
+ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 10); ctx.fill();
+
+ctx.strokeStyle = '#38bdf8';
+ctx.lineWidth = 2.5;
+ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 10); ctx.stroke();
+
+ctx.fillStyle = '#ffffff';
+ctx.font = 'bold 20px sans-serif';
+ctx.fillText('TAP TO START', canvas.width / 2, btnY + 34);
+}
+}
+
+// 플레이어 전투기 렌더링 (player.png 종횡비 보존)
+function drawPlayerFighter(x, y) {
+ctx.save();
+ctx.translate(x, y);
+
+if (player.invincible > 0 && Math.floor(frame / 4) % 2 === 0) {
+ctx.globalAlpha = 0.4;
+}
+
+if (isPlayerImgLoaded && playerImg.naturalWidth > 0) {
+const targetWidth = 78;
+const aspect = playerImg.naturalHeight / playerImg.naturalWidth;
+const targetHeight = targetWidth * aspect;
+
+ctx.imageSmoothingEnabled = false;
+ctx.drawImage(playerImg, -targetWidth / 2, -targetHeight / 2, targetWidth, targetHeight);
+ctx.imageSmoothingEnabled = true;
+
+if (hasHomingMissile) {
+ctx.strokeStyle = '#ec4899';
+ctx.lineWidth = 2;
+ctx.strokeRect(-targetWidth / 2 - 2, -targetHeight / 2 - 2, targetWidth + 4, targetHeight + 4);
+}
+ctx.restore();
+return;
+}
+
+const s = 1.05;
+[-10, 10].forEach(ox => {
+const fl = 18 + Math.random() * 8;
+ctx.fillStyle = '#ff6b00'; ctx.beginPath(); ctx.moveTo((ox - 4)s, 32s); ctx.lineTo(oxs, (32+fl)s); ctx.lineTo((ox + 4)s, 32s); ctx.closePath(); ctx.fill();
+ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.moveTo((ox - 2)s, 32s); ctx.lineTo(oxs, (32+fl0.65)s); ctx.lineTo((ox + 2)s, 32s); ctx.closePath(); ctx.fill();
+});
+ctx.fillStyle = '#334155'; ctx.fillRect(-15s, 26s, 10s, 6s); ctx.fillRect(5s, 26s, 10s, 6s);
+ctx.fillStyle = '#0284c7'; ctx.beginPath(); ctx.moveTo(0, 15s); ctx.lineTo(-24s, 30s); ctx.lineTo(-14s, 32s); ctx.lineTo(0, 24s); ctx.closePath(); ctx.fill();
+ctx.beginPath(); ctx.moveTo(0, 15s); ctx.lineTo(24s, 30s); ctx.lineTo(14s, 32s); ctx.lineTo(0, 24s); ctx.closePath(); ctx.fill();
+ctx.fillStyle = '#38bdf8'; ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.8; ctx.beginPath();
+ctx.moveTo(0, -12s); ctx.lineTo(-38s, 14s); ctx.lineTo(-33s, 18s); ctx.lineTo(-9s, 18s); ctx.lineTo(0, 22s); ctx.lineTo(9s, 18s); ctx.lineTo(33s, 18s); ctx.lineTo(38s, 14s); ctx.closePath(); ctx.fill(); ctx.stroke();
+ctx.fillStyle = '#0284c7'; ctx.beginPath(); ctx.moveTo(0, -36s); ctx.lineTo(-11s, -10s); ctx.lineTo(-10s, 26s); ctx.lineTo(10s, 26s); ctx.lineTo(11s, -10s); ctx.closePath(); ctx.fill(); ctx.stroke();
+ctx.fillStyle = '#cbd5e1'; ctx.beginPath(); ctx.moveTo(0, -36s); ctx.lineTo(-5s, -26s); ctx.lineTo(5s, -26s); ctx.closePath(); ctx.fill();
+ctx.fillStyle = '#7dd3fc'; ctx.beginPath(); ctx.ellipse(0, -6s, 6s, 14.5s, 0, 0, Math.PI*2); ctx.fill();
+
+if (hasHomingMissile) {
+ctx.strokeStyle = '#ec4899'; ctx.lineWidth = 2.5;
+ctx.strokeRect(-22s, -3s, 5s, 16s); ctx.strokeRect(17s, -3s, 5s, 16s);
+}
+ctx.restore();
+}
+
+// 보스 기체 렌더링
+function drawBossEntity(b) {
+ctx.save();
+ctx.translate(b.x, b.y);
+if (bossImgLoaded[b.tier]) {
+const img = bossImages[b.tier];
+ctx.rotate(Math.PI);
+const scale = Math.min(b.width / img.naturalWidth, b.height / img.naturalHeight);
+const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+ctx.restore();
+return;
+}
+switch (b.tier) {
+case 1: ctx.fillStyle='#4b5320'; ctx.beginPath(); ctx.ellipse(0,0,22,45,0,0,Math.PI*2); ctx.fill(); break;
+case 2: ctx.fillStyle='#1e293b'; ctx.beginPath(); ctx.moveTo(0,48); ctx.lineTo(-b.width/2,-30); ctx.lineTo(b.width/2,-30); ctx.closePath(); ctx.fill(); break;
+case 3: ctx.fillStyle='#78350f'; ctx.beginPath(); ctx.moveTo(0,52); ctx.lineTo(b.width/2,-15); ctx.lineTo(-b.width/2,-15); ctx.closePath(); ctx.fill(); break;
+case 4: ctx.fillStyle='#1c1917'; ctx.fillRect(-18,-35,36,75); break;
+case 5: ctx.fillStyle='#3b0764'; ctx.beginPath(); ctx.moveTo(0,55); ctx.lineTo(b.width/2,20); ctx.lineTo(-b.width/2,20); ctx.closePath(); ctx.fill(); break;
+}
+ctx.restore();
+}
+
+// 좌측 수직 에너지 바
+function drawLeftEnergyBar() {
+const barX = 16, barY = 80, barWidth = 14, barHeight = 150;
+player.displayEnergy += (player.energy - player.displayEnergy) * 0.15;
+const fillRatio = Math.max(0, Math.min(1, player.displayEnergy / player.maxEnergy));
+const currentFillH = barHeight * fillRatio;
+
+ctx.save();
+ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+ctx.fillText('ENG', barX + barWidth / 2, barY - 14);
+ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 12px sans-serif';
+ctx.fillText(${Math.round(player.energy)}%`, barX + barWidth / 2, barY - 2);
+
+ctx.fillStyle = 'rgba(15, 23, 42, 0.75)'; ctx.beginPath(); ctx.roundRect(barX, barY, barWidth, barHeight, 7); ctx.fill();
+let energyColor = player.energy <= 25 ? (frame % 8 < 4 ? '#ef4444' : '#fee2e2') : player.energy <= 55 ? '#f59e0b' : '#10b981';
+
+if (currentFillH > 0) {
+ctx.fillStyle = energyColor; ctx.beginPath();
+ctx.roundRect(barX + 2, barY + (barHeight - currentFillH) + 2, barWidth - 4, currentFillH - 4, 5);
+ctx.fill();
+}
+ctx.strokeStyle = energyColor; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(barX, barY, barWidth, barHeight, 7); ctx.stroke();
+ctx.restore();
+}
+
+// 메인 게임 루프
+function loop() {
+frame++;
+
+if (gameState === 'START') {
+drawStartScreen();
+requestAnimationFrame(loop);
+return;
+}
+
+if (gameState === 'GAMEOVER') {
+ctx.fillStyle = 'rgba(5, 8, 17, 0.88)';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.fillStyle = '#f87171';
+ctx.font = 'bold 34px sans-serif';
+ctx.textAlign = 'center';
+ctx.fillText('MISSION OVER', canvas.width / 2, canvas.height / 2 - 40);
+ctx.fillStyle = '#fff';
+ctx.font = 'bold 22px sans-serif';
+ctx.fillText(최종 점수:${score}, canvas.width / 2, canvas.height / 2 + 10); ctx.fillText(최종 도달: STAGE ${bossTier}, canvas.width / 2, canvas.height / 2 + 42);
+ctx.fillStyle = '#38bdf8';
+ctx.font = '16px sans-serif';
+ctx.fillText('화면을 탭하여 다시 출격', canvas.width / 2, canvas.height / 2 + 90);
+requestAnimationFrame(loop);
+return;
+}
+
+if (player.invincible > 0) player.invincible--;
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+updateBgmScheduler();
+
+ctx.fillStyle = '#94a3b8';
+stars.forEach(s => {
+s.y += s.speed;
+if (s.y > canvas.height) { s.y = 0; s.x = Math.random() * canvas.width; }
+ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+});
+
+player.x += (player.targetX - player.x) * 0.25;
+player.y += (player.targetY - player.y) * 0.25;
+player.x = Math.max(38, Math.min(canvas.width - 38, player.x));
+player.y = Math.max(45, Math.min(canvas.height - 45, player.y));
+drawPlayerFighter(player.x, player.y);
+
+if (frame % 8 === 0) {
+playSound('laser');
+if (weaponLevel === 1) {
+bullets.push({ x: player.x - 22, y: player.y - 25, vx: 0, vy: -13 });
+bullets.push({ x: player.x + 22, y: player.y - 25, vx: 0, vy: -13 });
+} else if (weaponLevel === 2) {
+bullets.push({ x: player.x - 24, y: player.y - 20, vx: -1, vy: -13 });
+bullets.push({ x: player.x, y: player.y - 36, vx: 0, vy: -13 });
+bullets.push({ x: player.x + 24, y: player.y - 20, vx: 1, vy: -13 });
+} else {
+bullets.push({ x: player.x - 26, y: player.y - 18, vx: -2.5, vy: -13 });
+bullets.push({ x: player.x - 12, y: player.y - 30, vx: 0, vy: -13 });
+bullets.push({ x: player.x + 12, y: player.y - 30, vx: 0, vy: -13 });
+bullets.push({ x: player.x + 26, y: player.y - 18, vx: 2.5, vy: -13 });
+}
+}
+
+if (hasHomingMissile) {
+missileTimer--;
+if (missileTimer <= 0) hasHomingMissile = false;
+if (frame % 18 === 0) {
+playSound('missile');
+missiles.push({ x: player.x - 26, y: player.y, vx: -3, vy: -5, speed: 7.5 });
+missiles.push({ x: player.x + 26, y: player.y, vx: 3, vy: -5, speed: 7.5 });
+}
+}
+
+ctx.fillStyle = '#fde047';
+for (let i = bullets.length - 1; i >= 0; i--) {
+const b = bullets[i]; b.x += b.vx; b.y += b.vy;
+ctx.beginPath(); ctx.arc(b.x, b.y, 3.5, 0, Math.PI * 2); ctx.fill();
+if (b.y < -15 || b.x < 0 || b.x > canvas.width) bullets.splice(i, 1);
+}
+
+for (let i = missiles.length - 1; i >= 0; i--) {
+const m = missiles[i];
+let target = boss;
+if (!target && enemies.length > 0) {
+let minDist = Infinity;
+enemies.forEach(e => {
+const d = Math.hypot(e.x - m.x, e.y - m.y);
+if (d < minDist) { minDist = d; target = e; }
+});
+}
+if (target) {
+const desired = Math.atan2(target.y - m.y, target.x - m.x), current = Math.atan2(m.vy, m.vx);
+let diff = desired - current;
+while (diff < -Math.PI) diff += Math.PI * 2;
+while (diff > Math.PI) diff -= Math.PI * 2;
+const newAng = current + diff * 0.14;
+m.vx = Math.cos(newAng) * m.speed; m.vy = Math.sin(newAng) * m.speed;
+}
+m.x += m.vx; m.y += m.vy;
+if (frame % 2 === 0) particles.push({ x: m.x, y: m.y, vx: (Math.random() - 0.5) * 1.5, vy: (Math.random() - 0.5) * 1.5, r: 2, alpha: 0.8, color: '#ec4899' });
+ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(Math.atan2(m.vy, m.vx) + Math.PI / 2);
+ctx.fillStyle = '#f43f5e'; ctx.fillRect(-2.5, -7, 5, 14);
+ctx.fillStyle = '#fbcfe8'; ctx.fillRect(-1.5, -9, 3, 4);
+ctx.restore();
+if (m.y < -30 || m.y > canvas.height + 30 || m.x < -30 || m.x > canvas.width + 30) missiles.splice(i, 1);
+}
+
+if (!boss && score >= nextBossScore) spawnBoss(bossTier);
+if (bossWarningTimer > 0) {
+bossWarningTimer--;
+ctx.fillStyle = '#ef4444'; ctx.font = 'bold 22px sans-serif'; ctx.textAlign = 'center';
+if (Math.floor(frame / 10) % 2 === 0) ctx.fillText(⚠ WARNING:${BOSS_CONFIGS[bossTier].name} ⚠`, canvas.width / 2, canvas.height / 2 - 80);
+}
+
+if (boss) {
+if (boss.y < boss.targetY) boss.y += 1.5;
+else {
+boss.x += boss.vx;
+if (boss.x < boss.width / 2 + 10 || boss.x > canvas.width - boss.width / 2 - 10) boss.vx *= -1;
+boss.shootCooldown++;
+if (boss.shootCooldown > boss.shotCdMax) {
+boss.shootCooldown = 0;
+if (boss.tier === 1) [-20, 20].forEach(ox => enemyBullets.push({ x: boss.x + ox, y: boss.y + 35, vx: 0, vy: 5, color: '#facc15' }));
+else if (boss.tier === 2) [-.35, 0, .35].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y + 40, vx: Math.sin(ang)*6.5, vy: Math.cos(ang)*6.5, color: '#38bdf8' }));
+else if (boss.tier === 3) [-.45, -.22, 0, .22, .45].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y + 45, vx: Math.sin(ang)*5.2, vy: Math.cos(ang)*5.2, color: '#fbbf24' }));
+else if (boss.tier === 4) [-.3, -.1, .1, .3].forEach(ang => enemyBullets.push({ x: boss.x, y: boss.y + 35, vx: Math.sin(ang)*5, vy: Math.cos(ang)*5, color: '#f87171' }));
+else for (let a = 0; a < 8; a++) {
+const ang = Math.PI * 2 / 8 * a + frame * 0.05;
+enemyBullets.push({ x: boss.x, y: boss.y + 20, vx: Math.cos(ang)*4.5, vy: Math.sin(ang)*4.5, color: '#c084fc' });
+}
+}
+}
+
+drawBossEntity(boss);
+boss.displayHp += (boss.hp - boss.displayHp) * 0.15;
+const barW = canvas.width * 0.7, barX = (canvas.width - barW) / 2 + 10;
+ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'; ctx.fillRect(barX, 58, barW, 12);
+ctx.fillStyle = boss.color; ctx.fillRect(barX, 58, barW * Math.max(0, boss.displayHp / boss.maxHp), 12);
+ctx.strokeStyle = boss.subColor; ctx.lineWidth = 1.5; ctx.strokeRect(barX, 58, barW, 12);
+ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+ctx.fillText(${boss.name} (${Math.max(0, boss.hp)} / ${boss.maxHp})`, canvas.width / 2 + 10, 52);
+
+for (let j = bullets.length - 1; j >= 0; j--) {
+const b = bullets[j];
+if (Math.hypot(b.x - boss.x, b.y - boss.y) < boss.width / 2) {
+bullets.splice(j, 1); boss.hp--; spawnExplosion(b.x, b.y, '#f59e0b', 3);
+}
+}
+for (let m = missiles.length - 1; m >= 0; m--) {
+const ms = missiles[m];
+if (Math.hypot(ms.x - boss.x, ms.y - boss.y) < boss.width / 2) {
+missiles.splice(m, 1); boss.hp -= 3; playSound('boom'); spawnExplosion(ms.x, ms.y, '#ec4899', 10);
+}
+}
+if (Math.hypot(player.x - boss.x, player.y - boss.y) < boss.width / 2 + 10) applyDamage(50);
+if (boss.hp <= 0) {
+playSound('boom'); spawnExplosion(boss.x, boss.y, boss.subColor, 50);
+score += 200 * boss.tier; nextBossScore = score + 450;
+if (bossTier < 5) bossTier++;
+else BOSS_CONFIGS[5].hp = Math.round(BOSS_CONFIGS[5].hp * 1.3);
+boss = null;
+}
+}
+
+for (let i = enemyBullets.length - 1; i >= 0; i--) {
+const eb = enemyBullets[i]; eb.x += eb.vx; eb.y += eb.vy;
+ctx.fillStyle = eb.color || '#fb7185'; ctx.beginPath(); ctx.arc(eb.x, eb.y, 4, 0, Math.PI * 2); ctx.fill();
+if (Math.hypot(player.x - eb.x, player.y - eb.y) < player.radius + 4) {
+enemyBullets.splice(i, 1); applyDamage(20); continue;
+}
+if (eb.y > canvas.height + 20 || eb.x < -20 || eb.x > canvas.width + 20) enemyBullets.splice(i, 1);
+}
+
+if (frame % (boss ? 70 : 32) === 0) enemies.push({ x: Math.random() * (canvas.width - 70) + 45, y: -30, hp: 1, speed: 3.2 + Math.random() * 1.5 });
+for (let i = enemies.length - 1; i >= 0; i--) {
+const e = enemies[i]; e.y += e.speed;
+ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(Math.PI); ctx.fillStyle = '#f43f5e';
+ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(18, 10); ctx.lineTo(-18, 10); ctx.closePath(); ctx.fill();
+ctx.restore();
+
+for (let j = bullets.length - 1; j >= 0; j--) {
+const b = bullets[j];
+if (Math.hypot(b.x - e.x, b.y - e.y) < 20) { bullets.splice(j, 1); e.hp = 0; break; }
+}
+for (let m = missiles.length - 1; m >= 0; m--) {
+const ms = missiles[m];
+if (Math.hypot(ms.x - e.x, ms.y - e.y) < 22) { missiles.splice(m, 1); e.hp = 0; break; }
+}
+if (e.hp <= 0) {
+playSound('boom'); spawnExplosion(e.x, e.y, '#ef4444', 12); score += 10;
+const rand = Math.random();
+if (rand < 0.10) items.push({ x: e.x, y: e.y, type: 'P' });
+else if (rand < 0.20) items.push({ x: e.x, y: e.y, type: 'M' });
+else if (rand < 0.30) items.push({ x: e.x, y: e.y, type: 'E' });
+enemies.splice(i, 1); continue;
+}
+if (Math.hypot(player.x - e.x, player.y - e.y) < player.radius + 14) {
+enemies.splice(i, 1); applyDamage(35); continue;
+}
+if (e.y > canvas.height + 30) enemies.splice(i, 1);
+}
+
+for (let i = items.length - 1; i >= 0; i--) {
+const it = items[i]; it.y += 2.2;
+ctx.fillStyle = it.type === 'M' ? '#ec4899' : it.type === 'E' ? '#06b6d4' : '#10b981';
+ctx.beginPath(); ctx.arc(it.x, it.y, 12, 0, Math.PI * 2); ctx.fill();
+ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+ctx.fillText(it.type, it.x, it.y);
+
+if (Math.hypot(player.x - it.x, player.y - it.y) < player.radius + 12) {
+if (it.type === 'P') weaponLevel = Math.min(3, weaponLevel + 1);
+else if (it.type === 'M') { hasHomingMissile = true; missileTimer = 500; }
+else { playSound('heal'); player.energy = Math.min(player.maxEnergy, player.energy + 30); spawnExplosion(player.x, player.y, '#06b6d4', 10); }
+items.splice(i, 1);
+} else if (it.y > canvas.height + 20) items.splice(i, 1);
+}
+
+for (let i = particles.length - 1; i >= 0; i--) {
+const pt = particles[i]; pt.x += pt.vx; pt.y += pt.vy; pt.alpha -= 0.035;
+if (pt.alpha <= 0) particles.splice(i, 1);
+else {
+ctx.save(); ctx.globalAlpha = pt.alpha; ctx.fillStyle = pt.color;
+ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+}
+
+drawLeftEnergyBar();
+ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left';
+ctx.fillText(SCORE${score}, 50, 34); if (hasHomingMissile) { ctx.fillStyle = '#ec4899'; ctx.font = 'bold 12px sans-serif'; ctx.fillText(MISSILE (${Math.ceil(missileTimer / 60)}s)`, 50, 52);
+}
+ctx.fillStyle = isMuted ? '#64748b' : '#38bdf8'; ctx.font = '18px sans-serif';
+ctx.fillText(isMuted ? '🔇' : '🔊', canvas.width - 25, 36);
+
+requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
 </body>
 </html>
