@@ -19,7 +19,7 @@
     if (nd < 60 && bombs > 0 && Math.random() < P.bombPanic) fireBomb();
   }
   while (f < MAXF && gameState === 'PLAYING') {
-    bot(); loop(); f++;
+    bot(); tick(); f++;
     if (stagePhase !== last) { log.push(`${f}f(${(f / 60) | 0}s) ${stagePhase} stage${bossTier} score${score} hp${Math.round(player.energy)} lives${lives}`); last = stagePhase; }
   }
   return { seconds: +(f / 60).toFixed(1), state: gameState, stage: bossTier, score, log };
