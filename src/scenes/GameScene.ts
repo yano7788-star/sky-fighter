@@ -19,6 +19,8 @@ import { loadAch, saveAch, loadBest, loadDaily, loadMeta, saveBest, saveDaily, s
 const MOVE_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' '];
 const PREVENT_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '];
 
+const ENEMY_W: Record<string, number> = { sniper: 58, scout: 42, zigzag: 46, kamikaze: 36, drone: 26, mine: 42, turret: 52, rock: 58 };   // 화면에 그려지는 가로 크기(논리 px)
+
 export class GameScene extends Phaser.Scene {
   private sim!: Sim;
   private hud!: Hud;
@@ -54,6 +56,11 @@ export class GameScene extends Phaser.Scene {
   private bestBefore = 0;       // 런 시작 시점의 최고 점수 (신기록 판정 기준)
 
   private paused = false;
+  private bossFlash = 0; private midFlash = 0;       // 흰색 실루엣 점멸 남은 프레임
+  private bossKick = 0; private midKick = 0;         // 피격 탄성(밀림·찌그러짐) 진폭
+  private lastBossStop = -99;                          // 보스 피격 히트스톱 쿨다운 (sim.frame 기준)
+  private dmgAcc = 0; private dmgAccAt = 0;           // 보스에게 들어간 피해량 숫자 팝업 누적
+  private slowUntil = 0; private slowScale = 1;       // 슬로 모션(실시간 ms)
   private quitArmed = false;     // 일시정지 메뉴의 '메인 화면으로'를 한 번 눌러 확인 대기 중
   private acc = 0;
   private hitStop = 0;
@@ -148,7 +155,7 @@ export class GameScene extends Phaser.Scene {
 
   private applySkin(key: string): void {
     this.playerImg.setTexture(key);
-    this.playerImg.setDisplaySize(66, (66 * this.playerImg.frame.height) / this.playerImg.frame.width);
+    this.playerImg.setDisplaySize(52, (52 * this.playerImg.frame.height) / this.playerImg.frame.width);   // 이전 66px에서 축소: 적 비행기보다 커 보이던 문제 해결
   }
 
   private resetRun(): void {
@@ -313,6 +320,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.paused) {
       let dt = delta;
       if (Math.abs(dt - STEP_MS) < 2) dt = STEP_MS;       // 60Hz 지터 보정
+      if (performance.now() < this.slowUntil) dt *= this.slowScale;   // 페이즈 전환·격추 순간의 슬로 모션
       this.acc += Math.min(dt, 100);                      // 탭 복귀 등 긴 지연은 잘라서 순간이동 방지
       let n = 0;
       while (this.acc >= STEP_MS - 0.5 && n < 3) { this.tick(); this.acc -= STEP_MS; n++; }
@@ -344,6 +352,10 @@ export class GameScene extends Phaser.Scene {
     this.hud.tick(s); this.fx.tick(); this.bg.tick(); this.overlay.tick();
     if (this.shake > 0.3) this.shake *= 0.88; else this.shake = 0;
     if (this.muzzle > 0) this.muzzle--;
+    if (this.bossFlash > 0) this.bossFlash--;
+    if (this.midFlash > 0) this.midFlash--;
+    this.bossKick *= 0.78; this.midKick *= 0.78;
+    this.damageSmoke();
     if (this.resultTimer > 0) this.resultTimer--;
     if (this.resultKind) { this.hud.showResult(this.resultInfo(), this.resultTimer <= 0); return; }
 
@@ -358,6 +370,51 @@ export class GameScene extends Phaser.Scene {
     if (s.frame % 2 === 0) for (const m of s.missiles) this.fx.trail(m.x, m.y, '#ec4899');
     if (s.stagePhase === 'INTRO') this.bg.setTier(s.stageTier);
     if (this.overlay.stage() !== s.stageTier) this.overlay.setStage(s.stageTier);
+  }
+
+  /** 보스/중간보스 피격 연출: 흰색 점멸 + 탄성 + 방향성 불꽃 + 무기별 소리·흔들림·히트스톱 + 피해 숫자 */
+  private onBossHit(e: Extract<SimEvent, { t: 'bossHit' }>): void {
+    const heavy = e.src === 'missile' || e.src === 'other', laser = e.src === 'laser';
+    const flash = heavy ? 4 : laser ? 2 : 1;
+    if (e.target === 'boss') { this.bossFlash = Math.max(this.bossFlash, flash); this.bossKick = Math.min(4, this.bossKick + (heavy ? 2.4 : laser ? 0.9 : 0.8)); }
+    else { this.midFlash = Math.max(this.midFlash, flash); this.midKick = Math.min(4, this.midKick + (heavy ? 2.4 : laser ? 0.9 : 0.8)); }
+    if (e.src === 'bullet') {   // 탄은 위로 날아와 맞으므로 불꽃은 아래·옆으로 반사
+      this.fx.sparkDir(e.x, e.y, '#fff7ae', 3, Math.PI / 2, 0.9);
+      this.shake = Math.max(this.shake, 1.3);
+      audio.sfx('bossHit');
+    } else if (e.src === 'missile') {
+      this.fx.sparkDir(e.x, e.y, '#fecdd3', 8, Math.PI / 2, 1.3);
+      this.shake = Math.max(this.shake, 4.5);
+      if (this.sim.frame - this.lastBossStop > 25) { this.hitStop = Math.max(this.hitStop, 2); this.lastBossStop = this.sim.frame; }   // 미사일은 짧은 히트스톱 (너무 잦지 않게 쿨다운)
+    } else if (laser) {
+      this.shake = Math.max(this.shake, 1.8);   // 빔이 닿는 동안 계속되는 미세한 진동
+    } else {
+      this.fx.sparkDir(e.x, e.y, '#ffffff', 10, Math.PI / 2, 2.2);
+      this.shake = Math.max(this.shake, 6);
+      audio.sfx('bossHeavy');
+    }
+    // 피해 숫자: 짧은 시간 동안 합산해서 읽기 쉽게
+    this.dmgAcc += e.dmg;
+    if (this.sim.frame - this.dmgAccAt >= 10) {
+      this.fx.pop(e.x + 18 + Math.random() * 14, e.y - 24, String(Math.round(this.dmgAcc)), heavy ? '#fda4af' : laser ? '#93c5fd' : '#fde68a', heavy ? 16 : 13);
+      this.dmgAcc = 0; this.dmgAccAt = this.sim.frame;
+    }
+  }
+
+  /** 체력이 줄수록 보스 몸체에서 연기·불꽃·전기 스파크가 새어 나온다 (누적 피해의 시각화) */
+  private damageSmoke(): void {
+    const s = this.sim, f = s.frame;
+    for (const m of [s.boss, s.midBoss]) {
+      if (!m || m.dying) continue;
+      const frac = m.hp / m.maxHp;
+      if (frac >= 0.7) continue;
+      const every = frac < 0.1 ? 3 : frac < 0.4 ? 5 : 9;
+      if (f % every !== 0) continue;
+      const px = m.x + (Math.random() - 0.5) * m.width * 0.8, py = m.y + (Math.random() - 0.5) * m.height * 0.7;
+      this.fx.explosion(px, py, frac < 0.4 ? '#f97316' : '#64748b', 2);
+      if (frac < 0.4 && f % (every * 2) === 0) this.fx.sparkBurst(px, py, '#7dd3fc', 3);   // 전기 스파크
+      if (frac < 0.1 && f % 9 === 0) this.fx.sparkBurst(px, py, '#fde047', 4);
+    }
   }
 
   private pollKeyboardMove(): void {
@@ -411,7 +468,27 @@ export class GameScene extends Phaser.Scene {
         else if (e.phase === 'ACTIVE') { audio.sfx(this.sim.ult.kind === 'barrage' ? 'boom' : 'laserCharge'); this.fx.ring(W / 2, H * 0.5, this.sim.ult.kind === 'barrage' ? '#fb923c' : '#7dd3fc', 420); }
         break;
       case 'gem': break;
-      case 'hitspark': if (this.sim.frame % 3 === 0) this.fx.ring(e.x, e.y, '#fde047', 16); break;
+      case 'hitspark': break;   // 보스 피격은 bossHit에서, 레이저는 laserHit에서 처리
+      case 'bossHit': this.onBossHit(e); break;
+      case 'bossBreak': {   // 외피 파손: 파편·불꽃·충격 링 + 묵직한 소리 + 히트스톱
+        const m = e.target === 'boss' ? this.sim.boss : this.sim.midBoss, w = m ? m.width : 100;
+        this.fx.ring(e.x, e.y, '#ffffff', w * 1.2); this.fx.ring(e.x, e.y, '#fb923c', w * 0.8);
+        this.fx.sparkBurst(e.x, e.y, '#fde68a', 22); this.fx.sparkBurst(e.x, e.y, '#f97316', 14);
+        this.fx.explosion(e.x + (Math.random() - 0.5) * w * 0.5, e.y + (Math.random() - 0.5) * w * 0.3, '#94a3b8', 14);
+        this.fx.flashBlob(e.x, e.y, w * 1.3, 0xfff7ed);
+        if (e.target === 'boss') this.bossFlash = 6; else this.midFlash = 6;
+        this.shake = Math.max(this.shake, 7 + e.stage * 2); this.hitStop = Math.max(this.hitStop, 3);
+        audio.sfx('bossBreak');
+        break;
+      }
+      case 'slowmo': this.slowUntil = performance.now() + e.ms; this.slowScale = e.scale; audio.duck(e.ms, 0.4); break;
+      case 'laserHit': {   // 빔 착탄: 위로 번쩍이는 섬광 + 아래로 튀는 불꽃 + 지글거리는 소리
+        this.fx.sparkDir(e.x, e.y, '#bae6fd', 4, Math.PI / 2, 1.2); this.fx.sparkDir(e.x, e.y, '#ffffff', 2, Math.PI / 2, 0.6);
+        this.fx.flashBlob(e.x, e.y, 34, 0xdbeafe);
+        if (this.sim.frame % 10 === 0) this.fx.ring(e.x, e.y, '#93c5fd', 26);
+        audio.sfx('laserHit');
+        break;
+      }
       case 'gameover': case 'gameclear': this.finishRun(e.t === 'gameover' ? 'GAMEOVER' : 'GAMECLEAR'); break;
     }
   }
@@ -475,8 +552,10 @@ export class GameScene extends Phaser.Scene {
     this.sync('gems', this.layers.gems, s.gems, () => 'gem', (img, g) => img.setPosition(g.x, g.y + Math.sin((s.frame + g.x) * 0.1) * 1.5).setDisplaySize(17, 17));
     this.sync('enemies', this.layers.enemies, s.enemies, e => (e.type === 'sniper' ? 'enemy_warship' : `enemy_${e.type}`), (img, e) => {
       // 전용 스프라이트: 정찰기/지그재그/돌진형은 위를 향하는 그림이라 180° 돌려 아래를 보게 하고, 저격형(워쉽)은 그대로
-      const w = e.type === 'sniper' ? 64 : e.type === 'scout' ? 46 : e.type === 'zigzag' ? 50 : 40;
-      img.setPosition(e.x, e.y).setDisplaySize(w, (w * img.frame.height) / img.frame.width).setRotation(e.type === 'sniper' ? 0 : Math.PI);
+      const w = ENEMY_W[e.type] ?? 40;
+      const rot = e.type === 'sniper' ? 0 : e.type === 'mine' ? e.age * 0.04 : e.type === 'rock' ? e.age * 0.012 : e.type === 'drone' || e.type === 'turret' ? 0 : Math.PI;   // 비행기류는 180° 회전
+      const heading = e.side ? Math.atan2(0.15, e.vx ?? 1) + Math.PI / 2 : rot;   // 옆에서 오는 적은 진행 방향을 바라본다 (위를 향한 그림 기준)
+      img.setPosition(e.x, e.y).setDisplaySize(w, (w * img.frame.height) / img.frame.width).setRotation(e.side && (e.type === 'scout' || e.type === 'zigzag') ? heading : rot);
       if (e.flash && e.flash > 0) img.setTintFill(0xffffff); else img.clearTint();   // 피격 순간 하얗게 번쩍
     });
     this.sync('pbullets', this.layers.pbullets, s.bullets, () => 'pbullet', (img, b) => img.setPosition(b.x, b.y));
@@ -485,7 +564,7 @@ export class GameScene extends Phaser.Scene {
 
     const p = s.player;
     this.playerImg.setPosition(p.x, p.y).setAlpha(p.invincible > 0 && Math.floor(s.frame / 4) % 2 === 0 ? 0.4 : 1);
-    this.muzzleImgs.forEach((m, i) => m.setVisible(this.muzzle > 0).setPosition(p.x + (i ? 18 : -18), p.y - 30));
+    this.muzzleImgs.forEach((m, i) => m.setVisible(this.muzzle > 0).setPosition(p.x + (i ? 14 : -14), p.y - 24));
     this.sync('drones', this.layers.player, s.dronePositions(), () => 'drone', (img, d) => img.setPosition(d.x, d.y).setDisplaySize(26, 26));
     this.renderPlayerAuras();
     this.renderWeaponFx();
@@ -510,6 +589,13 @@ export class GameScene extends Phaser.Scene {
         g.fillStyle(prism ? 0xe879f9 : rail ? 0x38bdf8 : 0x3b82f6, 0.35); g.fillRect(bx - w / 2 - 3, 0, w + 6, p.y - 24);
         g.fillStyle(prism ? 0xf5d0fe : rail ? 0xe0f2fe : 0x93c5fd, 0.8); g.fillRect(bx - w / 2, 0, w, p.y - 24);
         g.fillStyle(0xffffff, 0.95); g.fillRect(bx - w * 0.18, 0, w * 0.36, p.y - 24);
+        for (let i = 0; i < 4; i++) { const yy = p.y - 24 - ((s.frame * 26 + i * 170) % (p.y - 24)); g.fillStyle(0xffffff, 0.6); g.fillRect(bx - w * 0.3, yy, w * 0.6, 14); }   // 위로 흐르는 에너지 띠
+        g.fillStyle(0xffffff, 0.7); g.fillCircle(bx, p.y - 26, w * 0.7 + Math.sin(s.frame * 0.8) * 2);   // 총구 광구
+      }
+      for (const h of s.laser.hits) {   // 착탄 지점: 크게 번쩍이는 광구와 가로 섬광
+        const k = Math.max(0, 1 - (s.frame - h.f) / 8);
+        g.fillStyle(0xffffff, 0.75 * k); g.fillCircle(h.x, h.y, w * 0.9 * (0.6 + k * 0.6));
+        g.fillStyle(0x93c5fd, 0.45 * k); g.fillEllipse(h.x, h.y, w * 3.2, 14 * k + 4);
       }
     }
     if (s.bombT > 0) {   // 폭탄 폭발장: 퍼져 나가는 원
@@ -612,12 +698,13 @@ export class GameScene extends Phaser.Scene {
     if (!m) { this.midImg.setVisible(false); return; }
     const frame = this.sim.frame;
     const jit = m.dying && !this.paused;
-    const cx = m.x + (jit ? (Math.random() - 0.5) * 6 : 0), cy = m.y + (jit ? (Math.random() - 0.5) * 5 : 0);
+    const cx = m.x + (jit ? (Math.random() - 0.5) * 6 : 0), cy = m.y + (jit ? (Math.random() - 0.5) * 5 : 0) - this.midKick * 0.8;
     const mkey = `midboss_${m.tier}`, mfr = this.textures.get(mkey).getSourceImage() as HTMLImageElement;
     const mw = m.width * 1.25;   // 중간보스: 스테이지별 전용 기체 (위를 향하는 그림이라 180° 회전)
     this.midImg.setTexture(mkey).setVisible(true).setPosition(cx, cy + Math.sin(frame * 0.1) * 2).setRotation(Math.PI)
       .setDisplaySize(mw, (mw * mfr.height) / mfr.width)
       .setAlpha(m.dying && Math.floor(frame / 3) % 2 === 0 ? 0.6 : 1).setTint(m.state === 'CHARGE' && Math.floor(frame / 4) % 2 === 0 ? 0xffb4b4 : 0xffffff);
+    if (this.midFlash > 0 && !m.dying) this.midImg.setTintFill(0xffffff);
     if (m.dying) return;
 
     // 체력 바 (머리 위)
@@ -659,6 +746,12 @@ export class GameScene extends Phaser.Scene {
   /** 보스 특수 공격 연출: 레이저(빔 1~3줄기) / 돌진(예고 레인 + 잔상) */
   private renderBossSpecial(b: NonNullable<typeof this.sim.boss>, g: Phaser.GameObjects.Graphics): void {
     const sp = b.sp!, frame = this.sim.frame;
+    if (sp.kind === 'swarm') {   // 대군 소환: 보스 주위로 붉은 링이 모여든다
+      const k = sp.t / 60;
+      g.lineStyle(3, 0xfbbf24, 0.4 + 0.5 * k); g.strokeCircle(b.x, b.y, b.width * (1.1 - 0.4 * k) + 10);
+      g.fillStyle(0xef4444, 0.1 + 0.15 * k); g.fillCircle(b.x, b.y, b.width / 2 + 8 * k);
+      return;
+    }
     if (sp.kind === 'laser') {
       const ny = b.y + b.height * 0.55;
       for (const off of sp.beams) {
@@ -707,7 +800,8 @@ export class GameScene extends Phaser.Scene {
     const jit = b.dying && !this.paused;
     const jx = jit ? (Math.random() - 0.5) * 8 : 0, jy = jit ? (Math.random() - 0.5) * 6 : 0;
     const alpha = b.dying && Math.floor(frame / 3) % 2 === 0 ? 0.6 : 1;
-    const cx = b.x + jx, cy = b.y + jy;
+    const kick = this.bossKick;
+    const cx = b.x + jx, cy = b.y + jy - kick * 0.8;   // 피격 시 위로 살짝 밀림
     const col = (c: string) => Phaser.Display.Color.HexStringToColor(c).color;
     const main = col(b.phase2 ? '#f43f5e' : b.subColor);
 
@@ -751,8 +845,9 @@ export class GameScene extends Phaser.Scene {
     const scale = Math.min(b.width / clean.width, b.height / clean.height);
     const outlined = this.textures.get(key).getSourceImage() as HTMLImageElement;
     this.bossImg.setTexture(key).setVisible(true).setPosition(cx, cy).setRotation(Math.PI).setAlpha(alpha)
-      .setDisplaySize(outlined.width * scale, outlined.height * scale);
-    if ((b.stun ?? 0) > 0 && !b.dying) this.bossImg.setTint(Math.floor(frame / 4) % 2 === 0 ? 0xfff3a0 : 0xffffff); else this.bossImg.clearTint();
+      .setDisplaySize(outlined.width * scale * (1 + 0.012 * kick), outlined.height * scale * (1 - 0.012 * kick));   // 찌그러졌다 복원되는 탄성
+    if (this.bossFlash > 0 && !b.dying) this.bossImg.setTintFill(0xffffff);   // 단색 흰 실루엣 점멸
+    else if ((b.stun ?? 0) > 0 && !b.dying) this.bossImg.setTint(Math.floor(frame / 4) % 2 === 0 ? 0xfff3a0 : 0xffffff); else this.bossImg.clearTint();
   }
 }
 

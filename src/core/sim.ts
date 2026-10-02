@@ -4,7 +4,7 @@ import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config'
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
   FIGHT_FRAMES, HAZARD, HAZARDS, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
-  fireBossPattern, rankFor, BOSS_HP_MULT, BOSS_SP, HYPER, BOSS_SPECIALS,
+  fireBossPattern, rankFor, BOSS_HP_MULT, BOSS_SP, HYPER, HORDE, HORDES, SIDE_ENTRY_CHANCE, type HordeKind, BOSS_SPECIALS,
 } from './data';
 import { NO_META, pilotOf, type MetaParams } from './meta';
 import { createRng, type Rng } from './rng';
@@ -54,7 +54,7 @@ export class Sim {
 
   // 폭탄 폭발장 / 레이저 상태 (렌더링이 읽는다)
   bombT = 0; bombX = 0; bombY = 0;
-  laser = { on: false, x: 0, w: 0, offs: [0] as number[] };   // offs: 빔 가로 위치 오프셋(프리즘 융합 시 3줄기)
+  laser = { on: false, x: 0, w: 0, offs: [0] as number[], hits: [] as { x: number; y: number; f: number }[] };   // hits: 최근 빔 착탄 지점(연출)   // offs: 빔 가로 위치 오프셋(프리즘 융합 시 3줄기)
 
   combo = 0;
   comboTimer = 0;
@@ -79,6 +79,9 @@ export class Sim {
   enemies: Enemy[] = [];
   items: Item[] = [];
   hazards: Hazard[] = [];
+  hordeWarn = 0;                       // 인해전술 예고 남은 프레임 (HUD 경고 표시)
+  private hordeKind: HordeKind = 'wall';
+  private hordeDone: boolean[] = [];
   run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0, hypers: 0 };
   hyper = { gauge: 0, t: 0 };     // 하이퍼 모드: gauge 0~100 충전, t>0이면 발동 중(남은 프레임)   // 업적용 한 판 통계
   windDir = 0; windWarn = 0; windT = 0;     // 바람: 예고(windWarn) 후 windT 동안 windDir 방향으로 분다
@@ -236,6 +239,7 @@ export class Sim {
     if (this.boss) this.updateBoss();
     if (this.midBoss) this.updateMidBoss();
     this.updateEnemyBullets();
+    this.updateHorde();
     this.updateEnemies();
     this.updateItems();
     this.updateGems();
@@ -398,6 +402,7 @@ export class Sim {
 
     // 레이저: 사격 중 전방 관통 빔 (5프레임마다 피해)
     this.laser.on = false;
+    if (this.laser.hits.length && this.frame - this.laser.hits[0].f > 8) this.laser.hits.length = 0;
     if (st.laser > 0 && wantFire) {
       const offs = st.prism ? [-38, 0, 38] : [0];
       const w = (10 + 3 * st.laser) * (st.railgun ? 2.2 : 1) * (st.prism ? 0.8 : 1);
@@ -408,13 +413,14 @@ export class Sim {
 
   private laserTick(w: number, dmg: number, off = 0): void {
     const p = this.player, lx = p.x + off;
+    const hit = (x: number, y: number) => { this.laser.hits.push({ x, y, f: this.frame }); this.emit({ t: 'laserHit', x, y }); };
     for (const e of this.enemies) {
-      if (e.y < p.y && e.y >= ON_SCREEN_Y && Math.abs(e.x - lx) < w / 2 + ENEMY_DEFS[e.type].hitR * 0.6) this.damageEnemy(e, dmg);
+      if (e.y < p.y && e.y >= ON_SCREEN_Y && Math.abs(e.x - lx) < w / 2 + ENEMY_DEFS[e.type].hitR * 0.6) { this.damageEnemy(e, dmg); e.flash = 3; e.lastHit = 'bullet'; hit(lx, e.y + 8); }
     }
     const b = this.boss;
-    if (b && !b.dying && b.y > 20 && b.y < p.y && Math.abs(b.x - lx) < w / 2 + b.width / 2) { this.damageBoss(dmg); this.emit({ t: 'hitspark', x: lx, y: b.y + b.height / 2 }); }
+    if (b && !b.dying && b.y > 20 && b.y < p.y && Math.abs(b.x - lx) < w / 2 + b.width / 2) { const hy = b.y + b.height * 0.42; this.damageBoss(dmg, 'laser', lx, hy); hit(lx, hy); }
     const m = this.midBoss;
-    if (m && !m.dying && m.y > 20 && m.y < p.y && Math.abs(m.x - lx) < w / 2 + m.width / 2) { this.damageMid(dmg); this.emit({ t: 'hitspark', x: lx, y: m.y + m.height / 2 }); }
+    if (m && !m.dying && m.y > 20 && m.y < p.y && Math.abs(m.x - lx) < w / 2 + m.width / 2) { const hy = m.y + m.height * 0.42; this.damageMid(dmg, 'laser', lx, hy); hit(lx, hy); }
   }
 
   // ---- 피해 처리 공통 (흡혈 포함) ----
@@ -425,8 +431,22 @@ export class Sim {
     p.energy = Math.min(cap, p.energy + dmg * LIFESTEAL_RATE);
   }
   private damageEnemy(e: Enemy, dmg: number): void { e.hp -= dmg; this.lifesteal(dmg); }
-  private damageBoss(dmg: number): void { const b = this.boss!; if ((b.stun ?? 0) > 0) dmg *= BOSS_SP.stunDmg; b.hp -= dmg; this.lifesteal(dmg); }
-  private damageMid(dmg: number): void { this.midBoss!.hp -= dmg; this.lifesteal(dmg); }
+  private damageBoss(dmg: number, src: 'bullet' | 'missile' | 'laser' | 'other' = 'other', x?: number, y?: number): void {
+    const b = this.boss!; if ((b.stun ?? 0) > 0) dmg *= BOSS_SP.stunDmg;
+    b.hp -= dmg; this.lifesteal(dmg);
+    this.emit({ t: 'bossHit', target: 'boss', src, x: x ?? b.x, y: y ?? b.y, dmg });
+    this.checkBreak(b, 'boss');
+  }
+  private damageMid(dmg: number, src: 'bullet' | 'missile' | 'laser' | 'other' = 'other', x?: number, y?: number): void {
+    const m = this.midBoss!; m.hp -= dmg; this.lifesteal(dmg);
+    this.emit({ t: 'bossHit', target: 'mid', src, x: x ?? m.x, y: y ?? m.y, dmg });
+    this.checkBreak(m, 'mid');
+  }
+  /** 체력이 70/40/10% 아래로 내려가는 순간 외피 파손 연출 이벤트 */
+  private checkBreak(b: { hp: number; maxHp: number; x: number; y: number; brk?: number }, target: 'boss' | 'mid'): void {
+    const f = b.hp / b.maxHp, stage = f <= 0 ? 0 : f < 0.1 ? 3 : f < 0.4 ? 2 : f < 0.7 ? 1 : 0;
+    if (stage > (b.brk ?? 0)) { b.brk = stage; this.emit({ t: 'bossBreak', target, stage, x: b.x, y: b.y }); }
+  }
 
   private steer(b: Bullet, turnMax: number): void {
     const sp = Math.hypot(b.vx, b.vy) || 13, cur = Math.atan2(b.vy, b.vx);
@@ -540,7 +560,7 @@ export class Sim {
 
   private beginNextStage(): void {
     this.bossTier++;
-    this.stageFrames = 0;
+    this.stageFrames = 0; this.hordeDone = []; this.hordeWarn = 0;
     this.stagePhase = 'INTRO'; this.phaseTimer = PHASE_FRAMES.INTRO;
     this.midDone = false; this.stageHits = 0; this.stageRank = null;
     for (const c of [this.comp.cat, this.comp.dog]) { c.used = false; c.pity = 0; }   // 동료는 스테이지마다 다시 사용 가능
@@ -564,7 +584,7 @@ export class Sim {
     const p = this.player;
 
     if (!b.dying && !b.phase2 && b.hp <= b.maxHp * 0.5) {
-      b.phase2 = true; b.phase2Alert = 80;
+      b.phase2 = true; b.phase2Alert = 80; this.emit({ t: 'slowmo', ms: 450, scale: 0.3 });
       b.shotCdMax = Math.max(16, Math.round(b.shotCdMax * 0.74));   // 공격 주기 26% 가속
       b.vx = (b.vx > 0 ? 1 : -1) * Math.abs(b.vx) * 1.3;            // 이동 속도 30% 증속
       this.emit({ t: 'sfx', name: 'enrage' });
@@ -574,7 +594,7 @@ export class Sim {
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ef4444', max: 120 });
     }
     if (!b.dying && b.tier === 5 && b.phase2 && !b.phase3 && b.hp <= b.maxHp * 0.2) {   // 최종 보스 3페이즈
-      b.phase3 = true; b.phase3Alert = 100;
+      b.phase3 = true; b.phase3Alert = 100; this.emit({ t: 'slowmo', ms: 500, scale: 0.28 });
       b.shotCdMax = Math.max(14, Math.round(b.shotCdMax * 0.8));
       b.vx = (b.vx > 0 ? 1 : -1) * Math.abs(b.vx) * 1.2;
       this.enemyBullets.length = 0;                                  // 페이즈 전환 순간에는 탄을 지워 준다
@@ -619,7 +639,7 @@ export class Sim {
         const bl = this.bullets[j];
         if (bl.hits?.includes(b)) continue;
         if (Math.hypot(bl.x - b.x, bl.y - b.y) < b.width / 2) {
-          this.damageBoss(bl.dmg);
+          this.damageBoss(bl.dmg, 'bullet', bl.x, bl.y);
           this.boom(bl.x, bl.y, '#f59e0b', 3);
           this.emit({ t: 'hitspark', x: bl.x, y: bl.y });
           if (bl.pierce > 0) { (bl.hits ??= []).push(b); bl.pierce--; } else this.bullets.splice(j, 1);
@@ -628,7 +648,7 @@ export class Sim {
       for (let m = this.missiles.length - 1; m >= 0; m--) {
         const ms = this.missiles[m];
         if (Math.hypot(ms.x - b.x, ms.y - b.y) < b.width / 2) {
-          this.missiles.splice(m, 1); this.damageBoss(ms.dmg);
+          this.missiles.splice(m, 1); this.damageBoss(ms.dmg, 'missile', ms.x, ms.y);
           this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 10); this.emit({ t: 'missileHit', x: ms.x, y: ms.y, kill: false });
         }
       }
@@ -646,6 +666,7 @@ export class Sim {
       // 「자매의 손바닥」: 3번째 보스를 목숨 2개 이상 유지한 채 처치하면 게이지가 가득 찬다
       if (b.tier === 3 && this.loopCount === 0 && this.lives >= 2 && this.ult.gauge < 100) { this.ult.gauge = 100; this.emit({ t: 'sfx', name: 'heal' }); }
       this.emit({ t: 'sfx', name: 'boom' }); this.boom(b.x, b.y, b.subColor, 30);
+      this.emit({ t: 'slowmo', ms: 800, scale: 0.25 });
       this.emit({ t: 'shake', v: 14 }); this.emit({ t: 'hitstop', frames: 8 }); this.emit({ t: 'vibrate', pattern: [100, 50, 220] });
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ffffff', max: 160 });
       this.emit({ t: 'ring', x: b.x, y: b.y, color: b.subColor, max: 110 });
@@ -673,13 +694,19 @@ export class Sim {
   private updateBossSpecial(b: Boss): void {
     const sp = b.sp!, p = this.player;
     const cdIdx = b.phase3 ? 2 : b.phase2 ? 1 : 0;
-    const finish = () => {
+    const finish = (stun = true) => {
       b.sp = undefined; b.spCd = Math.round(BOSS_SP.cd[cdIdx] * (1 - 0.05 * this.loopCount)); b.shootCooldown = 0;
+      if (!stun) return;
       b.stun = Math.round(BOSS_SP.stun * (b.phase3 ? 0.8 : 1));   // 약점 노출
       this.enemyBullets.length = 0;
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#fde047', max: 130 }); this.emit({ t: 'sfx', name: 'item' });
     };
     sp.t++;
+    if (sp.kind === 'swarm') {   // 대군 소환: 보스가 힘을 모으고(1초) 벌떼를 쏟아낸다 (약점 노출 없음 — 벌떼가 곧 압박)
+      if (sp.t % 12 === 1) this.emit({ t: 'ring', x: b.x, y: b.y, color: b.subColor, max: 100 });
+      if (sp.t >= 60) { this.spawnHorde(b.phase2 ? 'pincer' : 'wall', b.y + 50); finish(false); }
+      return;
+    }
     if (sp.kind === 'laser') {
       if (sp.state === 'WARN') {
         b.x += Math.max(-6, Math.min(6, (sp.lockX - b.x) * 0.07));   // 조준 위치로 미끄러지며 예고선이 보스 앞에서 곧게 내려온다
@@ -771,13 +798,13 @@ export class Sim {
       const bl = this.bullets[j];
       if (bl.hits?.includes(m)) continue;
       if (Math.hypot(bl.x - m.x, bl.y - m.y) < m.width / 2) {
-        this.damageMid(bl.dmg); this.boom(bl.x, bl.y, '#f59e0b', 2); this.emit({ t: 'hitspark', x: bl.x, y: bl.y });
+        this.damageMid(bl.dmg, 'bullet', bl.x, bl.y); this.boom(bl.x, bl.y, '#f59e0b', 2); this.emit({ t: 'hitspark', x: bl.x, y: bl.y });
         if (bl.pierce > 0) { (bl.hits ??= []).push(m); bl.pierce--; } else this.bullets.splice(j, 1);
       }
     }
     for (let k = this.missiles.length - 1; k >= 0; k--) {
       const ms = this.missiles[k];
-      if (Math.hypot(ms.x - m.x, ms.y - m.y) < m.width / 2) { this.missiles.splice(k, 1); this.damageMid(ms.dmg); this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 8); this.emit({ t: 'missileHit', x: ms.x, y: ms.y, kill: false }); }
+      if (Math.hypot(ms.x - m.x, ms.y - m.y) < m.width / 2) { this.missiles.splice(k, 1); this.damageMid(ms.dmg, 'missile', ms.x, ms.y); this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 8); this.emit({ t: 'missileHit', x: ms.x, y: ms.y, kill: false }); }
     }
     if (Math.hypot(p.x - m.x, p.y - m.y) < m.width / 2 + 10) this.applyDamage(40);
 
@@ -912,9 +939,52 @@ export class Sim {
     const x = this.rng() * (W - 70) + 45;
     const speed = type === 'scout' ? 3.2 + this.rng() * 1.5
       : type === 'zigzag' ? 2.4 + this.rng() * 0.6
-      : type === 'kamikaze' ? 4.2 + this.rng() * 1.0 : 2.6;
+      : type === 'kamikaze' ? 4.2 + this.rng() * 1.0
+      : type === 'mine' ? 1.3 + this.rng() * 0.4 : type === 'turret' ? 1.7 : type === 'rock' ? 1.6 + this.rng() * 0.5 : type === 'drone' ? HORDE.speed : 2.6;
     const hp = Math.max(1, Math.round(def.hp * enemyHpScale(this.bossTier) * this.meta.mut.enemyHp));
+    if ((type === 'scout' || type === 'zigzag') && this.stageTier >= 2 && this.rng() < SIDE_ENTRY_CHANCE) {   // 옆에서 날아 들어온다
+      const dir = this.rng() < 0.5 ? 1 : -1, y = 70 + this.rng() * 230;
+      this.enemies.push({ type, x: dir > 0 ? -34 : W + 34, y, hp, maxHp: hp, speed: 0, baseX: y, age: 0, fireCd: 40 + this.rng() * 50, hold: 0, vx: dir * (2.8 + this.rng() * 1.2) * this.meta.mut.enemySpeed, side: true });
+      return;
+    }
     this.enemies.push({ type, x, y: -30, hp, maxHp: hp, speed: speed * this.meta.mut.enemySpeed, baseX: x, age: 0, fireCd: 50 + this.rng() * 60, hold: 0 });
+  }
+
+  /** 인해전술: 화면을 가득 채운 벌떼 드론이 한 번에 내려온다 (wall=빈 틈 1곳, diag=대각선 장벽, pincer=양옆에서 조여 옴) */
+  private spawnHorde(kind: HordeKind, y0 = -20): void {
+    const hp = Math.max(1, Math.round(enemyHpScale(this.bossTier) * this.meta.mut.enemyHp)), sp = HORDE.speed * this.meta.mut.enemySpeed;
+    const add = (x: number, y: number, vx = 0, side = false) => this.enemies.push({ type: 'drone', x, y, hp, maxHp: hp, speed: side ? 0 : sp, baseX: side ? y : x, age: 0, fireCd: 0, hold: 0, vx, side });
+    if (kind === 'wall') {
+      const cols = 11, gap = Math.floor(this.rng() * (cols - 2));   // 빈 틈(3칸)으로 빠져나가거나 뚫는다
+      for (let r = 0; r < 3; r++) for (let c = 0; c < cols; c++) if (c < gap || c > gap + 2) add(30 + (c * (W - 60)) / (cols - 1), y0 - r * 38);
+    } else if (kind === 'diag') {
+      const dir = this.rng() < 0.5 ? 1 : -1;
+      for (let i = 0; i < 15; i++) { const x = dir > 0 ? 25 + i * 28 : W - 25 - i * 28; add(x, y0 - i * 24); add(x + dir * 14, y0 - i * 24 - 12); }
+    } else if (kind === 'flank') {   // 횡대: 왼쪽·오른쪽에서 줄지어 가로로 휩쓸고 지나간다 (높이를 번갈아 틈을 만든다)
+      for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) {
+        const fromLeft = r % 2 === 0, y = 90 + r * 62 + (y0 > 0 ? y0 - 70 : 0);
+        add(fromLeft ? -20 - c * 34 : W + 20 + c * 34, y, fromLeft ? HORDE.speed + 0.9 : -(HORDE.speed + 0.9), true);
+      }
+    } else {
+      for (let r = 0; r < 9; r++) { add(30, y0 - r * 38, 0.9); add(W - 30, y0 - r * 38, -0.9); if (r % 3 === 1) add(W / 2 + (r % 2 ? 40 : -40), y0 - r * 38); }
+    }
+    this.emit({ t: 'sfx', name: 'enrage' });
+  }
+
+  /** 스테이지 진행도에 맞춰 인해전술을 예고하고 발동한다 */
+  private updateHorde(): void {
+    if (this.timeStopped) return;
+    if (this.stagePhase !== 'FIGHT' || this.boss || this.midBoss) { this.hordeWarn = 0; return; }
+    if (this.hordeWarn > 0) { if (--this.hordeWarn === 0) this.spawnHorde(this.hordeKind); return; }
+    const list = HORDES[this.stageTier];
+    if (!list) return;
+    const dur = FIGHT_FRAMES[this.stageTier];
+    list.forEach((h, i) => {
+      if (!this.hordeDone[i] && this.stageFrames >= dur * h.at && this.stageFrames < dur * h.at + 400) {
+        this.hordeDone[i] = true; this.hordeKind = h.kind; this.hordeWarn = HORDE.warn;
+        this.emit({ t: 'sfx', name: 'laserCharge' });
+      }
+    });
   }
 
   private aimedShot(e: Enemy, spd: number, color: string, r: number, spread = 0): void {
@@ -927,6 +997,13 @@ export class Sim {
     const p = this.player;
     e.age++;
     if (e.flash && e.flash > 0) e.flash--;
+    if (e.side) {   // 측면 비행: 가로로 지나가며(지그재그는 위아래로 출렁임) 화면 안에서만 사격
+      e.x += e.vx ?? 0;
+      e.y = e.baseX + (e.type === 'zigzag' ? Math.sin(e.age * 0.07) * 46 : e.age * 0.25);
+      if (e.type === 'zigzag' && --e.fireCd <= 0 && e.x > 30 && e.x < W - 30) { this.aimedShot(e, 2.6, '#fb923c', 4); e.fireCd = 80 + this.rng() * 30; }
+      else if (e.type === 'scout' && e.x > 30 && e.x < W - 30 && this.rng() < 0.012) this.enemyBullets.push({ x: e.x, y: e.y + 10, vx: 0, vy: 2.4, color: '#f43f5e', r: 4 });
+      return;
+    }
     switch (e.type) {
       case 'scout':
         e.y += e.speed;
@@ -940,6 +1017,19 @@ export class Sim {
       case 'kamikaze':
         e.y += e.speed;
         if (e.y < p.y - 40) e.x += Math.max(-3.2, Math.min(3.2, (p.x - e.x) * 0.035));
+        break;
+      case 'drone':
+        e.y += e.speed; e.x += e.vx ?? 0;
+        break;
+      case 'mine':
+        e.y += e.speed; e.x = Math.max(30, Math.min(W - 30, e.baseX + Math.sin(e.age * 0.03) * 36));
+        break;
+      case 'turret':
+        e.y += e.speed;   // 지상 포대: 배경과 같은 속도로 스크롤
+        if (--e.fireCd <= 0 && e.y > 30 && e.y < H * 0.6) { for (const o of [-0.28, 0, 0.28]) this.aimedShot(e, 2.5, '#facc15', 4, o); e.fireCd = 120 + this.rng() * 40; }
+        break;
+      case 'rock':
+        e.y += e.speed; e.x += Math.sin(e.age * 0.02) * 0.4;
         break;
       case 'sniper':
         if (e.y < 150 && e.hold === 0) e.y += e.speed;
@@ -963,7 +1053,7 @@ export class Sim {
       const e = this.enemies[i];
       const def = ENEMY_DEFS[e.type];
       if (!this.timeStopped) this.moveEnemy(e);
-      const vulnerable = e.y >= ON_SCREEN_Y;   // 화면에 들어오기 전에는 무적
+      const vulnerable = e.y >= ON_SCREEN_Y && e.x > -4 && e.x < W + 4;   // 화면에 들어오기 전에는 무적
 
       for (let j = this.bullets.length - 1; vulnerable && j >= 0; j--) {
         const b = this.bullets[j];
@@ -996,19 +1086,28 @@ export class Sim {
           this.emit({ t: 'ring', x: e.x, y: e.y, color: '#fb923c', max: 70 });
           for (const o of this.enemies) if (o !== e && o.hp > 0 && Math.hypot(o.x - e.x, o.y - e.y) < 70) { o.hp -= 6; o.flash = 6; }
         }
-        this.lifesteal(MOB_HIT_VALUE);
-        this.ult.gauge = Math.min(100, this.ult.gauge + def.xp * ULT.gaugePerXp);
-        this.spawnGems(e.x, e.y, def.xp, Math.max(1, Math.round(def.xp / 4)));
-        this.dropItem(e.x, e.y);
+        if (e.type !== 'drone') {   // 벌떼는 수가 많으므로 경험치·궁극기 게이지·흡혈 보상은 없다 (점수만)
+          this.lifesteal(MOB_HIT_VALUE);
+          this.ult.gauge = Math.min(100, this.ult.gauge + def.xp * ULT.gaugePerXp);
+          this.spawnGems(e.x, e.y, def.xp, Math.max(1, Math.round(def.xp / 4)));
+        }
+        if (e.type !== 'drone') this.dropItem(e.x, e.y);   // 벌떼는 아이템을 떨구지 않는다
+        if (e.type === 'mine') {   // 기뢰: 터지면서 탄 고리를 뿌린다 (미사일 폭발에 휩쓸릴 때 조심)
+          for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2 + 0.2; this.enemyBullets.push({ x: e.x, y: e.y, vx: Math.sin(a) * 2.8, vy: Math.cos(a) * 2.8, color: '#facc15', r: 4 }); }
+          this.emit({ t: 'ring', x: e.x, y: e.y, color: '#facc15', max: 90 });
+        }
+        if (e.type === 'rock') {   // 운석 괴수: 둘로 쪼개져 드론이 튀어나온다
+          for (const dx of [-1, 1]) this.enemies.push({ type: 'drone', x: e.x + dx * 14, y: e.y, hp: 1, maxHp: 1, speed: 2.4, baseX: e.x, age: 0, fireCd: 0, hold: 0, vx: dx * 1.2 });
+        }
         this.enemies.splice(i, 1);
         continue;
       }
       if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + def.bodyR) {
         this.enemies.splice(i, 1);
-        this.applyDamage(e.type === 'kamikaze' ? 45 : 35);
+        this.applyDamage(e.type === 'kamikaze' ? 45 : e.type === 'drone' ? HORDE.contactDmg : 35);
         continue;
       }
-      if (e.y > H + 30) this.enemies.splice(i, 1);
+      if (e.y > H + 30 || (e.side && e.age > 30 && (e.x < -60 || e.x > W + 60))) this.enemies.splice(i, 1);
     }
   }
 

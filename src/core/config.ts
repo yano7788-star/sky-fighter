@@ -8,7 +8,7 @@ export const STEP_MS = 1000 / 60;   // 고정 타임스텝 (게임 로직은 항
 export const PHASE_FRAMES = { WARNING: 130, BOSS_DYING: 80, CLEAR: 120, INTRO: 150 } as const;
 
 export const PLAYER = {
-  radius: 22,
+  radius: 21,   // 피격 판정(스프라이트보다 훨씬 작게 — 탄막 슈팅의 관행)
   maxEnergy: 100,
   startLives: 2,
   startBombs: 1,

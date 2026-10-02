@@ -137,8 +137,8 @@ describe('시뮬레이션', () => {
   });
 });
 
-describe('적 4종', () => {
-  it('1스테이지는 정찰기만, 5스테이지는 4종이 모두 등장한다', () => {
+describe('적 종류', () => {
+  it('1스테이지는 정찰기만, 5스테이지는 비행기 4종과 비행기가 아닌 적들이 등장한다', () => {
     const seen = (tier: number) => {
       const s = new Sim(3); s.startAtTier(tier); s.stagePhase = 'FIGHT'; s.stageFrames = -1e9;
       const types = new Set<string>();
@@ -146,7 +146,7 @@ describe('적 4종', () => {
       return types;
     };
     expect([...seen(1)]).toEqual(['scout']);
-    expect(seen(5).size).toBe(4);
+    const t5 = seen(5); for (const k of ['scout', 'zigzag', 'kamikaze', 'sniper']) expect(t5.has(k)).toBe(true); expect(t5.size).toBeGreaterThanOrEqual(6);   // 비행기 4종 + 기뢰·포대·운석 괴수(+쪼개진 드론)
   });
 
   it('지그재그는 체력 2: 한 발로는 안 죽는다', () => {
