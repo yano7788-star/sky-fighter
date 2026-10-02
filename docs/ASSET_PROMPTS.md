@@ -114,6 +114,41 @@ Seamlessly loopable 90-second chiptune-meets-synthwave shoot-em-up stage theme, 
 
 ---
 
-## 5. 전달 방법
+## 5. 추가로 있으면 좋은 이미지 (Phase 2 콘텐츠용, 우선순위순)
+
+| 우선 | 파일명 | 용도 | 비고 |
+|---|---|---|---|
+| ★★★ | `enemy_scout/zigzag/kamikaze/sniper.png` | 적 4종 (§2-2) | 지금은 빨간 삼각형 하나뿐이라 가장 체감이 큼 |
+| ★★★ | `bg1~5.png` 이음새 없는 버전 | 스테이지 배경 (§1) | 현재는 코드로 거울 타일링해서 임시 해결 |
+| ★★☆ | `midboss_2.png`, `midboss_3.png` | 중간보스 2종 | 스테이지 2·3 보스 전에 등장 예정 |
+| ★★☆ | `ally_cat.png`, `ally_dog.png` | 동료(흡혈/보호막) | 예전 Cyber_Strike.html에 base64로 들어 있던 걸 제가 추출해서 쓸 수도 있으니, 새로 만들 거면 같은 화풍으로 |
+| ★★☆ | `item_shield/magnet/life.png` | 신규 아이템 3종 | 256×256, 둥근 네온 뱃지 |
+| ★☆☆ | `ult_cutin.png` (+ `skill1/2.jpg` 기존) | 궁극기 컷인 | 기존 이미지 재사용 가능 |
+| ★☆☆ | `player_skin_2/3.png` | 해금용 기체 스킨 2종 | player.png와 같은 구도·크기 |
+| ★☆☆ | `boss_final_phase3.png` | 5스테이지 3페이즈 폭주 형태 | boss5 변형 |
+| ★☆☆ | `explosion_sheet.png` | 폭발 스프라이트 시트 (8~12프레임, 가로 배열) | 지금은 코드 파티클 — 시트가 있으면 더 화려해짐 |
+| ★☆☆ | `logo.png` | 타이틀 로고 (초록 크로마키) | 시작 화면 상단에 얹을 용도 |
+| ☆ | `bgm_stage2~5.mp3`, `bgm_title.mp3` | 스테이지별 BGM (§4) | 선택 |
+
+### 추가 프롬프트
+**동료 (고양이)** — `ally_cat.png`
+```
+Top-down view game sprite of a small cute cyber-cat drone companion with neon-blue glowing eyes and tiny jet thrusters, chibi proportions, nose pointing up, centered with 10% margin, semi-realistic sci-fi style matching a detailed spaceship game, on a perfectly flat solid pure green (#00FF00) background with no gradient or shadow. Subject contains no green. Keep the bottom-right corner empty. No text, no watermark.
+```
+(`ally_dog.png`: `...armored robot-dog companion with a small energy shield emitter on its back...`)
+
+**신규 아이템 뱃지** — 256×256, 마젠타(#FF00FF) 배경
+```
+A glossy round neon icon badge with a thick metallic rim and a bold simple glyph in the center: [SHIELD: a bubble shield / MAGNET: a horseshoe magnet with blue sparks / LIFE: a glowing red heart], sci-fi game pickup style, on a perfectly flat solid pure magenta (#FF00FF) background, no shadow on the background, centered with 10% margin. Keep the bottom-right corner empty. No text, no watermark.
+```
+
+**폭발 스프라이트 시트** — `explosion_sheet.png`
+```
+A horizontal sprite sheet of a stylized sci-fi explosion animation in exactly 10 frames laid out in a single row, each frame a perfect square of equal size, the explosion growing from a small bright flash to a large fireball then fading into smoke and sparks, orange-yellow-white core with dark smoke edges, on a perfectly flat solid pure green (#00FF00) background, no shadow. No text, no watermark.
+```
+
+---
+
+## 6. 전달 방법
 1. 파일을 `assets-src/incoming/` 에 위 파일명으로 저장 (원본 PNG 그대로, 리사이즈·압축하지 마세요)
 2. "에셋 넣었어"라고 알려 주시면 → 크로마키 제거 / WebP 변환 / 워터마크 정리 / 코드 연결 / 확인까지 제가 처리합니다.
