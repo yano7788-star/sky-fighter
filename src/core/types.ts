@@ -71,7 +71,7 @@ export interface MidBossConfig { hp: number; w: number; h: number; fanCount: num
 
 /** 시뮬레이션이 내보내는 이벤트 — 렌더링/사운드/연출은 이걸 보고 반응한다 (코어는 연출을 모른다) */
 export type SimEvent =
-  | { t: 'sfx'; name: 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' }
+  | { t: 'sfx'; name: 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'laserCharge' | 'laserBeam' }
   | { t: 'explosion'; x: number; y: number; color: string; count: number }
   | { t: 'ring'; x: number; y: number; color: string; max: number }
   | { t: 'shake'; v: number }

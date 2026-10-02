@@ -599,11 +599,11 @@ export class Sim {
           this.enemyBullets.push({ x: m.x, y: m.y + 36, vx: Math.sin(base + o) * c.fanSpeed, vy: Math.cos(base + o) * c.fanSpeed, color: c.color, r: 5 });
         }
       }
-      if (++m.stateTimer > 300) { m.state = 'CHARGE'; m.stateTimer = 0; m.lockX = Math.max(m.width / 2 + 10, Math.min(W - m.width / 2 - 10, p.x)); m.laserX = m.x; }   // 조준 위치는 이 시점의 플레이어 x로 고정
+      if (++m.stateTimer > 300) { m.state = 'CHARGE'; m.stateTimer = 0; this.emit({ t: 'sfx', name: 'laserCharge' }); m.lockX = Math.max(m.width / 2 + 10, Math.min(W - m.width / 2 - 10, p.x)); m.laserX = m.x; }   // 조준 위치는 이 시점의 플레이어 x로 고정
     } else if (m.state === 'CHARGE') {
       // 보스가 조준 위치로 미끄러져 가고, 예고선은 보스 코에서 곧게 내려온다 (1.2초 — 보고 피할 수 있어야 공정)
       m.x += Math.max(-6, Math.min(6, (m.lockX - m.x) * 0.07)); m.laserX = m.x;
-      if (++m.stateTimer >= 70) { m.state = 'FIRE'; m.stateTimer = 0; m.laserX = m.x; this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'shake', v: 8 }); }
+      if (++m.stateTimer >= 70) { m.state = 'FIRE'; m.stateTimer = 0; m.laserX = m.x; this.emit({ t: 'sfx', name: 'laserBeam' }); this.emit({ t: 'shake', v: 8 }); }
     } else {
       m.stateTimer++; m.laserX = m.x;
       if (Math.abs(p.x - m.laserX) < 34 + p.radius * 0.5 && p.y > m.y) this.applyDamage(40);
