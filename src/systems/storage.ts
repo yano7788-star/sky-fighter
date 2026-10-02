@@ -39,3 +39,12 @@ export const saveDaily = (d: DailySave): void => store.set('daily', d);
 // 업적: 달성한 id 목록
 export const loadAch = (): string[] => { const a = store.get<unknown>('ach', []); return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []; };
 export const saveAch = (a: string[]): void => store.set('ach', a);
+
+// 일일 미션 진행 (날짜가 바뀌면 초기화)
+import type { MissionSave } from '../core/missions';
+import { newMissionSave } from '../core/missions';
+export const loadMissions = (key: string): MissionSave => {
+  const m = store.get<Partial<MissionSave>>('missions', {});
+  return m.date === key ? { date: key, progress: m.progress ?? {}, done: m.done ?? [], bonus: !!m.bonus } : newMissionSave(key);
+};
+export const saveMissions = (m: MissionSave): void => store.set('missions', m);

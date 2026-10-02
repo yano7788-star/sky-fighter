@@ -7,6 +7,7 @@ import { dailyMutator, dailySeed, dayKey, offerMutators } from '../src/core/muta
 import type { EnemyBullet } from '../src/core/types';
 import { ACHIEVEMENTS, newlyUnlocked } from '../src/core/achievements';
 import { W } from '../src/core/config';
+import { MISSIONS, MISSION_ALL_BONUS, applyRun, dailyMissions, newMissionSave } from '../src/core/missions';
 import { Sim } from '../src/core/sim';
 import type { Enemy, EnemyType, SimInput } from '../src/core/types';
 
@@ -783,5 +784,39 @@ describe('옆에서 오는 적', () => {
     const d = s.enemies.filter(e => e.type === 'drone'); expect(d.length).toBe(36);
     expect(d.some(e => (e.vx ?? 0) > 0 && e.x < 0)).toBe(true); expect(d.some(e => (e.vx ?? 0) < 0 && e.x > W)).toBe(true);
     const x0 = d[0].x; s.step(idle(s)); expect(s.enemies.find(e => e === d[0])!.x).not.toBe(x0);
+  });
+});
+
+describe('일일 미션', () => {
+  const base = { score: 0, bossTier: 1, cleared: false, endless: false, hypers: 0, kills: 0, maxCombo: 0, graze: 0, hits: 0, bombs: 0, ults: 0, fusions: 0, mutator: null, daily: false };
+  it('날짜가 같으면 같은 미션 3개, 서로 다르다', () => {
+    const a = dailyMissions('2026-10-03'), b = dailyMissions('2026-10-03');
+    expect(a.map(m => m.id)).toEqual(b.map(m => m.id)); expect(new Set(a.map(m => m.id)).size).toBe(3);
+    const days = new Set(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05'].map(d => dailyMissions(d).map(m => m.id).join()));
+    expect(days.size).toBeGreaterThan(1);
+  });
+  it('누적(sum)/최고(max) 진행, 완료 시 한 번만 보상, 전체 완료 보너스', () => {
+    const key = '2026-10-03', list = dailyMissions(key);
+    let save = newMissionSave(key), got = 0;
+    // 모든 값을 충분히 크게 준 한 판
+    const big = { ...base, score: 99999, bossTier: 5, cleared: true, kills: 9999, maxCombo: 99, graze: 999, hypers: 9, ults: 9, fusions: 2 };
+    const r = applyRun(save, key, big, null); save = r.save; got += r.credits;
+    expect(save.done.length).toBe(3); expect(save.bonus).toBe(true);
+    expect(r.credits).toBe(list.reduce((n, m) => n + m.reward, 0) + MISSION_ALL_BONUS);
+    const again = applyRun(save, key, big, null); expect(again.credits).toBe(0); expect(again.completed.length).toBe(0);
+  });
+  it('prev(이미 반영한 기록)을 넘기면 누적 값이 중복으로 더해지지 않는다', () => {
+    const key = '2026-10-03', m = MISSIONS.find(x => x.id === 'graze')!;
+    const s0 = { ...newMissionSave(key), progress: {}, done: [] };
+    const stats = { ...base, graze: 30 };
+    const first = applyRun(s0, key, stats, null);
+    const second = applyRun(first.save, key, { ...stats, graze: 45 }, stats);
+    const used = dailyMissions(key).some(x => x.id === m.id);
+    if (used) expect(second.save.progress.graze).toBe(45);
+  });
+  it('날짜가 바뀌면 진행도가 초기화된다', () => {
+    const s = applyRun(newMissionSave('2026-10-03'), '2026-10-03', { ...base, kills: 50, graze: 50 }, null).save;
+    const next = applyRun(s, '2026-10-04', base, null).save;
+    expect(next.date).toBe('2026-10-04'); expect((next.progress.kills ?? 0) + (next.progress.graze ?? 0)).toBeLessThan(50); expect(next.done.length).toBeLessThan(3);
   });
 });
