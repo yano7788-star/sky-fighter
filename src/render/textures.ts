@@ -19,7 +19,7 @@ export function makeTexture(scene: Phaser.Scene, key: string, w: number, h: numb
   tex.refresh();
 }
 
-const ITEM_COLORS: Record<ItemType, string> = { P: '#10b981', M: '#ec4899', E: '#06b6d4', B: '#ef4444' };
+const ITEM_COLORS: Record<ItemType, string> = { P: '#10b981', M: '#ec4899', E: '#06b6d4', B: '#ef4444', S: '#3b82f6', G: '#a855f7', L: '#f43f5e' };
 
 /** 부트 시 한 번 만드는 공용 텍스처 */
 export function buildStaticTextures(scene: Phaser.Scene): void {
@@ -28,8 +28,24 @@ export function buildStaticTextures(scene: Phaser.Scene): void {
     c.fillStyle = '#f43f5e'; c.fillRect(1.5, 5, 5, 14);
     c.fillStyle = '#fbcfe8'; c.fillRect(2.5, 3, 3, 4);
   });
-  makeTexture(scene, 'enemy', 40, 34, c => {   // 아래를 향하는 적기 (원본의 180° 회전 삼각형)
+  // 적 4종 (아래를 향함). 전용 스프라이트가 준비되면 이 임시 도형을 대체한다 (docs/ASSET_PROMPTS.md)
+  makeTexture(scene, 'enemy_scout', 40, 34, c => {
     c.fillStyle = '#f43f5e'; c.beginPath(); c.moveTo(20, 32); c.lineTo(38, 4); c.lineTo(2, 4); c.closePath(); c.fill();
+  });
+  makeTexture(scene, 'enemy_zigzag', 40, 40, c => {   // 주황 육각 드론
+    c.fillStyle = '#f97316'; c.strokeStyle = '#fed7aa'; c.lineWidth = 2; c.beginPath();
+    for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + (Math.PI / 3) * i; const x = 20 + Math.cos(a) * 17, y = 20 + Math.sin(a) * 17; if (i) c.lineTo(x, y); else c.moveTo(x, y); }
+    c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#fff7ed'; c.beginPath(); c.arc(20, 20, 5, 0, Math.PI * 2); c.fill();
+  });
+  makeTexture(scene, 'enemy_kamikaze', 32, 46, c => {   // 보라색 돌진 미사일 (붉은 코)
+    c.fillStyle = '#7c3aed'; c.beginPath(); c.moveTo(16, 44); c.lineTo(30, 6); c.lineTo(16, 12); c.lineTo(2, 6); c.closePath(); c.fill();
+    c.fillStyle = '#ef4444'; c.beginPath(); c.moveTo(16, 44); c.lineTo(22, 28); c.lineTo(10, 28); c.closePath(); c.fill();
+  });
+  makeTexture(scene, 'enemy_sniper', 46, 52, c => {   // 회청색 저격함 + 긴 포신
+    c.fillStyle = '#475569'; c.beginPath(); c.moveTo(23, 30); c.lineTo(44, 8); c.lineTo(34, 4); c.lineTo(12, 4); c.lineTo(2, 8); c.closePath(); c.fill();
+    c.fillStyle = '#94a3b8'; c.fillRect(20, 20, 6, 30);
+    c.fillStyle = '#38bdf8'; c.beginPath(); c.arc(23, 14, 4, 0, Math.PI * 2); c.fill();
   });
   makeTexture(scene, 'dot', 8, 8, c => { c.fillStyle = '#fff'; c.beginPath(); c.arc(4, 4, 4, 0, Math.PI * 2); c.fill(); });
   makeTexture(scene, 'star', 6, 6, c => { c.fillStyle = '#fff'; c.beginPath(); c.arc(3, 3, 3, 0, Math.PI * 2); c.fill(); });

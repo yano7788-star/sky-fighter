@@ -1,4 +1,4 @@
-import type { Boss, BossConfig, EnemyBullet } from './types';
+import type { Boss, BossConfig, EnemyBullet, EnemyType, MidBossConfig, Rank } from './types';
 
 // 보스 1~5 설정 (HP: 200/380/620/970/1500)
 export const BOSS_CONFIGS: Record<number, BossConfig> = {
@@ -72,4 +72,54 @@ export const BOSS_PATTERNS: Record<number, [PhasePatterns, PhasePatterns]> = {
 
 export function fireBossPattern(b: Boss, c: PatternCtx): void {
   BOSS_PATTERNS[b.tier][b.phase2 ? 1 : 0][b.attackMode](b, c);
+}
+
+// ---------------------------------------------------------------------------
+// 일반 적 4종 — 체력·점수·충돌 크기, 스테이지별 등장 비중
+// ---------------------------------------------------------------------------
+export interface EnemyDef { hp: number; score: number; hitR: number; bodyR: number; }
+export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
+  scout:    { hp: 1, score: 10, hitR: 20, bodyR: 14 },   // 직선 강하 + 가끔 사격
+  zigzag:   { hp: 2, score: 20, hitR: 22, bodyR: 15 },   // 좌우로 흔들리며 내려오고 조준탄을 쏨
+  kamikaze: { hp: 1, score: 15, hitR: 20, bodyR: 14 },   // 플레이어 쪽으로 가속하며 돌진
+  sniper:   { hp: 4, score: 40, hitR: 26, bodyR: 18 },   // 상단에 멈춰서 조준 사격 후 퇴장
+};
+/** 스테이지(1~5)별 등장 가중치 */
+export const ENEMY_WEIGHTS: Record<number, Partial<Record<EnemyType, number>>> = {
+  1: { scout: 100 },
+  2: { scout: 55, zigzag: 30, kamikaze: 15 },
+  3: { scout: 35, zigzag: 25, kamikaze: 20, sniper: 20 },
+  4: { scout: 25, zigzag: 25, kamikaze: 25, sniper: 25 },
+  5: { scout: 20, zigzag: 25, kamikaze: 30, sniper: 25 },
+};
+
+// ---------------------------------------------------------------------------
+// 중간보스 (스테이지 2·3): 메인 보스 전 등장, 부채꼴 사격 + 레이저
+// ---------------------------------------------------------------------------
+export const MID_CONFIGS: Record<number, MidBossConfig> = {
+  2: { hp: 260, w: 100, h: 86, fanCount: 3, fanSpeed: 3.2, color: '#38bdf8' },
+  3: { hp: 420, w: 110, h: 94, fanCount: 5, fanSpeed: 3.0, color: '#facc15' },
+};
+export const MID_BOSS_LEAD_SCORE = 220;   // 메인 보스 등장 점수보다 이만큼 일찍 등장
+
+// ---------------------------------------------------------------------------
+// 아이템 드랍: 한 번의 난수로 기본 4종, 별도 난수로 신규 3종
+// ---------------------------------------------------------------------------
+export const DROP_BASE: [number, 'P' | 'M' | 'E' | 'B'][] = [[0.05, 'P'], [0.09, 'M'], [0.13, 'E'], [0.15, 'B']];   // 누적 확률
+export const DROP_EXTRA: [number, 'S' | 'G' | 'L'][] = [[0.03, 'S'], [0.05, 'G'], [0.058, 'L']];
+
+// ---------------------------------------------------------------------------
+// 콤보 / 랭크
+// ---------------------------------------------------------------------------
+export const COMBO_WINDOW = 120;                       // 이 프레임 안에 다음 처치가 없으면 콤보 종료
+export const comboMultiplier = (combo: number) => Math.min(2.5, 1 + Math.floor(combo / 6) * 0.25);
+export const GRAZE_MARGIN = 16;                         // 탄이 플레이어 판정에서 이만큼 안쪽을 스치면 그레이즈
+export const GRAZE_SCORE = 2;
+
+/** 스테이지 중 피격 횟수로 랭크와 보너스 결정 */
+export function rankFor(hits: number): { rank: Rank; bonus: number } {
+  if (hits === 0) return { rank: 'S', bonus: 500 };
+  if (hits === 1) return { rank: 'A', bonus: 300 };
+  if (hits === 2) return { rank: 'B', bonus: 150 };
+  return { rank: 'C', bonus: 0 };
 }

@@ -1,9 +1,18 @@
 import { FIRST_BOSS_SCORE, H, MAX_TIER, NEXT_BOSS_SCORE_STEP, PHASE_FRAMES, PLAYER, W } from './config';
-import { BOSS_CONFIGS, fireBossPattern } from './data';
+import {
+  BOSS_CONFIGS, COMBO_WINDOW, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE, MID_BOSS_LEAD_SCORE,
+  MID_CONFIGS, comboMultiplier, fireBossPattern, rankFor,
+} from './data';
 import { createRng, type Rng } from './rng';
 import type {
-  Boss, Bullet, Enemy, EnemyBullet, GameState, Item, ItemType, Missile, PlayerState, SimEvent, SimInput, StagePhase,
+  Boss, Bullet, Enemy, EnemyBullet, EnemyType, GameState, Item, ItemType, MidBoss, Missile, PlayerState, Rank, SimEvent, SimInput,
+  StagePhase,
 } from './types';
+
+const SHIELD_FRAMES = 900;
+const MAGNET_FRAMES = 600;
+const MAGNET_RANGE = 150;
+const MAX_LIVES = 4;
 
 /**
  * 게임 규칙 시뮬레이션 (Phaser/DOM 무관한 순수 TS).
@@ -22,8 +31,16 @@ export class Sim {
   hasHomingMissile = false;
   missileTimer = 0;
 
+  combo = 0;
+  comboTimer = 0;
+  grazeCount = 0;
+  stageHits = 0;                 // 이번 스테이지에서 피격당한 횟수 (랭크 계산용)
+  stageRank: Rank | null = null;
+
   bossTier = 1;
   boss: Boss | null = null;
+  midBoss: MidBoss | null = null;
+  midDone = false;               // 이번 스테이지의 중간보스를 이미 등장시켰는가
   nextBossScore = FIRST_BOSS_SCORE;
   stagePhase: StagePhase = 'FIGHT';
   phaseTimer = 0;
@@ -46,10 +63,12 @@ export class Sim {
     this.player = this.newPlayer();
   }
 
+  get multiplier(): number { return comboMultiplier(this.combo); }
+
   private newPlayer(): PlayerState {
     return {
       x: W / 2, y: PLAYER.spawnY, targetX: W / 2, targetY: PLAYER.spawnY,
-      radius: PLAYER.radius, energy: PLAYER.maxEnergy, maxEnergy: PLAYER.maxEnergy, invincible: 0,
+      radius: PLAYER.radius, energy: PLAYER.maxEnergy, maxEnergy: PLAYER.maxEnergy, invincible: 0, shield: 0, magnet: 0,
     };
   }
 
@@ -57,6 +76,7 @@ export class Sim {
   startAtTier(tier: number): void {
     this.bossTier = tier;
     this.nextBossScore = this.score + 1;
+    this.midDone = true;
   }
 
   drainEvents(): SimEvent[] {
@@ -78,6 +98,9 @@ export class Sim {
     p.targetX = inp.targetX; p.targetY = inp.targetY;
     if (inp.bomb) this.fireBomb();
     if (p.invincible > 0) p.invincible--;
+    if (p.shield > 0) p.shield--;
+    if (p.magnet > 0) p.magnet--;
+    if (this.comboTimer > 0 && --this.comboTimer === 0 && this.combo > 0) { this.combo = 0; this.emit({ t: 'combo', combo: 0, mult: 1 }); }
 
     // 플레이어 이동
     p.x += (p.targetX - p.x) * 0.25; p.y += (p.targetY - p.y) * 0.25;
@@ -89,6 +112,7 @@ export class Sim {
     this.updateMissiles();
     this.updateStagePhase();
     if (this.boss) this.updateBoss();
+    if (this.midBoss) this.updateMidBoss();
     this.updateEnemyBullets();
     this.updateEnemies();
     this.updateItems();
@@ -133,6 +157,7 @@ export class Sim {
     for (let i = this.missiles.length - 1; i >= 0; i--) {
       const m = this.missiles[i];
       let target: { x: number; y: number } | null = this.boss && !this.boss.dying ? this.boss : null;
+      if (!target && this.midBoss && !this.midBoss.dying) target = this.midBoss;
       if (!target && this.enemies.length > 0) {
         let minDist = Infinity;
         for (const e of this.enemies) { const d = Math.hypot(e.x - m.x, e.y - m.y); if (d < minDist) { minDist = d; target = e; } }
@@ -151,13 +176,19 @@ export class Sim {
   }
 
   // ---------------------------------------------------------------------
-  // 스테이지 진행: 전투 → 경고 → 보스 → 폭발 → 클리어 → 다음 스테이지 도입
+  // 스테이지 진행: 전투(+중간보스) → 경고 → 보스 → 폭발 → 클리어 → 다음 스테이지 도입
   // ---------------------------------------------------------------------
   private updateStagePhase(): void {
     switch (this.stagePhase) {
-      case 'FIGHT':
-        if (!this.boss && this.score >= this.nextBossScore) { this.stagePhase = 'WARNING'; this.phaseTimer = PHASE_FRAMES.WARNING; }
+      case 'FIGHT': {
+        const mc = MID_CONFIGS[this.bossTier];
+        if (mc && !this.midDone && !this.midBoss && !this.boss && this.score >= this.nextBossScore - MID_BOSS_LEAD_SCORE) {
+          this.spawnMidBoss(this.bossTier);
+        } else if (!this.boss && !this.midBoss && this.score >= this.nextBossScore) {
+          this.stagePhase = 'WARNING'; this.phaseTimer = PHASE_FRAMES.WARNING;
+        }
         break;
+      }
       case 'WARNING':
         if (--this.phaseTimer <= 0) { this.spawnBoss(this.bossTier); this.stagePhase = 'BOSS'; }
         break;
@@ -188,6 +219,7 @@ export class Sim {
     this.bossTier++;
     this.nextBossScore = this.score + NEXT_BOSS_SCORE_STEP;
     this.stagePhase = 'INTRO'; this.phaseTimer = PHASE_FRAMES.INTRO;
+    this.midDone = false; this.stageHits = 0; this.stageRank = null;
   }
 
   private spawnBoss(tier: number): void {
@@ -215,7 +247,6 @@ export class Sim {
       this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'vibrate', pattern: 150 });
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ef4444', max: 120 });
     }
-
     if (b.phase2Alert > 0) b.phase2Alert--;
 
     if (b.dying) {
@@ -262,7 +293,9 @@ export class Sim {
     if (!b.dying && b.hp <= 0) {
       b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0;
       this.stagePhase = 'BOSS_DYING'; this.phaseTimer = PHASE_FRAMES.BOSS_DYING;
-      this.clearBonus = 200 * b.tier; this.score += this.clearBonus;
+      const { rank, bonus } = rankFor(this.stageHits);
+      this.stageRank = rank;
+      this.clearBonus = 200 * b.tier + bonus; this.score += this.clearBonus;
       this.emit({ t: 'sfx', name: 'boom' }); this.boom(b.x, b.y, b.subColor, 30);
       this.emit({ t: 'shake', v: 14 }); this.emit({ t: 'hitstop', frames: 8 }); this.emit({ t: 'vibrate', pattern: [100, 50, 220] });
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ffffff', max: 160 });
@@ -275,18 +308,148 @@ export class Sim {
   }
 
   // ---------------------------------------------------------------------
+  // 중간보스: 좌우 이동 + 부채꼴 사격, 주기적으로 레이저(예고선 → 발사)
+  // ---------------------------------------------------------------------
+  private spawnMidBoss(tier: number): void {
+    const c = MID_CONFIGS[tier];
+    this.midDone = true;
+    this.midBoss = {
+      tier, x: W / 2, y: -80, targetY: 120, width: c.w, height: c.h, vx: 1.8 + tier * 0.2,
+      hp: c.hp, maxHp: c.hp, shootCd: 0, state: 'MOVE', stateTimer: 0, laserX: W / 2, dying: false, deathTimer: 0,
+    };
+    this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'shake', v: 6 });
+  }
+
+  private updateMidBoss(): void {
+    const m = this.midBoss!, p = this.player, c = MID_CONFIGS[m.tier];
+
+    if (m.dying) {
+      m.deathTimer++;
+      if (m.deathTimer % 6 === 0) this.boom(m.x + (this.rng() - 0.5) * m.width, m.y + (this.rng() - 0.5) * m.height, this.rng() < 0.5 ? c.color : '#f59e0b', 8);
+      if (m.deathTimer === 1) this.emit({ t: 'sfx', name: 'boom' });
+      if (m.deathTimer >= 60) {
+        this.boom(m.x, m.y, '#ffffff', 30); this.boom(m.x, m.y, c.color, 30);
+        this.emit({ t: 'sfx', name: 'boom' }); this.emit({ t: 'ring', x: m.x, y: m.y, color: c.color, max: 100 });
+        this.items.push({ x: m.x, y: m.y, type: 'L' });    // 중간보스 처치 보상: 목숨
+        this.midBoss = null;
+      }
+      return;
+    }
+
+    if (m.y < m.targetY) {
+      m.y += 2;
+    } else if (m.state === 'MOVE') {
+      m.x += m.vx;
+      if (m.x < m.width / 2 + 10 || m.x > W - m.width / 2 - 10) m.vx *= -1;
+      if (++m.shootCd > 75) {
+        m.shootCd = 0;
+        const offs = c.fanCount === 3 ? [-0.3, 0, 0.3] : [-0.5, -0.25, 0, 0.25, 0.5];
+        const base = Math.atan2(p.x - m.x, p.y - m.y) * 0.5;   // 플레이어 쪽으로 살짝 치우친 부채꼴
+        for (const o of offs) {
+          this.enemyBullets.push({ x: m.x, y: m.y + 36, vx: Math.sin(base + o) * c.fanSpeed, vy: Math.cos(base + o) * c.fanSpeed, color: c.color, r: 5 });
+        }
+      }
+      if (++m.stateTimer > 300) { m.state = 'CHARGE'; m.stateTimer = 0; m.laserX = p.x; }   // 예고선은 이 시점의 플레이어 위치에 고정
+    } else if (m.state === 'CHARGE') {
+      // 예고선은 고정(1.2초) — 보고 피할 수 있어야 공정하다
+      if (++m.stateTimer >= 70) { m.state = 'FIRE'; m.stateTimer = 0; this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'shake', v: 8 }); }
+    } else {
+      m.stateTimer++;
+      if (Math.abs(p.x - m.laserX) < 34 + p.radius * 0.5 && p.y > m.y) this.applyDamage(40);
+      if (m.stateTimer >= 45) { m.state = 'MOVE'; m.stateTimer = 0; m.shootCd = 0; }
+    }
+
+    // 피격
+    for (let j = this.bullets.length - 1; j >= 0; j--) {
+      const bl = this.bullets[j];
+      if (Math.hypot(bl.x - m.x, bl.y - m.y) < m.width / 2) { this.bullets.splice(j, 1); m.hp--; this.boom(bl.x, bl.y, '#f59e0b', 2); this.emit({ t: 'hitspark', x: bl.x, y: bl.y }); }
+    }
+    for (let k = this.missiles.length - 1; k >= 0; k--) {
+      const ms = this.missiles[k];
+      if (Math.hypot(ms.x - m.x, ms.y - m.y) < m.width / 2) { this.missiles.splice(k, 1); m.hp -= 3; this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 8); }
+    }
+    if (Math.hypot(p.x - m.x, p.y - m.y) < m.width / 2 + 10) this.applyDamage(40);
+
+    if (m.hp <= 0) {
+      m.dying = true; m.deathTimer = 0; m.hp = 0;
+      this.score += 150;
+      this.enemyBullets.length = 0;
+      this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'hitstop', frames: 5 }); this.emit({ t: 'vibrate', pattern: [60, 40, 120] });
+    }
+  }
+
+  // ---------------------------------------------------------------------
   private updateEnemyBullets(): void {
     const p = this.player;
     for (let i = this.enemyBullets.length - 1; i >= 0; i--) {
       if (i >= this.enemyBullets.length) continue;   // applyDamage(리스폰)가 탄을 전부 지운 경우
       const eb = this.enemyBullets[i];
       eb.x += eb.vx; eb.y += eb.vy;
-      if (Math.hypot(p.x - eb.x, p.y - eb.y) < p.radius + eb.r) {
+      const d = Math.hypot(p.x - eb.x, p.y - eb.y);
+      if (d < p.radius + eb.r) {
         this.enemyBullets.splice(i, 1);
         this.applyDamage(20);
         continue;
       }
+      // 그레이즈: 판정 바로 바깥을 스치면 보너스 (피격 직후 무적 중에는 제외)
+      if (!eb.grazed && p.invincible === 0 && d < p.radius + eb.r + GRAZE_MARGIN) {
+        eb.grazed = true; this.grazeCount++; this.score += GRAZE_SCORE;
+        this.emit({ t: 'graze', x: eb.x, y: eb.y });
+      }
       if (eb.y > H + 20 || eb.x < -20 || eb.x > W + 20 || eb.y < -20) this.enemyBullets.splice(i, 1);
+    }
+  }
+
+  private pickEnemyType(): EnemyType {
+    const w = ENEMY_WEIGHTS[Math.min(MAX_TIER, this.bossTier)];
+    let total = 0;
+    for (const k of Object.keys(w) as EnemyType[]) total += w[k] ?? 0;
+    let r = this.rng() * total;
+    for (const k of Object.keys(w) as EnemyType[]) { r -= w[k] ?? 0; if (r < 0) return k; }
+    return 'scout';
+  }
+
+  private spawnEnemy(): void {
+    const type = this.pickEnemyType();
+    const def = ENEMY_DEFS[type];
+    const x = this.rng() * (W - 70) + 45;
+    const speed = type === 'scout' ? 3.2 + this.rng() * 1.5
+      : type === 'zigzag' ? 2.4 + this.rng() * 0.6
+      : type === 'kamikaze' ? 4.2 + this.rng() * 1.0 : 2.6;
+    this.enemies.push({ type, x, y: -30, hp: def.hp, maxHp: def.hp, speed, baseX: x, age: 0, fireCd: 50 + this.rng() * 60, hold: 0 });
+  }
+
+  private aimedShot(e: Enemy, spd: number, color: string, r: number, spread = 0): void {
+    const p = this.player;
+    const ang = Math.atan2(p.x - e.x, p.y - e.y) + spread;
+    this.enemyBullets.push({ x: e.x, y: e.y + 12, vx: Math.sin(ang) * spd, vy: Math.cos(ang) * spd, color, r });
+  }
+
+  private moveEnemy(e: Enemy): void {
+    const p = this.player;
+    e.age++;
+    switch (e.type) {
+      case 'scout':
+        e.y += e.speed;
+        if (this.rng() < 0.008) this.enemyBullets.push({ x: e.x, y: e.y + 10, vx: 0, vy: 2.2, color: '#f43f5e', r: 4 });
+        break;
+      case 'zigzag':
+        e.y += e.speed;
+        e.x = Math.max(30, Math.min(W - 30, e.baseX + Math.sin(e.age * 0.06) * 80));
+        if (--e.fireCd <= 0 && e.y > 40 && e.y < H * 0.55) { this.aimedShot(e, 2.6, '#fb923c', 4); e.fireCd = 110 + this.rng() * 40; }
+        break;
+      case 'kamikaze':
+        e.y += e.speed;
+        if (e.y < p.y - 40) e.x += Math.max(-3.2, Math.min(3.2, (p.x - e.x) * 0.035));
+        break;
+      case 'sniper':
+        if (e.y < 150 && e.hold === 0) e.y += e.speed;
+        else if (e.hold < 170) {
+          e.hold++;
+          if (--e.fireCd <= 0) { this.aimedShot(e, 3.0, '#38bdf8', 4.5, -0.12); this.aimedShot(e, 3.0, '#38bdf8', 4.5, 0.12); e.fireCd = 60; }
+        } else e.y += e.speed * 1.5;
+        if (e.hold === 0 && e.y >= 150) e.hold = 1;
+        break;
     }
   }
 
@@ -294,59 +457,87 @@ export class Sim {
     const p = this.player;
     const spawnOk = this.stagePhase === 'FIGHT' || this.stagePhase === 'BOSS' ||
       (this.stagePhase === 'INTRO' && this.phaseTimer < PHASE_FRAMES.INTRO - 50);
-    if (spawnOk && this.frame % (this.boss ? 70 : 32) === 0) {
-      this.enemies.push({ x: this.rng() * (W - 70) + 45, y: -30, hp: 1, speed: 3.2 + this.rng() * 1.5 });
-    }
+    if (spawnOk && this.frame % (this.boss || this.midBoss ? 70 : 32) === 0) this.spawnEnemy();
+
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
-      e.y += e.speed;
-      if (this.rng() < 0.008) this.enemyBullets.push({ x: e.x, y: e.y + 10, vx: 0, vy: 2.2, color: '#f43f5e', r: 4 });
+      const def = ENEMY_DEFS[e.type];
+      this.moveEnemy(e);
 
       for (let j = this.bullets.length - 1; j >= 0; j--) {
         const b = this.bullets[j];
-        if (Math.hypot(b.x - e.x, b.y - e.y) < 20) { this.bullets.splice(j, 1); e.hp = 0; break; }
+        if (Math.hypot(b.x - e.x, b.y - e.y) < def.hitR) { this.bullets.splice(j, 1); e.hp -= 1; this.emit({ t: 'hitspark', x: b.x, y: b.y }); break; }
       }
       for (let m = this.missiles.length - 1; m >= 0; m--) {
         const ms = this.missiles[m];
-        if (Math.hypot(ms.x - e.x, ms.y - e.y) < 22) { this.missiles.splice(m, 1); e.hp = 0; break; }
+        if (Math.hypot(ms.x - e.x, ms.y - e.y) < def.hitR + 2) { this.missiles.splice(m, 1); e.hp -= 3; break; }
       }
       if (e.hp <= 0) {
-        this.emit({ t: 'sfx', name: 'boom' }); this.boom(e.x, e.y, '#ef4444', 12); this.score += 10;
-        const r = this.rng();
-        let drop: ItemType | null = null;
-        if (r < 0.05) drop = 'P'; else if (r < 0.09) drop = 'M'; else if (r < 0.13) drop = 'E'; else if (r < 0.15) drop = 'B';
-        if (drop) this.items.push({ x: e.x, y: e.y, type: drop });
+        this.emit({ t: 'sfx', name: 'boom' }); this.boom(e.x, e.y, '#ef4444', 12);
+        this.killScore(def.score);
+        this.dropItem(e.x, e.y);
         this.enemies.splice(i, 1);
         continue;
       }
-      if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + 14) {
+      if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + def.bodyR) {
         this.enemies.splice(i, 1);
-        this.applyDamage(35);
+        this.applyDamage(e.type === 'kamikaze' ? 45 : 35);
         continue;
       }
       if (e.y > H + 30) this.enemies.splice(i, 1);
     }
   }
 
+  /** 처치 점수: 연속 처치(콤보)에 따라 배율 적용 */
+  private killScore(base: number): void {
+    this.combo++; this.comboTimer = COMBO_WINDOW;
+    this.score += Math.round(base * comboMultiplier(this.combo));
+    this.emit({ t: 'combo', combo: this.combo, mult: comboMultiplier(this.combo) });
+  }
+
+  private dropItem(x: number, y: number): void {
+    const r = this.rng();
+    let type: ItemType | null = null;
+    for (const [cum, t] of DROP_BASE) if (r < cum) { type = t; break; }
+    if (!type) { const r2 = this.rng(); for (const [cum, t] of DROP_EXTRA) if (r2 < cum) { type = t; break; } }
+    if (type) this.items.push({ x, y, type });
+  }
+
   private updateItems(): void {
     const p = this.player;
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
-      it.y += 2.2;
+      const dx = p.x - it.x, dy = p.y - it.y, dist = Math.hypot(dx, dy);
+      if (p.magnet > 0 && dist < MAGNET_RANGE && dist > 1) { it.x += (dx / dist) * 7; it.y += (dy / dist) * 7; }
+      else it.y += 2.2;
       if (Math.hypot(p.x - it.x, p.y - it.y) < p.radius + 12) {
-        if (it.type === 'P') this.weaponLevel = Math.min(3, this.weaponLevel + 1);
-        else if (it.type === 'M') { this.hasHomingMissile = true; this.missileTimer = 500; }
-        else if (it.type === 'E') {
-          this.emit({ t: 'sfx', name: 'heal' });
-          p.energy = Math.min(p.maxEnergy, p.energy + 30);
-          this.boom(p.x, p.y, '#06b6d4', 10);
-        } else {
-          this.emit({ t: 'sfx', name: 'item' });
-          this.bombs = Math.min(PLAYER.maxBombs, this.bombs + 1);
-          this.boom(p.x, p.y, '#ef4444', 10);
-        }
+        this.collect(it.type);
         this.items.splice(i, 1);
       } else if (it.y > H + 20) this.items.splice(i, 1);
+    }
+  }
+
+  private collect(type: ItemType): void {
+    const p = this.player;
+    switch (type) {
+      case 'P': this.weaponLevel = Math.min(3, this.weaponLevel + 1); this.emit({ t: 'sfx', name: 'item' }); break;
+      case 'M': this.hasHomingMissile = true; this.missileTimer = 500; this.emit({ t: 'sfx', name: 'item' }); break;
+      case 'E':
+        this.emit({ t: 'sfx', name: 'heal' });
+        p.energy = Math.min(p.maxEnergy, p.energy + 30);
+        this.boom(p.x, p.y, '#06b6d4', 10);
+        break;
+      case 'B':
+        this.emit({ t: 'sfx', name: 'item' });
+        this.bombs = Math.min(PLAYER.maxBombs, this.bombs + 1);
+        this.boom(p.x, p.y, '#ef4444', 10);
+        break;
+      case 'S': p.shield = SHIELD_FRAMES; this.emit({ t: 'sfx', name: 'item' }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#60a5fa', max: 60 }); break;
+      case 'G': p.magnet = MAGNET_FRAMES; this.emit({ t: 'sfx', name: 'item' }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#c084fc', max: MAGNET_RANGE }); break;
+      case 'L':
+        this.lives = Math.min(MAX_LIVES, this.lives + 1);
+        this.emit({ t: 'sfx', name: 'heal' }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#f43f5e', max: 70 });
+        break;
     }
   }
 
@@ -366,14 +557,28 @@ export class Sim {
       this.boss.hp -= 40;
       this.boom(this.boss.x, this.boss.y, '#ef4444', 30);
     }
+    if (this.midBoss && !this.midBoss.dying) {
+      this.midBoss.hp -= 40;
+      this.boom(this.midBoss.x, this.midBoss.y, '#ef4444', 24);
+    }
   }
 
   applyDamage(dmg: number): void {
     const p = this.player;
     if (p.invincible > 0 || this.state !== 'PLAYING') return;
     if (this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'CLEAR') return;   // 전환 연출 중에는 피해 없음
+
+    if (p.shield > 0) {   // 실드가 피격 1회를 흡수
+      p.shield = 0; p.invincible = 30;
+      this.emit({ t: 'sfx', name: 'item' }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#60a5fa', max: 70 });
+      this.emit({ t: 'shake', v: 4 });
+      return;
+    }
+
     p.energy = Math.max(0, p.energy - dmg);
     p.invincible = 40;
+    this.stageHits++;
+    if (this.combo > 0) { this.combo = 0; this.comboTimer = 0; this.emit({ t: 'combo', combo: 0, mult: 1 }); }
     this.emit({ t: 'sfx', name: 'boom' }); this.boom(p.x, p.y, '#ef4444', 16);
     this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'flash', kind: 'hit', v: 0.45 });
     this.emit({ t: 'hitstop', frames: 4 }); this.emit({ t: 'vibrate', pattern: 60 });

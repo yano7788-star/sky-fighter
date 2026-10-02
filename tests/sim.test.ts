@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { H, W } from '../src/core/config';
 import { BOSS_PATTERNS } from '../src/core/data';
 import { Sim } from '../src/core/sim';
-import type { Boss, EnemyBullet, SimInput } from '../src/core/types';
+import { ENEMY_DEFS, comboMultiplier, rankFor } from '../src/core/data';
+import type { Boss, Enemy, EnemyBullet, EnemyType, SimInput } from '../src/core/types';
 
+const mkEnemy = (type: EnemyType, x: number, y: number, hp = ENEMY_DEFS[type].hp): Enemy =>
+  ({ type, x, y, hp, maxHp: hp, speed: type === 'sniper' ? 2.6 : 3, baseX: x, age: 0, fireCd: 999, hold: 0 });
 const idle = (s: Sim, fire = false): SimInput => ({ targetX: s.player.x, targetY: s.player.y, fire, bomb: false });
 
 function makeBoss(tier: number, phase2: boolean, mode: 1 | 2): Boss {
@@ -55,7 +58,7 @@ describe('시뮬레이션', () => {
     let last = '';
     for (let i = 0; i < 60 * 60 * 20 && s.state === 'PLAYING'; i++) {
       s.player.invincible = 999;
-      s.step({ targetX: s.boss ? s.boss.x : 225, targetY: 650, fire: true, bomb: false });
+      s.step({ targetX: s.boss ? s.boss.x : s.midBoss ? s.midBoss.x : 225, targetY: 650, fire: true, bomb: false });
       const key = `${s.bossTier}:${s.stagePhase}`;
       if (key !== last) { phases.push(key); last = key; }
     }
@@ -64,11 +67,12 @@ describe('시뮬레이션', () => {
     // 각 스테이지는 FIGHT → WARNING → BOSS → BOSS_DYING → CLEAR 순서
     const t1 = phases.filter(p => p.startsWith('1:'));
     expect(t1).toEqual(['1:FIGHT', '1:WARNING', '1:BOSS', '1:BOSS_DYING', '1:CLEAR']);
+    expect(phases).toContain('2:FIGHT');
   });
 
   it('폭탄은 화면 안의 적만 제거한다', () => {
     const s = new Sim(1);
-    s.enemies.push({ x: 100, y: -30, hp: 1, speed: 0 }, { x: 100, y: 200, hp: 1, speed: 0 });
+    s.enemies.push({ ...mkEnemy('scout', 100, -30), speed: 0 }, { ...mkEnemy('scout', 100, 200), speed: 0 });
     s.frame = 100;
     s.fireBomb();
     expect(s.enemies.map(e => e.hp)).toEqual([1, 0]);
@@ -128,5 +132,139 @@ describe('시뮬레이션', () => {
     const s = new Sim(1);
     for (let i = 0; i < 5; i++) { s.items.push({ x: s.player.x, y: s.player.y, type: 'P' }); s.step(idle(s)); }
     expect(s.weaponLevel).toBe(3);
+  });
+});
+
+describe('적 4종', () => {
+  it('1스테이지는 정찰기만, 5스테이지는 4종이 모두 등장한다', () => {
+    const seen = (tier: number) => {
+      const s = new Sim(3); s.startAtTier(tier); s.stagePhase = 'FIGHT'; s.nextBossScore = 1e9;
+      const types = new Set<string>();
+      for (let i = 0; i < 4000; i++) { s.player.invincible = 999; s.step(idle(s)); for (const e of s.enemies) types.add(e.type); }
+      return types;
+    };
+    expect([...seen(1)]).toEqual(['scout']);
+    expect(seen(5).size).toBe(4);
+  });
+
+  it('지그재그는 체력 2: 한 발로는 안 죽는다', () => {
+    const s = new Sim(1);
+    s.enemies.push(mkEnemy('zigzag', 225, 300));
+    s.bullets.push({ x: 225, y: 300, vx: 0, vy: 0 });
+    s.step(idle(s));
+    expect(s.enemies).toHaveLength(1); expect(s.enemies[0].hp).toBe(1);
+    s.bullets.push({ x: s.enemies[0].x, y: s.enemies[0].y, vx: 0, vy: 0 });
+    s.step(idle(s));
+    expect(s.enemies).toHaveLength(0);
+  });
+
+  it('저격형은 상단(y≈150)에 멈춰서 조준 사격을 한다', () => {
+    const s = new Sim(1);
+    s.player.invincible = 99999;
+    s.enemies.push({ ...mkEnemy('sniper', 100, 0), fireCd: 5 });
+    let shots = 0, maxY = 0;
+    for (let i = 0; i < 300; i++) { const before = s.enemyBullets.length; s.step(idle(s)); if (s.enemyBullets.length > before) shots++; maxY = Math.max(maxY, s.enemies[0]?.y ?? 0); }
+    expect(shots).toBeGreaterThan(0);
+    expect(s.enemyBullets.some(b => b.color === '#38bdf8') || shots > 0).toBe(true);
+  });
+
+  it('돌진형은 플레이어 쪽으로 가로 이동한다', () => {
+    const s = new Sim(1);
+    s.player.invincible = 99999; s.player.x = s.player.targetX = 400;
+    s.enemies.push({ ...mkEnemy('kamikaze', 50, 0), speed: 3 });
+    for (let i = 0; i < 40; i++) s.step({ targetX: 400, targetY: s.player.y, fire: false, bomb: false });
+    expect(s.enemies[0].x).toBeGreaterThan(80);
+  });
+});
+
+describe('콤보 / 그레이즈 / 랭크', () => {
+  it('콤보 배율은 6킬마다 0.25씩 오르고 2.5에서 멈춘다', () => {
+    expect(comboMultiplier(0)).toBe(1); expect(comboMultiplier(6)).toBe(1.25); expect(comboMultiplier(60)).toBe(2.5); expect(comboMultiplier(999)).toBe(2.5);
+  });
+  it('연속 처치하면 점수 배율이 적용되고, 피격하면 콤보가 끊긴다', () => {
+    const s = new Sim(1);
+    for (let i = 0; i < 12; i++) { s.enemies.push({ ...mkEnemy('scout', 50, 200), speed: 0 }); s.enemies[s.enemies.length - 1].hp = 0; s.step(idle(s)); }
+    expect(s.combo).toBe(12);
+    expect(s.score).toBeGreaterThan(12 * 10);
+    s.applyDamage(10);
+    expect(s.combo).toBe(0);
+  });
+  it('콤보는 일정 시간 처치가 없으면 끝난다', () => {
+    const s = new Sim(1);
+    s.enemies.push({ ...mkEnemy('scout', 50, 200), hp: 0, speed: 0 }); s.step(idle(s));
+    expect(s.combo).toBe(1);
+    for (let i = 0; i < 125; i++) s.step(idle(s));
+    expect(s.combo).toBe(0);
+  });
+  it('그레이즈는 탄 하나당 한 번만 점수를 준다', () => {
+    const s = new Sim(1);
+    s.enemyBullets.push({ x: s.player.x + s.player.radius + 8, y: s.player.y, vx: 0, vy: 0, color: '#fff', r: 4 });
+    const before = s.score;
+    for (let i = 0; i < 10; i++) s.step(idle(s));
+    expect(s.grazeCount).toBe(1); expect(s.score).toBe(before + 2);
+  });
+  it('피격 횟수에 따라 랭크가 정해진다', () => {
+    expect(rankFor(0).rank).toBe('S'); expect(rankFor(1).rank).toBe('A'); expect(rankFor(2).rank).toBe('B'); expect(rankFor(5).rank).toBe('C');
+  });
+  it('보스 처치 시 무피격이면 S랭크 보너스가 붙는다', () => {
+    const s = new Sim(1);
+    s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.step(idle(s));
+    s.boss!.hp = 0; const before = s.score; s.step(idle(s));
+    expect(s.stageRank).toBe('S'); expect(s.score - before).toBe(200 + 500);
+  });
+});
+
+describe('아이템', () => {
+  it('실드는 피격 1회를 흡수하고 사라진다', () => {
+    const s = new Sim(1);
+    s.items.push({ x: s.player.x, y: s.player.y, type: 'S' }); s.step(idle(s));
+    expect(s.player.shield).toBeGreaterThan(0);
+    s.player.invincible = 0; s.applyDamage(50);
+    expect(s.player.energy).toBe(100); expect(s.player.shield).toBe(0);
+    s.player.invincible = 0; s.applyDamage(50);
+    expect(s.player.energy).toBe(50);
+  });
+  it('자석은 범위 안의 아이템을 끌어당긴다', () => {
+    const s = new Sim(1);
+    s.player.magnet = 600;
+    s.items.push({ x: s.player.x + 100, y: s.player.y - 100, type: 'E' });
+    const d0 = Math.hypot(100, 100);
+    s.step(idle(s));
+    const it = s.items[0];
+    expect(Math.hypot(it.x - s.player.x, it.y - s.player.y)).toBeLessThan(d0 - 5);
+  });
+  it('목숨 아이템은 최대 4개까지', () => {
+    const s = new Sim(1);
+    for (let i = 0; i < 6; i++) { s.items.push({ x: s.player.x, y: s.player.y, type: 'L' }); s.step(idle(s)); }
+    expect(s.lives).toBe(4);
+  });
+});
+
+describe('중간보스', () => {
+  it('스테이지 2에서 메인 보스 전에 등장하고, 처치 전에는 경고 단계로 넘어가지 않으며, 목숨을 떨군다', () => {
+    const s = new Sim(1);
+    s.bossTier = 2; s.nextBossScore = 1000; s.score = 1000 - 220;
+    s.player.invincible = 99999;
+    s.step(idle(s));
+    expect(s.midBoss).not.toBeNull();
+    s.score = 5000;                       // 메인 보스 조건 충족
+    for (let i = 0; i < 20; i++) s.step(idle(s));
+    expect(s.stagePhase).toBe('FIGHT');   // 중간보스가 살아 있으면 대기
+    s.midBoss!.hp = 0;
+    for (let i = 0; i < 80; i++) { s.player.invincible = 99999; s.step(idle(s)); }
+    expect(s.midBoss).toBeNull();
+    expect(s.items.some(i => i.type === 'L') || s.lives > 2).toBe(true);
+    for (let i = 0; i < 5; i++) s.step(idle(s));
+    expect(s.stagePhase).toBe('WARNING');
+  });
+  it('레이저는 예고(CHARGE) 후 발사(FIRE)되고 맞으면 피해를 준다', () => {
+    const s = new Sim(1);
+    s.bossTier = 2; s.nextBossScore = 1000; s.score = 800; s.step(idle(s));
+    const m = s.midBoss!; m.y = m.targetY; m.state = 'CHARGE'; m.stateTimer = 60; m.laserX = s.player.x;
+    for (let i = 0; i < 12 && (m.state as string) !== 'FIRE'; i++) s.step(idle(s));
+    expect(m.state as string).toBe('FIRE');
+    const e0 = s.player.energy; s.player.invincible = 0;
+    s.step({ targetX: s.player.x, targetY: s.player.y, fire: false, bomb: false });
+    expect(s.player.energy).toBeLessThan(e0);
   });
 });

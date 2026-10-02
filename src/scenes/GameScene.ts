@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PLAYER, STEP_MS, W } from '../core/config';
+import { H, PLAYER, STEP_MS, W } from '../core/config';
 import { Sim } from '../core/sim';
 import type { SimEvent } from '../core/types';
 import { ScrollingBackground } from '../render/background';
@@ -26,6 +26,9 @@ export class GameScene extends Phaser.Scene {
   private muzzleImgs: Phaser.GameObjects.Image[] = [];
   private bossImg!: Phaser.GameObjects.Image;
   private bossG!: Phaser.GameObjects.Graphics;
+  private midG!: Phaser.GameObjects.Graphics;
+  private midImg!: Phaser.GameObjects.Image;
+  private auraG!: Phaser.GameObjects.Graphics;
 
   private paused = false;
   private acc = 0;
@@ -80,7 +83,11 @@ export class GameScene extends Phaser.Scene {
     }
     this.bossG = this.add.graphics();
     this.bossImg = this.add.image(0, 0, 'boss1_n').setVisible(false);
-    this.layers.boss.add([this.bossG, this.bossImg]);
+    this.midG = this.add.graphics();
+    this.midImg = this.add.image(0, 0, 'boss2_n').setVisible(false);
+    this.auraG = this.add.graphics();
+    this.layers.boss.add([this.bossG, this.bossImg, this.midImg, this.midG]);
+    this.layers.player.add(this.auraG);
 
     this.setupInput();
     this.resetRun();
@@ -244,6 +251,8 @@ export class GameScene extends Phaser.Scene {
       case 'flash': this.hud.flash(e.kind, e.v); break;
       case 'vibrate': try { navigator.vibrate?.(e.pattern); } catch { /* 미지원 */ } break;
       case 'muzzle': this.muzzle = 3; break;
+      case 'graze': this.fx.explosion(e.x, e.y, '#e0f2fe', 2); break;
+      case 'combo': break;   // HUD가 sim.combo를 직접 읽는다
       case 'hitspark': if (this.sim.frame % 3 === 0) this.fx.ring(e.x, e.y, '#fde047', 16); break;
       case 'gameover': case 'gameclear': this.finishRun(e.t === 'gameover' ? 'GAMEOVER' : 'GAMECLEAR'); break;
     }
@@ -289,7 +298,7 @@ export class GameScene extends Phaser.Scene {
     this.bg.render();
 
     this.sync('items', this.layers.items, s.items, it => `item_${it.type}`, (img, it) => img.setPosition(it.x, it.y));
-    this.sync('enemies', this.layers.enemies, s.enemies, () => 'enemy', (img, e) => img.setPosition(e.x, e.y));
+    this.sync('enemies', this.layers.enemies, s.enemies, e => `enemy_${e.type}`, (img, e) => img.setPosition(e.x, e.y));
     this.sync('pbullets', this.layers.pbullets, s.bullets, () => 'pbullet', (img, b) => img.setPosition(b.x, b.y));
     this.sync('missiles', this.layers.missiles, s.missiles, () => 'missile', (img, m) => img.setPosition(m.x, m.y).setRotation(Math.atan2(m.vy, m.vx) + Math.PI / 2));
     this.sync('ebullets', this.layers.ebullets, s.enemyBullets, b => bulletTexture(this, b.color, b.r), (img, b) => img.setPosition(b.x, b.y));
@@ -297,13 +306,65 @@ export class GameScene extends Phaser.Scene {
     const p = s.player;
     this.playerImg.setPosition(p.x, p.y).setAlpha(p.invincible > 0 && Math.floor(s.frame / 4) % 2 === 0 ? 0.4 : 1);
     this.muzzleImgs.forEach((m, i) => m.setVisible(this.muzzle > 0).setPosition(p.x + (i ? 18 : -18), p.y - 30));
+    this.renderPlayerAuras();
     this.renderBoss();
 
     this.fx.render();
     this.hud.render(s, this.best.score, audio.muted);
   }
 
+  /** 실드 / 자석 범위 표시 */
+  private renderPlayerAuras(): void {
+    const g = this.auraG, p = this.sim.player, f = this.sim.frame;
+    g.clear();
+    if (p.shield > 0) {
+      const blink = p.shield < 120 && Math.floor(f / 5) % 2 === 0;   // 끝나기 2초 전부터 깜빡임
+      if (!blink) {
+        g.lineStyle(2.5, 0x60a5fa, 0.9); g.strokeCircle(p.x, p.y, 38 + Math.sin(f * 0.15) * 2);
+        g.fillStyle(0x3b82f6, 0.14); g.fillCircle(p.x, p.y, 38);
+      }
+    }
+    if (p.magnet > 0 && (p.magnet > 120 || Math.floor(f / 5) % 2 === 0)) {
+      g.lineStyle(1.5, 0xc084fc, 0.35); g.strokeCircle(p.x, p.y, 150);
+    }
+  }
+
+  private renderMidBoss(): void {
+    const m = this.sim.midBoss, g = this.midG;
+    g.clear();
+    if (!m) { this.midImg.setVisible(false); return; }
+    const frame = this.sim.frame;
+    const key = `boss${m.tier}_n`;
+    const clean = this.textures.get(`boss${m.tier}`).getSourceImage() as HTMLImageElement;
+    const outlined = this.textures.get(key).getSourceImage() as HTMLImageElement;
+    const scale = Math.min(m.width / clean.width, m.height / clean.height);
+    const jit = m.dying && !this.paused;
+    const cx = m.x + (jit ? (Math.random() - 0.5) * 6 : 0), cy = m.y + (jit ? (Math.random() - 0.5) * 5 : 0);
+    this.midImg.setTexture(key).setVisible(true).setPosition(cx, cy).setRotation(Math.PI)
+      .setDisplaySize(outlined.width * scale, outlined.height * scale)
+      .setAlpha(m.dying && Math.floor(frame / 3) % 2 === 0 ? 0.6 : 1).setTint(m.state === 'CHARGE' && Math.floor(frame / 4) % 2 === 0 ? 0xffb4b4 : 0xffffff);
+    if (m.dying) return;
+
+    // 체력 바 (머리 위)
+    const bw = m.width, bx = m.x - bw / 2, by = m.y - m.height / 2 - 14;
+    g.fillStyle(0x0f172a, 0.8); g.fillRect(bx, by, bw, 5);
+    g.fillStyle(0xf97316, 1); g.fillRect(bx, by, bw * Math.max(0, m.hp / m.maxHp), 5);
+    g.lineStyle(1, 0xfed7aa, 1); g.strokeRect(bx, by, bw, 5);
+
+    // 레이저: 예고선(가는 점멸선) → 발사(굵은 빔)
+    if (m.state === 'CHARGE') {
+      const a = 0.25 + 0.35 * Math.abs(Math.sin(m.stateTimer * 0.35));
+      g.lineStyle(2, 0xff4d4d, a); g.beginPath(); g.moveTo(m.laserX, m.y + m.height / 2); g.lineTo(m.laserX, H); g.strokePath();
+      g.fillStyle(0xff4d4d, a * 0.5); g.fillCircle(m.x, m.y + m.height / 2, 6 + m.stateTimer * 0.15);
+    } else if (m.state === 'FIRE') {
+      const w = 68 * Math.min(1, m.stateTimer / 6) * Math.min(1, (45 - m.stateTimer) / 8 + 0.2);
+      g.fillStyle(0xff3b3b, 0.45); g.fillRect(m.laserX - w / 2, m.y + m.height / 2, w, H);
+      g.fillStyle(0xfff1f1, 0.9); g.fillRect(m.laserX - w * 0.22, m.y + m.height / 2, w * 0.44, H);
+    }
+  }
+
   private renderBoss(): void {
+    this.renderMidBoss();
     const b = this.sim.boss, g = this.bossG, frame = this.sim.frame;
     g.clear();
     if (!b) { this.bossImg.setVisible(false); return; }

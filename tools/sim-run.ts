@@ -19,12 +19,12 @@ interface RunResult { stage: number; cleared: boolean; seconds: number; score: n
 function runOne(seed: number): RunResult {
   const s = new Sim(seed);
   if (START_TIER > 1) s.startAtTier(START_TIER);
-  let bombsUsed = 0;
+  let bombsUsed = 0, laserSide = 0;
   const reaction = 70 + SKILL * 70;       // 이 거리 안의 탄을 피한다
   const maxF = 60 * MAX_SECONDS;
   for (let f = 0; f < maxF && s.state === 'PLAYING'; f++) {
     const p = s.player;
-    let tx = s.boss ? s.boss.x : (s.enemies.length ? nearestEnemyX(s) : W / 2);
+    let tx = s.boss ? s.boss.x : s.midBoss ? s.midBoss.x : (s.enemies.length ? nearestEnemyX(s) : W / 2);
     let near: { x: number; y: number } | null = null, nd = 1e9, danger = 0;
     for (const b of s.enemyBullets) {
       if (b.y > p.y + 20) continue;
@@ -37,6 +37,12 @@ function runOne(seed: number): RunResult {
       tx = p.x + dir * 70;
       if (p.x < 70) tx = p.x + 70; else if (p.x > W - 70) tx = p.x - 70;
     }
+    // 레이저: 예고선/빔 근처에 있으면 옆으로 피한다 (실력이 낮을수록 늦게 반응)
+    const m = s.midBoss;
+    if (m && !m.dying && m.state !== 'MOVE') {
+      if (laserSide === 0) laserSide = Math.random() < 0.4 + SKILL * 0.6 ? (m.laserX < W / 2 ? 1 : -1) : 0.001;   // 낮은 실력: 못 보고 지나침
+      if (laserSide !== 0.001) tx = Math.max(40, Math.min(W - 40, m.laserX + laserSide * 110));
+    } else laserSide = 0;
     const bomb = s.bombs > 0 && (nd < 45 * SKILL + 15 || danger > 14) && (f % 7 === 0);
     if (bomb) bombsUsed++;
     s.step({ targetX: Math.max(40, Math.min(W - 40, tx)), targetY: H - 120, fire: true, bomb });

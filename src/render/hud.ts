@@ -58,6 +58,7 @@ export class Hud {
     text('best', 50, 49, 11, '#64748b', 0, 1);
     text('stage', W / 2, 34, 18, '#38bdf8', 0.5, 1);
     text('missile', 50, 66, 12, '#ec4899', 0, 1);
+    text('combo', 50, 84, 13, '#facc15', 0, 1).setShadow(0, 0, '#000', 4, true, true);
     text('mute', W - 25, 36, 18, '#38bdf8', 1, 1, false);
     text('lives', W - 20, 65, 18, '#f43f5e', 1, 1, false);
     text('bossName', 0, 0, 11, '#ffffff', 0.5, 1);
@@ -173,7 +174,12 @@ export class Hud {
     this.setText('score', `SCORE ${sim.score}`);
     this.setText('best', `BEST ${Math.max(bestScore, sim.score)}`);
     this.setText('stage', `STAGE ${sim.bossTier}`);
-    this.setText('missile', sim.hasHomingMissile ? `MISSILE (${Math.ceil(sim.missileTimer / 60)}s)` : '');
+    const buffs: string[] = [];
+    if (sim.hasHomingMissile) buffs.push(`MISSILE ${Math.ceil(sim.missileTimer / 60)}s`);
+    if (p.shield > 0) buffs.push('SHIELD');
+    if (p.magnet > 0) buffs.push(`MAGNET ${Math.ceil(p.magnet / 60)}s`);
+    this.setText('missile', buffs.join('  ·  '));
+    this.setText('combo', sim.combo >= 2 ? `COMBO ${sim.combo}  ×${sim.multiplier.toFixed(2).replace(/.?0+$/, '')}` : '');
     this.setText('mute', muted ? '🔇' : '🔊').setColor(muted ? '#64748b' : '#38bdf8');
     this.setText('lives', '♥ '.repeat(sim.lives));
 
@@ -213,7 +219,7 @@ export class Hud {
     } else if (ph === 'CLEAR') {
       const total = PHASE_FRAMES.CLEAR, a = bannerAlpha(total - sim.phaseTimer, total, 15, 25);
       main.setAlpha(a).setFontSize(34).setColor('#10b981').setText(`STAGE ${sim.bossTier} CLEAR!`);
-      sub.setAlpha(a).setColor('#facc15').setText(`BOSS BONUS +${sim.clearBonus}`).setPosition(W / 2, H * 0.36 + 36);
+      sub.setAlpha(a).setColor('#facc15').setText(`BOSS BONUS +${sim.clearBonus}${sim.stageRank ? `  ·  RANK ${sim.stageRank}` : ''}`).setPosition(W / 2, H * 0.36 + 36);
     } else {
       const total = PHASE_FRAMES.INTRO - 15, t = PHASE_FRAMES.INTRO - sim.phaseTimer - 15;   // 배경이 바뀌기 시작한 뒤에 등장
       const cfg = BOSS_CONFIGS[sim.bossTier], a = bannerAlpha(t, total, 20, 30);
