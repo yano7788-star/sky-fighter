@@ -164,7 +164,7 @@ export const BOMB = {
 /** 파일럿별 궁극기 */
 export const ULT_KIND = {
   palm:     { name: '자매의 손바닥', owner: '에이스', cutin: 120 },
-  barrage:  { name: '미사일 포격',   owner: '언니',   cutin: 90, active: 200, invincible: 150, dmg: 4.2, interval: 3 },   // 약 3.3초간 위에서 미사일 비
+  barrage:  { name: '미사일 포격',   owner: '언니',   cutin: 90, active: 200, invincible: 210, dmg: 4.2, interval: 3 },   // 약 3.3초간 위에서 미사일 비
   timestop: { name: '시간 정지',     owner: '동생',   cutin: 90, active: 150, boost: 1.5 },                                // 2.5초간 적·탄 정지, 내 피해 1.5배
 } as const;
 

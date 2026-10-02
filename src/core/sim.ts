@@ -211,7 +211,7 @@ export class Sim {
     this.updateBullets();
     this.updateMissiles();
     this.updateBombField();
-    if (!this.timeStopped) this.updateStagePhase();
+    if (!this.timeStopped || this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'CLEAR') this.updateStagePhase();   // 시간 정지 중에도 보스 폭발·클리어 연출은 계속 진행
     if (this.boss) this.updateBoss();
     if (this.midBoss) this.updateMidBoss();
     this.updateEnemyBullets();
@@ -597,7 +597,7 @@ export class Sim {
       this.stagePhase = 'BOSS_DYING'; this.phaseTimer = PHASE_FRAMES.BOSS_DYING;
       const { rank, bonus } = rankFor(this.stageHits);
       this.stageRank = rank;
-      this.clearBonus = 200 * b.tier + bonus; this.score += this.clearBonus;
+      this.clearBonus = 200 * this.bossTier + bonus; this.score += this.clearBonus;   // 무한 모드에서는 루프가 돌수록 보너스도 커진다
       this.ult.gauge = Math.min(100, this.ult.gauge + ULT.gaugeBoss);
       // 「자매의 손바닥」: 3번째 보스를 목숨 2개 이상 유지한 채 처치하면 게이지가 가득 찬다
       if (b.tier === 3 && this.loopCount === 0 && this.lives >= 2 && this.ult.gauge < 100) { this.ult.gauge = 100; this.emit({ t: 'sfx', name: 'heal' }); }

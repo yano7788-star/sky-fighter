@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Sim } from '../src/core/sim';
 import { metaParams } from '../src/core/meta';
-import { PHASE_FRAMES } from '../src/core/config';
 import type { SimInput } from '../src/core/types';
 
 const idle = (s: Sim, extra: Partial<SimInput> = {}): SimInput => ({ targetX: s.player.x, targetY: s.player.y, fire: false, bomb: false, ...extra });
