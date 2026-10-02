@@ -123,7 +123,7 @@ export const BOSS_SPECIALS: Record<number, ('laser' | 'charge')[]> = { 2: ['lase
 export const BOSS_SP = {
   cd: [420, 330, 250],            // 1·2·3페이즈 특수 공격 간격(프레임)
   laserWarn: 70, laserAct: 45, laserHalf: 34, laserDmg: 30, tripleOff: 120,   // 2페이즈부터 빔 3줄기(사이 틈으로 피한다)
-  stun: 110, stunDmg: 2,   // 특수 공격을 넘기면 보스가 잠깐 멈추고 피해 ×2 (피한 뒤 반격하는 리듬)
+  stun: 80, stunDmg: 1.6,   // 특수 공격을 넘기면 보스가 잠깐 멈추고 피해 ×2 (피한 뒤 반격하는 리듬)
   chargeWarn: 60, dashMax: 17, retSpeed: 6, chargeDmg: 40,
 };
 

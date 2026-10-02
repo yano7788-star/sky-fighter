@@ -252,7 +252,7 @@ export class Hud {
       g.fillStyle(col, 1); g.fillRect(bx, by, bw * Math.max(0, this.displayHp / b.maxHp), 12);
       g.lineStyle(1.5, Phaser.Display.Color.HexStringToColor(b.phase2 ? '#f87171' : b.subColor).color, 1); g.strokeRect(bx, by, bw, 12);
       this.t.bossName.setPosition(bx + bw / 2, by - 3);
-      this.setText('bossName', `${b.name}${b.phase3 ? ' [FINAL PHASE]' : b.phase2 ? ' [PHASE 2]' : ''}${(b.stun ?? 0) > 0 ? '  ▼ WEAK x2!' : ''} (${Math.max(0, b.hp)} / ${b.maxHp})`);
+      this.setText('bossName', `${b.name}${b.phase3 ? ' [FINAL PHASE]' : b.phase2 ? ' [PHASE 2]' : ''}${(b.stun ?? 0) > 0 ? '  ▼ WEAK x1.6!' : ''} (${Math.max(0, b.hp)} / ${b.maxHp})`);
       const a3 = (b.phase3Alert ?? 0) > 0, alert = b.phase2Alert > 0 || a3;
       this.t.phase2.setVisible(alert);
       if (alert) { this.setText('phase2', a3 ? '☠ FINAL PHASE ☠' : '⚡ PHASE 2: OVERDRIVE ⚡').setColor(sim.frame % 8 < 4 ? (a3 ? '#e879f9' : '#ef4444') : '#facc15'); }
