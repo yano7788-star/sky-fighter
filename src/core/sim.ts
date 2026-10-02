@@ -1122,7 +1122,7 @@ export class Sim {
         this.applyDamage(e.type === 'kamikaze' ? 45 : e.type === 'drone' ? HORDE.contactDmg : 35);
         continue;
       }
-      if (e.y > H + 30 || (e.side && e.age > 30 && (e.x < -60 || e.x > W + 60))) this.enemies.splice(i, 1);
+      if (e.y > H + 30 || (e.side && ((e.vx ?? 0) < 0 ? e.x < -60 : e.x > W + 60))) this.enemies.splice(i, 1);
     }
   }
 
