@@ -613,6 +613,10 @@ export class GameScene extends Phaser.Scene {
       };
       corner(-1, -1); corner(1, -1); corner(-1, 1); corner(1, 1);
     }
+    if (b.phase3 && !b.dying) {   // 3페이즈: 보라색 외곽 오라가 하나 더
+      const p3 = 30 + Math.sin(frame * 0.3) * 8;
+      g.lineStyle(3, 0xe879f9, 0.8); g.strokeCircle(cx, cy, b.width / 2 + p3);
+    }
     if (b.phase2 && !b.dying) {   // 2페이즈 각성 오라
       const pulse = 12 + Math.sin(frame * 0.22) * 6;
       g.lineStyle(3, Math.floor(frame / 5) % 2 === 0 ? 0xf43f5e : 0xfacc15, 1); g.strokeCircle(cx, cy, b.width / 2 + pulse);

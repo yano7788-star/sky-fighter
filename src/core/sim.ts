@@ -545,7 +545,17 @@ export class Sim {
       this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'vibrate', pattern: 150 });
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ef4444', max: 120 });
     }
+    if (!b.dying && b.tier === 5 && b.phase2 && !b.phase3 && b.hp <= b.maxHp * 0.2) {   // 최종 보스 3페이즈
+      b.phase3 = true; b.phase3Alert = 100;
+      b.shotCdMax = Math.max(14, Math.round(b.shotCdMax * 0.8));
+      b.vx = (b.vx > 0 ? 1 : -1) * Math.abs(b.vx) * 1.2;
+      this.enemyBullets.length = 0;                                  // 페이즈 전환 순간에는 탄을 지워 준다
+      this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'flash', kind: 'enrage', v: 0.8 });
+      this.emit({ t: 'shake', v: 16 }); this.emit({ t: 'vibrate', pattern: [120, 60, 200] });
+      this.boom(b.x, b.y, '#e879f9', 40); this.emit({ t: 'ring', x: b.x, y: b.y, color: '#e879f9', max: 200 });
+    }
     if (b.phase2Alert > 0) b.phase2Alert--;
+    if (b.phase3Alert && b.phase3Alert > 0) b.phase3Alert--;
 
     if (b.dying) {
       // 폭발 중: 이동·공격 정지, 기체 위에서 연쇄 폭발
@@ -593,7 +603,7 @@ export class Sim {
 
     // 체력이 0이 되어도 바로 사라지지 않고 '폭발 연출 → 클리어 → 다음 스테이지' 순서로 이어짐
     if (!b.dying && b.hp <= 0) {
-      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0;
+      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0;
       this.stagePhase = 'BOSS_DYING'; this.phaseTimer = PHASE_FRAMES.BOSS_DYING;
       const { rank, bonus } = rankFor(this.stageHits);
       this.stageRank = rank;

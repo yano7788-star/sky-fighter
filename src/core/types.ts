@@ -48,6 +48,7 @@ export interface Boss {
   color: string; subColor: string;
   shotCdMax: number;
   phase2: boolean; phase2Alert: number;
+  phase3?: boolean; phase3Alert?: number;   // 최종 보스(5스테이지) 전용 3페이즈: 체력 20% 이하
   dying: boolean; deathTimer: number;
 }
 

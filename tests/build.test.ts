@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BOMB, ULT } from '../src/core/data';
+import { BOMB, BOSS_PATTERNS, ULT } from '../src/core/data';
 import { CARDS, fusionAvailable, newBuild, offerCards, statsOf, xpNeeded } from '../src/core/build';
 import { createRng } from '../src/core/rng';
 import { creditsFor, metaParams } from '../src/core/meta';
 import { dailyMutator, dailySeed, dayKey, offerMutators } from '../src/core/mutators';
+import type { EnemyBullet } from '../src/core/types';
 import { Sim } from '../src/core/sim';
 import type { Enemy, EnemyType, SimInput } from '../src/core/types';
 
@@ -488,4 +489,26 @@ describe('일일 도전', () => {
     expect(run()).toBe(run());
   });
   it('dayKey 형식은 YYYY-MM-DD', () => { expect(dayKey(new Date(2026, 9, 2))).toBe('2026-10-02'); });
+});
+
+describe('최종 보스 3페이즈', () => {
+  const boss5 = () => { const s = new Sim(1); s.bossTier = 5; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s)); s.boss!.y = 135; return s; };
+  it('체력 20% 이하에서 한 번만 3페이즈에 들어가고 경고 타이머가 줄어든다', () => {
+    const s = boss5(); const b = s.boss!;
+    b.hp = b.maxHp * 0.45; s.step(idle(s)); expect(b.phase2).toBe(true); expect(b.phase3).toBeFalsy();
+    b.hp = b.maxHp * 0.19; s.step(idle(s)); expect(b.phase3).toBe(true); expect(b.phase3Alert).toBeGreaterThan(90);
+    const cd = b.shotCdMax; for (let i = 0; i < 120; i++) { s.player.invincible = 99999; s.step(idle(s)); }
+    expect(b.shotCdMax).toBe(cd); expect(b.phase3Alert).toBe(0);
+  });
+  it('3페이즈 패턴은 2페이즈와 다르다', () => {
+    const out2: EnemyBullet[] = [], out3: EnemyBullet[] = [];
+    const b = { tier: 5, name: 't', x: 100, y: 100, targetY: 100, width: 100, height: 100, vx: 2, hp: 1, maxHp: 1, shootCooldown: 0, attackMode: 1 as 1 | 2, color: '#fff', subColor: '#fff', shotCdMax: 20, phase2: true, phase2Alert: 0, dying: false, deathTimer: 0 };
+    BOSS_PATTERNS[5][1]![1](b, { player: { x: 300, y: 500 }, frame: 5, emit: x => out2.push(x) });
+    BOSS_PATTERNS[5][2]![1](b, { player: { x: 300, y: 500 }, frame: 5, emit: x => out3.push(x) });
+    expect(out3.length).toBe(14 + 5); expect(out3.length).not.toBe(out2.length);
+  });
+  it('다른 보스에는 3페이즈가 없다', () => {
+    const s = new Sim(1); s.bossTier = 3; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s));
+    s.boss!.y = 135; s.boss!.hp = s.boss!.maxHp * 0.05; s.step(idle(s)); expect(s.boss!.phase3).toBeFalsy();
+  });
 });

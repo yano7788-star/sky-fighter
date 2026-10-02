@@ -46,7 +46,7 @@ const both = (...fns: Pattern[]): Pattern => (b, c) => { for (const f of fns) f(
 
 type PhasePatterns = { 1: Pattern; 2: Pattern };
 
-export const BOSS_PATTERNS: Record<number, [PhasePatterns, PhasePatterns]> = {
+export const BOSS_PATTERNS: Record<number, [PhasePatterns, PhasePatterns, PhasePatterns?]> = {
   1: [
     { 1: line([-20, 20], 3.4, '#facc15', 4.5, 35),            2: fan([-0.3, 0, 0.3], 2.0, '#fb923c', 5.5, 35) },
     { 1: line([-32, -12, 12, 32], 4.2, '#facc15', 4.8, 35),   2: fan([-0.22, 0, 0.22], 3.2, '#ea580c', 6.5, 35, true) },
@@ -67,11 +67,16 @@ export const BOSS_PATTERNS: Record<number, [PhasePatterns, PhasePatterns]> = {
     { 1: ring(8, 3.8, '#c084fc', 4.5, 20, f => f * 0.04),     2: ring(12, 2.0, '#f472b6', 6.5, 20, f => -f * 0.02) },
     { 1: ring(12, 4.2, '#c084fc', 4.8, 20, f => f * 0.06),
       2: both(fan([-0.18, 0, 0.18], 5.2, '#f472b6', 6.0, 20, true), ring(8, 1.8, '#e879f9', 7.0, 20, f => -f * 0.03)) },
+    // 3페이즈 (최종 폭주): 촘촘한 회전 탄막 + 조준 부채꼴
+    { 1: both(ring(14, 4.4, '#e879f9', 5.0, 20, f => f * 0.09), fan([-0.5, -0.25, 0, 0.25, 0.5], 5.6, '#fb7185', 6.0, 20, true)),
+      2: both(ring(16, 2.4, '#c084fc', 6.5, 20, f => -f * 0.05), ring(10, 3.6, '#f472b6', 5.0, 20, f => f * 0.11)) },
   ],
 };
 
 export function fireBossPattern(b: Boss, c: PatternCtx): void {
-  BOSS_PATTERNS[b.tier][b.phase2 ? 1 : 0][b.attackMode](b, c);
+  const tbl = BOSS_PATTERNS[b.tier];
+  const set = (b.phase3 && tbl[2]) ? tbl[2] : tbl[b.phase2 ? 1 : 0];
+  set![b.attackMode](b, c);
 }
 
 // ---------------------------------------------------------------------------
