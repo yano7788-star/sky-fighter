@@ -2,13 +2,13 @@ import { CARDS, hasFusion, type FusionId, newBuild, offerCards, statsOf, xpNeede
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config';
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
-  FIGHT_FRAMES, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
+  FIGHT_FRAMES, HAZARD, HAZARDS, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
   fireBossPattern, rankFor,
 } from './data';
 import { NO_META, pilotOf, type MetaParams } from './meta';
 import { createRng, type Rng } from './rng';
 import type {
-  Boss, Bullet, Companion, Enemy, EnemyBullet, EnemyType, GameState, Gem, Item, ItemType, MidBoss, Missile, PlayerState, Rank,
+  Boss, Bullet, Companion, Enemy, EnemyBullet, EnemyType, GameState, Gem, Hazard, Item, ItemType, MidBoss, Missile, PlayerState, Rank,
   SimEvent, SimInput, SkillKey, StagePhase, UltKind, UltPhase,
 } from './types';
 
@@ -77,6 +77,9 @@ export class Sim {
   enemyBullets: EnemyBullet[] = [];
   enemies: Enemy[] = [];
   items: Item[] = [];
+  hazards: Hazard[] = [];
+  windDir = 0; windWarn = 0; windT = 0;     // 바람: 예고(windWarn) 후 windT 동안 windDir 방향으로 분다
+  private hazCd: Record<string, number> = {};
   events: SimEvent[] = [];
 
   private fireCd = 0;
@@ -207,6 +210,7 @@ export class Sim {
     p.x = Math.max(PLAYER.minX, Math.min(PLAYER.maxX, p.x));
     p.y = Math.max(PLAYER.minY, Math.min(PLAYER.maxY, p.y));
 
+    this.updateHazards();
     this.updateWeapons(inp.fire);
     this.updateBullets();
     this.updateMissiles();
@@ -704,6 +708,62 @@ export class Sim {
   }
 
   // ---------------------------------------------------------------------
+  get windForce(): number { return this.windT > 0 ? this.windDir * HAZARD.windBullet : 0; }
+
+  /** 스테이지 장애물: 일반 전투 구간에서만 나온다 (중간보스·보스·시간 정지 중에는 멈추거나 사라진다) */
+  private updateHazards(): void {
+    const def = HAZARDS[this.stageTier];
+    if (!def || this.stagePhase !== 'FIGHT' || this.midBoss) {
+      this.hazards.length = 0; this.windT = 0; this.windWarn = 0; this.hazCd = {};
+      return;
+    }
+    if (this.timeStopped) return;
+    const p = this.player, loop = 12 * this.loopCount;
+    for (const kind of ['meteor', 'lava', 'wind'] as const) {
+      const base = def[kind];
+      if (!base) continue;
+      const interval = Math.max(80, base - loop);
+      const cd = this.hazCd[kind] ?? (HAZARD.grace + interval);
+      if (this.stageFrames < 1) { this.hazCd[kind] = cd; continue; }
+      if (cd > 0) { this.hazCd[kind] = cd - 1; continue; }
+      this.hazCd[kind] = interval * (0.8 + this.rng() * 0.4);
+      if (kind === 'wind') {
+        if (this.windT <= 0 && this.windWarn <= 0) { this.windDir = this.rng() < 0.5 ? -1 : 1; this.windWarn = HAZARD.windWarn; }
+      } else {
+        const x = Math.max(30, Math.min(W - 30, p.x + (this.rng() - 0.5) * 170));
+        this.hazards.push(kind === 'meteor'
+          ? { kind, x, y: -24, t: 0, warn: HAZARD.meteorWarn, dur: 0 }
+          : { kind, x, y: 0, t: 0, warn: HAZARD.lavaWarn, dur: HAZARD.lavaDur });
+      }
+    }
+    if (this.windWarn > 0 && --this.windWarn === 0) this.windT = HAZARD.windDur;
+    if (this.windT > 0) {
+      this.windT--;
+      p.x = Math.max(PLAYER.minX, Math.min(PLAYER.maxX, p.x + this.windDir * HAZARD.windPush));
+    }
+    for (let i = this.hazards.length - 1; i >= 0; i--) {
+      const h = this.hazards[i];
+      h.t++;
+      if (h.kind === 'meteor') {
+        if (h.t > h.warn) {
+          h.y += HAZARD.meteorSpeed;
+          if (!h.hit && Math.hypot(p.x - h.x, p.y - h.y) < p.radius + HAZARD.meteorR) {
+            h.hit = true; this.applyDamage(HAZARD.damage);
+            this.emit({ t: 'explosion', x: h.x, y: h.y, color: '#fb923c', count: 14 });
+          }
+          if (h.hit || h.y > H + 30) {
+            if (!h.hit) this.emit({ t: 'explosion', x: h.x, y: H - 6, color: '#fb923c', count: 8 });
+            this.hazards.splice(i, 1);
+          }
+        }
+      } else {
+        if (h.t === h.warn) { this.emit({ t: 'shake', v: 5 }); this.emit({ t: 'sfx', name: 'boom' }); }
+        if (h.t > h.warn && !h.hit && Math.abs(p.x - h.x) < HAZARD.lavaHalfW + p.radius * 0.5) { h.hit = true; this.applyDamage(HAZARD.damage); }
+        if (h.t >= h.warn + h.dur) this.hazards.splice(i, 1);
+      }
+    }
+  }
+
   private updateEnemyBullets(): void {
     if (this.timeStopped) return;   // 시간 정지: 적 탄은 허공에 멈춰 있다
     const p = this.player, dogOn = this.comp.dog.active;
@@ -712,7 +772,7 @@ export class Sim {
       if (i >= this.enemyBullets.length) continue;   // applyDamage(리스폰)가 탄을 전부 지운 경우
       const eb = this.enemyBullets[i];
       const sp = this.enemyBulletSpeed;
-      eb.x += eb.vx * sp; eb.y += eb.vy * sp;
+      eb.x += eb.vx * sp + this.windForce; eb.y += eb.vy * sp;
       const d = Math.hypot(p.x - eb.x, p.y - eb.y);
       if (orbit && orbit.some(d => Math.hypot(d.x - eb.x, d.y - eb.y) < 17 + eb.r)) {
         this.enemyBullets.splice(i, 1);

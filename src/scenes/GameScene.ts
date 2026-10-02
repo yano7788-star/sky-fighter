@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { CARDS, lv, type CardId } from '../core/build';
 import { H, PLAYER, STEP_MS, W } from '../core/config';
-import { BOMB, COMPANION_FRAMES, SHIELD_R } from '../core/data';
+import { BOMB, COMPANION_FRAMES, HAZARD, SHIELD_R } from '../core/data';
 import { creditsFor, metaParams, pilotOf } from '../core/meta';
 import { dailyMutator, dailySeed, dayKey } from '../core/mutators';
 import { Sim } from '../core/sim';
@@ -37,6 +37,7 @@ export class GameScene extends Phaser.Scene {
   private bossImg!: Phaser.GameObjects.Image;
   private bossG!: Phaser.GameObjects.Graphics;
   private midG!: Phaser.GameObjects.Graphics;
+  private hazG!: Phaser.GameObjects.Graphics;
   private midImg!: Phaser.GameObjects.Image;
   private auraG!: Phaser.GameObjects.Graphics;
   private beamG!: Phaser.GameObjects.Graphics;
@@ -118,9 +119,10 @@ export class GameScene extends Phaser.Scene {
     this.bossG = this.add.graphics();
     this.bossImg = this.add.image(0, 0, 'boss1_n').setVisible(false);
     this.midG = this.add.graphics();
+    this.hazG = this.add.graphics();
     this.midImg = this.add.image(0, 0, 'boss2_n').setVisible(false);
     this.auraG = this.add.graphics();
-    this.layers.boss.add([this.bossG, this.bossImg, this.midImg, this.midG]);
+    this.layers.boss.add([this.hazG, this.bossG, this.bossImg, this.midImg, this.midG]);
     this.layers.player.add(this.auraG);
     this.fieldG = this.add.graphics(); this.layers.field.add(this.fieldG);
     this.beamG = this.add.graphics(); this.layers.beam.add(this.beamG);
@@ -466,6 +468,7 @@ export class GameScene extends Phaser.Scene {
     this.renderPlayerAuras();
     this.renderWeaponFx();
     this.renderCompanions();
+    this.renderHazards();
     this.renderBoss();
     this.ultfx.render(s);
     this.levelup.update(this.time.now);
@@ -535,6 +538,44 @@ export class GameScene extends Phaser.Scene {
     }
     if (p.magnet > 0 && (p.magnet > 120 || Math.floor(f / 5) % 2 === 0)) {
       g.lineStyle(1.5, 0xc084fc, 0.35); g.strokeCircle(p.x, p.y, 150);
+    }
+  }
+
+  /** 장애물: 예고(깜빡이는 표시) → 위험 구간. 바람은 화면을 가로지르는 줄무늬로 표현 */
+  private renderHazards(): void {
+    const s = this.sim, g = this.hazG, f = s.frame;
+    g.clear();
+    for (const h of s.hazards) {
+      if (h.kind === 'meteor') {
+        if (h.t <= h.warn) {   // 낙하 예고: 위쪽에 깜빡이는 화살표와 흐린 궤적
+          const a = 0.2 + 0.5 * Math.abs(Math.sin(h.t * 0.3));
+          g.lineStyle(2, 0xfb923c, a * 0.5); g.beginPath(); g.moveTo(h.x, 0); g.lineTo(h.x, H); g.strokePath();
+          g.fillStyle(0xfb923c, a); g.fillTriangle(h.x - 12, 10, h.x + 12, 10, h.x, 30);
+        } else {
+          g.lineStyle(10, 0xf97316, 0.25); g.beginPath(); g.moveTo(h.x, h.y - 70); g.lineTo(h.x, h.y); g.strokePath();
+          g.fillStyle(0xea580c, 0.9); g.fillCircle(h.x, h.y, 15); g.fillStyle(0xfde68a, 0.95); g.fillCircle(h.x, h.y, 8);
+        }
+      } else {
+        const hw = HAZARD.lavaHalfW;
+        if (h.t <= h.warn) {
+          const a = 0.1 + 0.25 * Math.abs(Math.sin(h.t * 0.25));
+          g.fillStyle(0xef4444, a); g.fillRect(h.x - hw, 0, hw * 2, H);
+          g.lineStyle(1, 0xfca5a5, a * 2); g.strokeRect(h.x - hw, 0, hw * 2, H);
+        } else {
+          const k = Math.min(1, (h.t - h.warn) / 5) * Math.min(1, (h.warn + h.dur - h.t) / 8 + 0.3);
+          g.fillStyle(0xdc2626, 0.5 * k); g.fillRect(h.x - hw * 1.5, 0, hw * 3, H);
+          g.fillStyle(0xf97316, 0.75 * k); g.fillRect(h.x - hw, 0, hw * 2, H);
+          g.fillStyle(0xfef3c7, 0.9 * k); g.fillRect(h.x - hw * 0.35, 0, hw * 0.7, H);
+        }
+      }
+    }
+    if (s.windWarn > 0 || s.windT > 0) {   // 바람 줄무늬
+      const a = s.windT > 0 ? 0.28 : 0.1 + 0.1 * Math.abs(Math.sin(f * 0.3));
+      for (let i = 0; i < 16; i++) {
+        const y = (i * 53 + 17) % H, len = 50 + (i % 4) * 25, sp = 14 + (i % 3) * 5;
+        const x = (((f * sp * s.windDir + i * 97) % (W + 160)) + (W + 160)) % (W + 160) - 80;
+        g.lineStyle(2, 0xe0f2fe, a); g.beginPath(); g.moveTo(x, y); g.lineTo(x - s.windDir * len, y); g.strokePath();
+      }
     }
   }
 

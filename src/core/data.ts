@@ -118,6 +118,15 @@ export const enemyHpScale = (tier: number) => 1 + 0.14 * (tier - 1);
 /** 적이 이 높이(y) 아래로 내려와 '화면 안'에 들어오기 전에는 맞지 않는다 (화면 밖에서 죽는 문제 방지) */
 export const ON_SCREEN_Y = 14;
 
+/** 스테이지 장애물 출현 간격(프레임). 2: 바람 / 3: 운석 / 4: 용암 기둥 / 5: 전부. 무한 모드 루프마다 12프레임씩 빨라진다 */
+export const HAZARDS: Record<number, { meteor?: number; lava?: number; wind?: number }> = {
+  2: { wind: 780 },
+  3: { meteor: 210 },
+  4: { lava: 240 },
+  5: { meteor: 300, lava: 360, wind: 960 },
+};
+export const HAZARD = { meteorWarn: 60, meteorSpeed: 10, meteorR: 14, lavaWarn: 70, lavaDur: 40, lavaHalfW: 22, damage: 15, windWarn: 60, windDur: 180, windPush: 3.5, windBullet: 0.9, grace: 300 };
+
 // ---------------------------------------------------------------------------
 // 아이템 드랍: 한 번의 난수로 기본 4종, 별도 난수로 신규 3종
 // ---------------------------------------------------------------------------

@@ -512,3 +512,38 @@ describe('최종 보스 3페이즈', () => {
     s.boss!.y = 135; s.boss!.hp = s.boss!.maxHp * 0.05; s.step(idle(s)); expect(s.boss!.phase3).toBeFalsy();
   });
 });
+
+describe('스테이지 장애물', () => {
+  const at = (tier: number) => { const s = new Sim(7); s.startAtTier(tier); s.stagePhase = 'FIGHT'; s.stageFrames = 0; s.player.invincible = 0; return s; };
+  const run = (s: Sim, n: number, f?: () => void) => { for (let i = 0; i < n; i++) { f?.(); s.step(idle(s)); } };
+  it('1스테이지에는 장애물이 없다', () => {
+    const s = at(1); s.player.invincible = 99999; run(s, 1500);
+    expect(s.hazards.length).toBe(0); expect(s.windT + s.windWarn).toBe(0);
+  });
+  it('3스테이지: 운석이 예고 후 떨어지고 맞으면 피해를 준다', () => {
+    const s = at(3); s.player.invincible = 99999; let seen = false;
+    run(s, 800, () => { s.player.invincible = 99999; if (s.hazards.some(h => h.kind === 'meteor')) seen = true; s.stageFrames = Math.min(s.stageFrames, 500); });
+    expect(seen).toBe(true);
+    s.player.invincible = 0; const e0 = s.player.energy;
+    s.hazards.push({ kind: 'meteor', x: s.player.x, y: s.player.y - 5, t: 61, warn: 60, dur: 0 });
+    s.step(idle(s)); expect(s.player.energy).toBeLessThan(e0);
+  });
+  it('4스테이지: 용암 기둥은 예고 중에는 안전하고 분출하면 아프다', () => {
+    const s = at(4); s.player.invincible = 0; const e0 = s.player.energy;
+    s.hazards.push({ kind: 'lava', x: s.player.x, y: 0, t: 5, warn: 70, dur: 40 });
+    run(s, 30); expect(s.player.energy).toBe(e0);
+    s.hazards.push({ kind: 'lava', x: s.player.x, y: 0, t: 70, warn: 70, dur: 40 });
+    s.step(idle(s)); expect(s.player.energy).toBeLessThan(e0);
+  });
+  it('2스테이지: 바람이 불면 적 탄이 밀리고 보스전에서는 사라진다', () => {
+    const s = at(2); s.windDir = 1; s.windT = 100;
+    expect(s.windForce).toBeGreaterThan(0);
+    s.stagePhase = 'WARNING'; s.step(idle(s));
+    expect(s.windT).toBe(0); expect(s.hazards.length).toBe(0);
+  });
+  it('시간 정지 중에는 장애물이 진행하지 않는다', () => {
+    const s = at(3); s.hazards.push({ kind: 'meteor', x: 100, y: -24, t: 0, warn: 60, dur: 0 });
+    (s as any).ult.phase = 'ACTIVE'; (s as any).ult.kind = 'timestop';
+    s.step(idle(s)); expect(s.hazards[0].t).toBe(0);
+  });
+});
