@@ -90,7 +90,7 @@ export class Sim {
     this.meta = meta;
     this.stats = statsOf(this.build, meta);
     this.player = this.newPlayer();
-    this.player.maxEnergy += meta.energyBonus; this.player.energy = this.player.maxEnergy;
+    this.player.maxEnergy = Math.round((this.player.maxEnergy + meta.energyBonus) * meta.mut.playerHp); this.player.energy = this.player.maxEnergy;
     this.bombs += meta.startBombs;
     this.ult.gauge = meta.ultStart;
     this.ult.kind = pilotOf(meta.pilot).ult;
@@ -106,7 +106,7 @@ export class Sim {
   get stageTier(): number { return tierIdx(this.bossTier); }
   get loopCount(): number { return loopOf(this.bossTier); }
   /** 적 탄 속도 배율: 루프가 돌수록 빨라진다 */
-  get enemyBulletSpeed(): number { return Math.min(1.45, 1 + 0.06 * this.loopCount); }
+  get enemyBulletSpeed(): number { return Math.min(1.45, 1 + 0.06 * this.loopCount) * this.meta.mut.bulletSpeed; }
 
   private newPlayer(): PlayerState {
     return {
@@ -523,7 +523,7 @@ export class Sim {
     this.boss = {
       tier, name: c.name.replace(/STAGE \d+/, 'STAGE ' + this.bossTier), x: W / 2, y: -120, targetY: 135, width: c.w, height: c.h,
       vx: 2.3 + tier * 0.25, hp, maxHp: hp, shootCooldown: 0, attackMode: 1,
-      color: c.color, subColor: c.subColor, shotCdMax: Math.max(14, Math.round(c.shotCd * (1 - 0.04 * loop))),
+      color: c.color, subColor: c.subColor, shotCdMax: Math.max(12, Math.round(c.shotCd * (1 - 0.04 * loop) * this.meta.mut.bossShot)),
       phase2: false, phase2Alert: 0, dying: false, deathTimer: 0,
     };
   }
@@ -738,8 +738,8 @@ export class Sim {
     const speed = type === 'scout' ? 3.2 + this.rng() * 1.5
       : type === 'zigzag' ? 2.4 + this.rng() * 0.6
       : type === 'kamikaze' ? 4.2 + this.rng() * 1.0 : 2.6;
-    const hp = Math.ceil(def.hp * enemyHpScale(this.bossTier));
-    this.enemies.push({ type, x, y: -30, hp, maxHp: hp, speed, baseX: x, age: 0, fireCd: 50 + this.rng() * 60, hold: 0 });
+    const hp = Math.max(1, Math.round(def.hp * enemyHpScale(this.bossTier) * this.meta.mut.enemyHp));
+    this.enemies.push({ type, x, y: -30, hp, maxHp: hp, speed: speed * this.meta.mut.enemySpeed, baseX: x, age: 0, fireCd: 50 + this.rng() * 60, hold: 0 });
   }
 
   private aimedShot(e: Enemy, spd: number, color: string, r: number, spread = 0): void {
@@ -781,7 +781,7 @@ export class Sim {
     const p = this.player, dogOn = this.comp.dog.active;
     const spawnOk = this.stagePhase === 'FIGHT' || this.stagePhase === 'BOSS' ||
       (this.stagePhase === 'INTRO' && this.phaseTimer < PHASE_FRAMES.INTRO - 50);
-    const interval = Math.max(10, SPAWN_INTERVAL[this.stageTier] - 2 * this.loopCount);
+    const interval = Math.max(10, Math.round((SPAWN_INTERVAL[this.stageTier] - 2 * this.loopCount) * this.meta.mut.spawn));
     if (spawnOk && !this.timeStopped && this.frame % (this.boss || this.midBoss ? interval * 2 : interval) === 0) this.spawnEnemy();
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -836,7 +836,7 @@ export class Sim {
   /** 처치 점수: 연속 처치(콤보)에 따라 배율 적용 */
   private killScore(base: number): number {
     this.combo++; this.comboTimer = COMBO_WINDOW;
-    const pts = Math.round(base * comboMultiplier(this.combo));
+    const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score);
     this.score += pts;
     this.emit({ t: 'combo', combo: this.combo, mult: comboMultiplier(this.combo) });
     return pts;

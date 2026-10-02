@@ -132,7 +132,7 @@ export class TitleScene extends Phaser.Scene {
     if (this.started) return;
     this.started = true;
     audio.unlock();    // 사용자 제스처 안에서 오디오 잠금 해제
-    this.scene.start('GameScene');
+    this.scene.start('MutatorScene');
   }
 
   update(time: number): void {

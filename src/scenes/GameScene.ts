@@ -72,7 +72,12 @@ export class GameScene extends Phaser.Scene {
   private padY = 0;
   private padPrev: Record<string, boolean> = {};
 
+  private mutatorId: string | null = null;
+
   constructor() { super('GameScene'); }
+
+  /** 출격 전에 고른 런 모디파이어를 받는다 (MutatorScene에서 전달) */
+  init(data: { mutator?: string | null }): void { this.mutatorId = data?.mutator ?? null; }
 
   create(): void {
     // Phaser는 같은 씬 인스턴스를 재사용하므로, 이전 실행에서 파괴된 오브젝트 참조를 반드시 버린다
@@ -126,7 +131,7 @@ export class GameScene extends Phaser.Scene {
   /** 격납고 강화 + 선택한 파일럿 패시브를 반영해 새 런을 시작하고, 파일럿의 기체 스킨을 적용한다 */
   private newSim(): void {
     const m = loadMeta();
-    this.sim = new Sim((Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected));
+    this.sim = new Sim((Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected, this.mutatorId));
     if (this.playerImg) this.applySkin(pilotOf(m.pilots.selected).skin);
   }
 
@@ -228,7 +233,7 @@ export class GameScene extends Phaser.Scene {
   /** 결과 화면 입력: 게임오버=재출격, 미션 클리어=[무한 모드 계속]/[타이틀로] (좌표가 없으면 키보드·패드 → 무한 모드 계속) */
   private resultTap(x?: number, y?: number): void {
     if (this.resultTimer > 0) return;
-    if (this.resultKind === 'GAMEOVER') { this.resetRun(); return; }
+    if (this.resultKind === 'GAMEOVER') { this.scene.start('MutatorScene'); return; }   // 재출격: 모디파이어를 다시 고른다
     let choice: 'continue' | 'title' = 'continue';
     if (x !== undefined && y !== undefined) {
       if (inRect(RESULT_BTN.title, x, y)) choice = 'title';
@@ -394,7 +399,7 @@ export class GameScene extends Phaser.Scene {
     this.newRecord = s.score > this.bestBefore;
     this.best = { score: Math.max(this.best.score, s.score), stage: Math.max(this.best.stage, s.bossTier) };
     saveBest(this.best);
-    const total = creditsFor(s.score, s.bossTier, s.endless || kind === 'GAMECLEAR');
+    const total = Math.floor(creditsFor(s.score, s.bossTier, s.endless || kind === 'GAMECLEAR') * s.meta.mut.credit);
     const meta = loadMeta(); meta.credits += Math.max(0, total - this.creditsPaid); saveMeta(meta);   // 무한 모드로 이어 간 경우 이미 지급한 크레딧은 제외
     this.creditsPaid = Math.max(this.creditsPaid, total); this.runCredits = total;
     this.resultKind = kind; this.resultTimer = 90;

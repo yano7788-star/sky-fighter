@@ -1,4 +1,5 @@
 // 영구 성장(격납고): 런이 끝날 때 크레딧을 얻고, 크레딧으로 다음 런부터 적용되는 강화를 산다. (순수 규칙)
+import { effectsOf, type MutatorEffects } from './mutators';
 export interface MetaParams {
   energyBonus: number;   // 시작 최대 에너지 보너스
   startBombs: number;    // 시작 폭탄 추가
@@ -9,6 +10,8 @@ export interface MetaParams {
   dmgMult: number;       // 피해 배율 (파일럿 패시브)
   magnetMult: number;    // 젬·아이템 흡수 범위 배율 (파일럿 패시브)
   pilot: string;         // 선택한 파일럿 id (궁극기 종류 결정)
+  mutator: string | null; // 이번 런의 모디파이어 id
+  mut: MutatorEffects;   // 모디파이어 효과(배율)
 }
 export type MetaId = 'hull' | 'munitions' | 'intel' | 'salvage' | 'burst';
 export interface MetaUpgrade { id: MetaId; name: string; icon: string; max: number; desc: (lv: number) => string; cost: (lv: number) => number; }
@@ -47,13 +50,15 @@ export const PILOTS: PilotDef[] = [
 ];
 export const pilotOf = (id: string): PilotDef => PILOTS.find(p => p.id === id) ?? PILOTS[0];
 
-export function metaParams(levels: MetaLevels, pilot: PilotId | string = 'ace'): MetaParams {
+export function metaParams(levels: MetaLevels, pilot: PilotId | string = 'ace', mutator: string | null = null): MetaParams {
+  const mut = effectsOf(mutator);
   const l = (id: MetaId) => levels[id] ?? 0;
   const p = pilotOf(pilot).passive;
   return {
     energyBonus: l('hull') * 10 + (p.energyBonus ?? 0), startBombs: l('munitions'),
-    xpMult: (1 + l('intel') * 0.1) * (p.xpMult ?? 1), luckMult: 1 + l('salvage') * 0.1, ultStart: l('burst') * 20,
-    rateMult: p.rateMult ?? 1, dmgMult: p.dmgMult ?? 1, magnetMult: p.magnetMult ?? 1, pilot: pilotOf(pilot).id,
+    xpMult: (1 + l('intel') * 0.1) * (p.xpMult ?? 1) * mut.xp, luckMult: (1 + l('salvage') * 0.1) * mut.drop, ultStart: l('burst') * 20,
+    rateMult: p.rateMult ?? 1, dmgMult: (p.dmgMult ?? 1) * mut.dmg, magnetMult: p.magnetMult ?? 1, pilot: pilotOf(pilot).id,
+    mutator: mutator ?? null, mut,
   };
 }
 export const NO_META: MetaParams = metaParams({});

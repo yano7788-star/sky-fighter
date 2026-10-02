@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { H, PHASE_FRAMES, W } from '../core/config';
 import { BOSS_CONFIGS } from '../core/data';
+import { mutatorOf } from '../core/mutators';
 import type { Sim } from '../core/sim';
 import { contentCenter, R } from './textures';
 
@@ -74,6 +75,7 @@ export class Hud {
     text('missile', 50, 66, 12, '#ec4899', 0, 1);
     text('combo', 50, 84, 13, '#facc15', 0, 1).setShadow(0, 0, '#000', 4, true, true);
     text('level', W / 2, 50, 12, '#7dd3fc', 0.5, 1);
+    text('mut', W / 2, 63, 10.5, '#fbbf24', 0.5, 1);
     this.btn = {
       ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(30, 36)),
       cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(30, 28)),
@@ -242,6 +244,8 @@ export class Hud {
     g.fillStyle(0x0f172a, 0.7); g.fillRect(0, 0, W, 5);
     g.fillStyle(0x22d3ee, 1); g.fillRect(0, 0, W * xr, 5);
     this.setText('level', `LV ${sim.level}`);
+    const md = mutatorOf(sim.meta.mutator);
+    this.setText('mut', md ? `${md.icon} ${md.name}` : '').setColor(md?.color ?? '#fbbf24');
 
     // 4-3. 스킬 버튼 (필살기 게이지 링 / 동료)
     this.renderSkillButtons(sim);

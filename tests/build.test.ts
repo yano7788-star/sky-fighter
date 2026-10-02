@@ -3,6 +3,7 @@ import { BOMB, ULT } from '../src/core/data';
 import { CARDS, fusionAvailable, newBuild, offerCards, statsOf, xpNeeded } from '../src/core/build';
 import { createRng } from '../src/core/rng';
 import { creditsFor, metaParams } from '../src/core/meta';
+import { offerMutators } from '../src/core/mutators';
 import { Sim } from '../src/core/sim';
 import type { Enemy, EnemyType, SimInput } from '../src/core/types';
 
@@ -401,5 +402,44 @@ describe('무한 모드', () => {
     s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
     s.boss!.hp = 0; s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
     expect(s.ult.gauge).toBeLessThan(100);
+  });
+});
+
+describe('런 모디파이어', () => {
+  const sim = (id: string | null) => new Sim(1, metaParams({}, 'ace', id));
+  it('모디파이어가 없으면 기본값과 동일하다', () => {
+    const a = sim(null);
+    expect(a.player.maxEnergy).toBe(100); expect(a.enemyBulletSpeed).toBe(1); expect(a.meta.mutator).toBeNull();
+  });
+  it('유리 대포: 최대 에너지 60%, 내 피해 1.5배', () => {
+    const s = sim('glass'), base = sim(null);
+    expect(s.player.maxEnergy).toBe(60); expect(s.stats.dmgMult).toBeCloseTo(base.stats.dmgMult * 1.5);
+  });
+  it('탄막 폭풍: 적 탄이 빠르고 보스 공격 주기가 짧다', () => {
+    const s = sim('storm');
+    expect(s.enemyBulletSpeed).toBeCloseTo(1.2);
+    s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s));
+    expect(s.boss!.shotCdMax).toBe(Math.round(44 * 0.85));
+  });
+  it('강철 장갑 / 평온한 하늘: 일반 적 체력이 변한다', () => {
+    const spawn = (id: string | null) => { const s = sim(id); for (let i = 0; i < 400 && s.enemies.length === 0; i++) { s.player.invincible = 99999; s.step(idle(s)); } return s.enemies[0].maxHp; };
+    expect(spawn('tough')).toBeGreaterThan(spawn(null)); expect(spawn('calm')).toBeLessThan(spawn(null));
+  });
+  it('질주하는 적: 적 이동 속도 +25%', () => {
+    const spawn = (id: string | null) => { const s = new Sim(5, metaParams({}, 'ace', id)); for (let i = 0; i < 400 && s.enemies.length === 0; i++) { s.player.invincible = 99999; s.step(idle(s)); } return s.enemies[0].speed; };
+    expect(spawn('swift')).toBeCloseTo(spawn(null) * 1.25);
+  });
+  it('보급 단절: 아이템이 훨씬 덜 나온다', () => {
+    const drops = (id: string | null) => { const s = new Sim(3, metaParams({}, 'ace', id)); let n = 0; for (let i = 0; i < 3000; i++) { s.enemies.push({ ...mkEnemy('scout', 225, 300), hp: 0, maxHp: 1 }); s.player.invincible = 99999; s.step(idle(s)); } n = s.items.length; return n; };
+    expect(drops('famine')).toBeLessThan(drops(null));
+  });
+  it('점수/경험치/크레딧 배율이 반영된다', () => {
+    const s = sim('swift'); expect(s.stats.xpMult).toBeCloseTo(1.25); expect(s.meta.mut.credit).toBe(1.2);
+    const kill = (id: string | null) => { const t = sim(id); t.enemies.push({ ...mkEnemy('scout', 225, 300), hp: 0, maxHp: 1 }); t.step(idle(t)); return t.score; };
+    expect(kill('swift')).toBeGreaterThan(kill(null) - 1);
+    expect(kill('glass')).toBe(Math.round(10 * 1.3));
+  });
+  it('제안은 서로 다른 3개', () => {
+    const o = offerMutators(createRng(9)); expect(o).toHaveLength(3); expect(new Set(o).size).toBe(3);
   });
 });
