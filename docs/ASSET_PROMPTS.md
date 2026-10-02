@@ -195,3 +195,14 @@ A horizontal sprite sheet of a stylized sci-fi explosion animation in exactly 10
 **추가 후보(다음 업데이트용, 아직 코드 없음)** — 필요하면 이 순서로: ① `enemy_jelly.png` 공중 해파리형 생명체(전기 촉수) ② `enemy_crab.png` 지상 게형 메카(측면 이동) ③ `enemy_gunship_side.png` 측면 진입용 대형 헬기형 ④ `enemy_swarm_bug.png` 곤충형 벌떼(드론 대체 스킨).
 
 `enemy_drone/mine/turret/rock`을 받으면: "에셋 넣었어"라고 알려 주세요 → 크로마키 제거·WebP 변환·로딩 연결(`BootScene`)·크기 조정(`GameScene.ENEMY_W`)까지 처리합니다.
+
+### 7-1. 신규 적 4종을 한 장으로 (이 프롬프트 하나면 됩니다) — 파일명 `enemies_new_sheet.png`
+```
+A single image containing a 2x2 grid of four distinct top-down view sci-fi shooter game enemy sprites, each centered inside its own equal square cell with generous margin, cells clearly separated, semi-realistic detailed sci-fi style matching a vertical-scrolling spaceship shooter. All four on one perfectly flat solid pure green (#00FF00) background with no gradient, no shadow and no cell borders. None of the subjects contains any green.
+Top-left: a tiny hostile swarm drone — a glowing red single-eye spherical body with two short swept wings, simple and readable even when thirty appear at once.
+Top-right: a spiked floating space mine — dark metal sphere with eight radial spikes, a pulsing red core light and yellow hazard stripes.
+Bottom-left: a ground anti-air turret emplacement seen from above — octagonal steel base, round rotating hub with a triple-barrel cannon pointing downward, yellow warning lights.
+Bottom-right: a living meteor creature — a jagged cracked asteroid body with glowing molten-orange fissures and two small glowing eyes in the cracks.
+Keep the bottom-right corner of the whole image empty. No text, no labels, no watermark.
+```
+받으면 `assets-src/incoming/enemies_new_sheet.png` 로 넣고 "에셋 넣었어"라고 알려 주세요 → 2×2로 자르고 크로마키 제거 후 `enemy_drone/mine/turret/rock`으로 연결합니다.

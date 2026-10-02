@@ -19,7 +19,7 @@ import { loadAch, saveAch, loadBest, loadDaily, loadMeta, saveBest, saveDaily, s
 const MOVE_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' '];
 const PREVENT_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '];
 
-const ENEMY_W: Record<string, number> = { sniper: 58, scout: 42, zigzag: 46, kamikaze: 36, drone: 26, mine: 42, turret: 52, rock: 58 };   // 화면에 그려지는 가로 크기(논리 px)
+const ENEMY_W: Record<string, number> = { sniper: 58, scout: 42, zigzag: 46, kamikaze: 36, drone: 40, mine: 50, turret: 54, rock: 56 };   // 화면에 그려지는 가로 크기(논리 px)
 
 export class GameScene extends Phaser.Scene {
   private sim!: Sim;
