@@ -16,7 +16,7 @@ export const MISSIONS: MissionDef[] = [
   { id: 'hyper', desc: '하이퍼 모드 1번 발동', goal: 1, reward: 80, kind: 'sum', value: r => r.hypers },
   { id: 'fusion', desc: '융합 카드 획득', goal: 1, reward: 70, kind: 'max', value: r => r.fusions },
   { id: 'stage3', desc: '3스테이지에 도달', goal: 3, reward: 70, kind: 'max', value: r => r.bossTier },
-  { id: 'bosses', desc: '보스 2기 격파', goal: 2, reward: 90, kind: 'sum', value: r => Math.max(0, r.bossTier - (r.cleared ? 0 : 1)) },
+  { id: 'bosses', desc: '보스 2기 격파', goal: 2, reward: 90, kind: 'sum', value: r => Math.max(0, r.bossTier - (r.endless || !r.cleared ? 1 : 0)) },
   { id: 'ults', desc: '궁극기 2번 사용', goal: 2, reward: 60, kind: 'sum', value: r => r.ults },
   { id: 'score', desc: '한 판에 점수 8,000 달성', goal: 8000, reward: 80, kind: 'max', value: r => r.score },
   { id: 'nohit', desc: '피격 없이 2스테이지에 도달', goal: 1, reward: 90, kind: 'max', value: r => (r.hits === 0 && r.bossTier >= 2 ? 1 : 0) },

@@ -63,7 +63,8 @@ export class GameScene extends Phaser.Scene {
   private lastBossStop = -99;                          // 보스 피격 히트스톱 쿨다운 (sim.frame 기준)
   private dmgAcc = 0; private dmgAccAt = 0;           // 보스에게 들어간 피해량 숫자 팝업 누적
   private slowUntil = 0; private slowScale = 1;       // 슬로 모션(실시간 ms)
-  private quitArmed = false;     // 일시정지 메뉴의 '메인 화면으로'를 한 번 눌러 확인 대기 중
+  private quitArmed = false;
+  private missionDay = '';                            // 미션 반영 기준 날짜 (자정을 넘기면 이전 기록 차감을 끊는다)     // 일시정지 메뉴의 '메인 화면으로'를 한 번 눌러 확인 대기 중
   private acc = 0;
   private hitStop = 0;
   private shake = 0;
@@ -163,6 +164,8 @@ export class GameScene extends Phaser.Scene {
   private resetRun(): void {
     this.newSim();
     this.acc = 0; this.hitStop = 0; this.shake = 0; this.muzzle = 0; this.paused = false;
+    this.bossFlash = 0; this.midFlash = 0; this.bossKick = 0; this.midKick = 0; this.lastBossStop = -99; this.dmgAcc = 0; this.dmgAccAt = 0;   // 연출 상태 초기화 (씬 인스턴스가 재사용된다)
+    this.slowUntil = 0; this.slowScale = 1; this.quitArmed = false; this.missionDay = '';
     this.resultKind = null; this.newRecord = false;
     this.targetX = W / 2; this.targetY = PLAYER.spawnY;
     this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
@@ -184,9 +187,10 @@ export class GameScene extends Phaser.Scene {
     kb.on('keydown', (e: KeyboardEvent) => this.onKeyDown(e));
     kb.on('keyup', (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase()));
 
-    const onHidden = () => { this.persistBestInRun(); this.setPaused(true); };
-    this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden); audio.resume(); });
+    const onHidden = () => { this.persistBestInRun(); this.setPaused(true); audio.suspend(); };   // 카드 선택·결과 화면 중에도 탭을 숨기면 소리를 멈춘다
+    const onVisible = () => { if (!this.paused) audio.resume(); };
+    this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden); this.game.events.on(Phaser.Core.Events.VISIBLE, onVisible);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden); this.game.events.off(Phaser.Core.Events.VISIBLE, onVisible); audio.resume(); });
     const onBlur = () => this.keys.clear();
     const onPageHide = () => this.persistBestInRun();
     window.addEventListener('blur', onBlur); window.addEventListener('pagehide', onPageHide);
@@ -199,7 +203,7 @@ export class GameScene extends Phaser.Scene {
     if (e.repeat) { if (!this.paused && !this.resultKind && MOVE_KEYS.includes(k)) this.keys.add(k); return; }
     if (this.resultKind === 'GAMECLEAR' && k === 'escape') { if (this.resultTimer <= 0) this.scene.start('TitleScene'); return; }
     if (k === 'p' || k === 'escape') { this.setPaused(!this.paused); return; }
-    if (this.paused) { if (k === 'enter' || k === ' ') this.setPaused(false); else if (k === 'q' || k === 't') this.pressQuit(); return; }
+    if (this.paused) { if (k === 'enter' || k === ' ') this.setPaused(false); else if (k === 't') this.pressQuit(); return; }   // 종료 키는 T만 (Q는 고양이 키)
     if (k === 'm') { audio.toggleMute(); return; }
     if (this.sim.pending) {   // 레벨업 카드 선택
       if (k === '1' || k === '2' || k === '3') this.pickCard(Number(k) - 1);
@@ -519,6 +523,7 @@ export class GameScene extends Phaser.Scene {
     }
     {   // 일일 미션: 이번 판 기록을 누적하고 새로 완료한 미션의 크레딧을 지급
       const key = dayKey(), stats = s.runStats(!!this.daily);
+      if (this.missionDay !== key) { this.missionPrev = null; this.missionDay = key; }   // 날짜가 바뀌면 이전 날의 기록을 차감하지 않는다
       const r = applyRun(loadMissions(key), key, stats, this.missionPrev);
       this.missionPrev = stats; saveMissions(r.save);
       if (r.completed.length) {
@@ -582,7 +587,7 @@ export class GameScene extends Phaser.Scene {
     this.renderCompanions();
     this.renderHazards();
     this.renderBoss();
-    this.ultfx.render(s);
+    if (this.paused || s.pending || this.resultKind) this.ultfx.hide(); else this.ultfx.render(s);
     this.levelup.update(this.time.now);
 
     this.fx.render();
@@ -757,6 +762,12 @@ export class GameScene extends Phaser.Scene {
   /** 보스 특수 공격 연출: 레이저(빔 1~3줄기) / 돌진(예고 레인 + 잔상) */
   private renderBossSpecial(b: NonNullable<typeof this.sim.boss>, g: Phaser.GameObjects.Graphics): void {
     const sp = b.sp!, frame = this.sim.frame;
+    if (this.sim.timeStopped && sp.state === 'ACT') {   // 시간 정지 중에는 멈춘 공격을 흐린 윤곽으로만 보여 준다
+      g.lineStyle(2, 0xff6b6b, 0.25);
+      if (sp.kind === 'laser') for (const o of sp.beams) g.strokeRect(b.x + o - 34, b.y + b.height * 0.55, 68, H);
+      else g.strokeRect(b.x - b.width / 2, 0, b.width, H);
+      return;
+    }
     if (sp.kind === 'swarm') {   // 대군 소환: 보스 주위로 붉은 링이 모여든다
       const k = sp.t / 60;
       g.lineStyle(3, 0xfbbf24, 0.4 + 0.5 * k); g.strokeCircle(b.x, b.y, b.width * (1.1 - 0.4 * k) + 10);

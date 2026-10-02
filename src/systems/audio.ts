@@ -144,7 +144,11 @@ class AudioSystem {
     ng.gain.setValueAtTime(vol, t); ng.gain.exponentialRampToValueAtTime(0.004, t + dur); ns.start(t);
   }
   /** BGM 덕킹: 강한 타격 순간 음악을 잠깐 낮춰 효과음을 부각 */
-  duck(ms: number, amt = 0.5): void { this.duckUntil = performance.now() + ms; this.duckAmt = amt; }
+  duck(ms: number, amt = 0.5): void {   // 겹치면 더 길고 더 깊은 쪽을 따른다
+    const now = performance.now(), active = now < this.duckUntil;
+    this.duckAmt = active ? Math.min(this.duckAmt, amt) : amt;
+    this.duckUntil = Math.max(this.duckUntil, now + ms);
+  }
 
   // ---------------------------------------------------------------- BGM
   private get(name: BgmName): Track {

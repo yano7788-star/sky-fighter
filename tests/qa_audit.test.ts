@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { newlyUnlocked } from '../src/core/achievements';
+import { MISSIONS } from '../src/core/missions';
 import { Sim } from '../src/core/sim';
 
 const idle = { targetX: 225, targetY: 660, fire: false, bomb: false, skill: null } as const;
@@ -29,12 +31,36 @@ describe('QA audit', () => {
     expect(b.sp).toBeTruthy(); expect(b.sp.t).toBe(5);
   });
 
-  it('시간 정지 중에도 보스 2페이즈 연출(phase2Alert/slowmo)이 시작된다', () => {
+  it('시간 정지 중에는 보스 페이즈 전환이 보류되고, 정지가 풀린 직후 전환된다', () => {
     const s = new Sim(4) as any;
     s.stagePhase = 'BOSS'; s.spawnBoss(1); const b = s.boss; b.y = b.targetY;
     s.ult.kind = 'timestop'; s.ult.phase = 'ACTIVE'; s.ult.t = 0; b.hp = b.maxHp * 0.4;
-    s.step(idle);
+    s.step(idle); expect(b.phase2).toBe(false); expect(b.phase2Alert).toBe(0);
+    s.ult.phase = 'IDLE'; s.step(idle);
     expect(b.phase2).toBe(true);
     expect(s.drainEvents().some((e: any) => e.t === 'slowmo')).toBe(true);
+  });
+});
+
+describe('QA audit 2 (수정 확인)', () => {
+  const noop = { targetX: 225, targetY: 660, fire: false, bomb: false, skill: null } as const;
+  it('히트스톱 중 비상 폭탄도 통계(run.bombs)에 잡힌다', () => {
+    const s = new Sim(1) as any; s.bombs = 2; s.frame = 100; s.fireBomb();
+    expect(s.run.bombs).toBe(1); expect(s.bombs).toBe(1);
+  });
+  it('시간 정지가 끝나는 순간 짧은 무적이 생긴다', () => {
+    const s = new Sim(2) as any; s.player.invincible = 0;
+    s.ult.kind = 'timestop'; s.ult.phase = 'ACTIVE'; s.ult.t = 149;
+    s.step(noop); expect(s.ult.phase).toBe('IDLE'); expect(s.player.invincible).toBeGreaterThanOrEqual(29);
+  });
+  it('미션 bosses 값은 무한 모드에서 과대 집계되지 않는다', () => {
+    const m = (MISSIONS as any[]).find(x => x.id === 'bosses');
+    const base = { score: 0, bossTier: 6, cleared: true, endless: true, hypers: 0, kills: 0, maxCombo: 0, graze: 0, hits: 0, bombs: 0, ults: 0, fusions: 0, mutator: null, daily: false };
+    expect(m.value(base)).toBe(5); expect(m.value({ ...base, endless: false, bossTier: 5 })).toBe(5); expect(m.value({ ...base, endless: false, cleared: false, bossTier: 3 })).toBe(2);
+  });
+  it('일일 도전 업적은 2스테이지 이상 도달해야 얻는다', () => {
+    const base = { score: 0, bossTier: 1, cleared: false, endless: false, hypers: 0, kills: 0, maxCombo: 0, graze: 0, hits: 0, bombs: 0, ults: 0, fusions: 0, mutator: null, daily: true };
+    expect(newlyUnlocked(base, []).some(a => a.id === 'daily')).toBe(false);
+    expect(newlyUnlocked({ ...base, bossTier: 2 }, []).some(a => a.id === 'daily')).toBe(true);
   });
 });

@@ -109,8 +109,11 @@ export function buildStaticTextures(scene: Phaser.Scene): void {
 }
 
 /** 적 탄환: 외곽 블랙 + 네온 바디 + 백색 코어 (색·반경 조합별로 한 번만 생성) */
+const bulletKeys = new Map<string, Map<number, string>>();   // 매 프레임 탄마다 문자열을 만들지 않도록 캐시
 export function bulletTexture(scene: Phaser.Scene, color: string, r: number): string {
-  const key = `eb_${color}_${r}`;
+  let byR = bulletKeys.get(color); if (!byR) bulletKeys.set(color, byR = new Map());
+  const cached = byR.get(r); if (cached && scene.textures.exists(cached)) return cached;
+  const key = `eb_${color}_${r}`; byR.set(r, key);
   const size = (r + 1.8) * 2 + 2;
   makeTexture(scene, key, size, size, c => {
     const m = size / 2;
