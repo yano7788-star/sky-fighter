@@ -1,4 +1,6 @@
-# Sky Fighter (Cyber Strike: Neon Warfare)
+# SKY BREAKER: NEON STRIKE (repo: sky-fighter)
+
+> 게임 이름은 `src/branding.ts` 한 곳에서 관리. 바꿀 때는 그 파일 + `index.html` <title> + `public/manifest.webmanifest` 3곳.
 
 세로형 슈팅 게임. **Phaser 3.90.0 + TypeScript + Vite**. GitHub Pages로 배포 (repo: yano7788-star/sky-fighter).
 이전 단일 HTML 버전은 git 태그 `vanilla-v1` 과 `legacy/` 에 보관.

@@ -249,7 +249,7 @@ export class GameScene extends Phaser.Scene {
       case 'shake': this.shake = Math.max(this.shake, e.v); break;
       case 'hitstop': this.hitStop = Math.max(this.hitStop, e.frames); break;
       case 'flash': this.hud.flash(e.kind, e.v); break;
-      case 'vibrate': try { navigator.vibrate?.(e.pattern); } catch { /* 미지원 */ } break;
+      case 'vibrate': try { if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(e.pattern); } catch { /* 미지원 */ } break;   // 사용자 입력 전에는 브라우저가 차단
       case 'muzzle': this.muzzle = 3; break;
       case 'graze': this.fx.explosion(e.x, e.y, '#e0f2fe', 2); break;
       case 'combo': break;   // HUD가 sim.combo를 직접 읽는다

@@ -125,11 +125,10 @@ async function stats(name) {
 
 (async () => {
   for (const n of ['bg1', 'bg2', 'bg3', 'bg4', 'bg5']) await bg(n, 1080, 200);
-  await bg('Startscreen', 1080, 300);
   await sprite('player', 256);
   await sprite('bomb', 256);
   for (let i = 1; i <= 5; i++) await sprite('boss' + i, 320);
   if (process.argv.includes('--stats')) {
-    for (const n of ['bg1', 'bg2', 'bg3', 'bg4', 'bg5', 'Startscreen', 'player', 'bomb', 'boss1', 'boss2', 'boss3', 'boss4', 'boss5']) await stats(n);
+    for (const n of ['bg1', 'bg2', 'bg3', 'bg4', 'bg5', 'player', 'bomb', 'boss1', 'boss2', 'boss3', 'boss4', 'boss5']) await stats(n);
   }
 })();

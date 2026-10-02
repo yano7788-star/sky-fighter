@@ -99,9 +99,24 @@ Top-down view game sprite of [SUBJECT DESCRIPTION], nose pointing up, perfectly 
 
 ---
 
-## 3. 시작 화면 / 컷인 (선택)
-- `Startscreen.png` 개선 시: **9:16, 하단 중앙 버튼 영역은 비워두기**(게임이 그 위에 "TAP TO START"를 그립니다). 우하단 15% 비우기.
-- 궁극기 컷인(`skill1.jpg`, `skill2.jpg`)은 Phase 2에서 사용 예정이라 지금은 그대로 두셔도 됩니다.
+## 3. 타이틀 화면 아트 (새로 제작 필요 — 기존 `Startscreen.png`는 폐기)
+
+기존 시작 화면 이미지에는 **"CONTINUE CAMPAIGN / MULTIPLAYER / WELCOME BACK, PILOT"** 같은 UI와 옛 제목("Cyber Strike: Neon Warfare / Mobile Shooter")이 그림에 박혀 있었는데, 실제 게임에는 스토리 모드도 멀티플레이도 없어서 **폐기**했습니다.
+지금 타이틀은 **코드로 그린 임시 화면**(스테이지 배경 순환 + 전투기 + 로고 텍스트 + 버튼)이고, 아래 두 장이 오면 교체합니다. **글자·버튼·UI는 절대 그림에 넣지 말아 주세요**(제목·버튼은 게임이 직접 그립니다).
+
+### 3-1. 타이틀 배경 — `title_bg.png` (9:16, 1080×1920)
+```
+A vertical 9:16 key-art background for a mobile vertical-scrolling shooter game title screen, NO text, NO logo, NO UI, NO buttons. A dramatic sky-to-space scene seen from high altitude: golden-orange sunset clouds in the lower half transitioning upward into deep blue and violet sky with stars and a faint nebula at the top, distant glowing neon-edged warships silhouetted far away, soft volumetric light rays. The upper third (where the game logo will go) and the lower third (where buttons will go) should be relatively calm and darker with low detail; the middle third is open and empty (a fighter jet will be placed there). Cinematic, semi-realistic sci-fi concept art matching a detailed spaceship game, rich colors, no characters, no airplanes in the center. Keep the bottom-right corner empty. No watermark.
+```
+
+### 3-2. 로고 — `logo.png` (초록 크로마키, 가로 16:9 이상)
+게임 이름이 확정되면 만들어 주세요(현재 임시 이름: **SKY BREAKER / NEON STRIKE**).
+```
+A bold game logo that reads exactly "[GAME TITLE]" with a smaller line "[SUBTITLE]" beneath it, metallic chrome letters with cyan neon glow edges and subtle lightning/wing motifs, sci-fi arcade shooter style, centered, on a perfectly flat solid pure green (#00FF00) background with no shadow or gradient. The letters contain no green. Keep the bottom-right corner empty. No watermark.
+```
+
+### 3-3. (선택) 스테이지 브리핑용 일러스트 — `brief_1~5.png`
+각 보스 등장 전에 짧은 대사/설정을 보여주는 **스토리 컷**을 넣고 싶다면(스토리 모드 대신 "연출" 수준) 보스별 반신 일러스트 5장. 우선순위 낮음.
 
 ---
 
