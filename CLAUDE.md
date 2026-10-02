@@ -20,14 +20,15 @@ src/core/     게임 규칙 (순수 TS, Phaser/DOM 무관) — 테스트·시뮬
   meta.ts       격납고(영구 성장) 업그레이드·크레딧
   data.ts       보스/적/중간보스 설정, 탄막 패턴 테이블, 폭탄·궁극기·동료·진행 시간 상수
   config.ts     상수 (논리 해상도 450x800, 타이밍, 플레이어)
+  mutators.ts   런 모디파이어·일일 도전 시드 / achievements.ts 업적 16종·RunStats / missions.ts 일일 미션 / routes.ts 스테이지 사이 항로 선택
 src/render/   Phaser 렌더링: background(거울 타일 스크롤), fx(파티클/링), hud(스킬 버튼·XP바 포함), levelup(카드 오버레이), ultfx(궁극기 연출), textures(생성 텍스처)
-src/scenes/   BootScene(로딩) → TitleScene ↔ HangarScene, TitleScene → GameScene (입력·고정 틱 루프·결과 오버레이)
+src/scenes/   (+ MutatorScene·MissionScene·AchievementScene·PilotScene·HangarScene) BootScene(로딩) → TitleScene ↔ HangarScene, TitleScene → GameScene (입력·고정 틱 루프·결과 오버레이)
 src/systems/  audio(합성 SFX + mp3 BGM 크로스페이드), storage(localStorage)
 tests/        Vitest      tools/  sim-run.ts, optimize-assets.js
 public/       정적 파일: assets/img(WebP), assets/audio(mp3), assets/icons, manifest, sw.js
 assets-src/   원본 이미지(originals), 새로 받은 이미지(incoming)
 legacy/       예전 HTML 버전들 (배포 안 됨, 참고/포팅용)
-docs/         DESIGN.md(게임 디자인·아이디어), ROADMAP.md(점검+로드맵), ASSET_PROMPTS.md(Gemini 생성 요청서)
+docs/         DESIGN.md(게임 디자인·아이디어), ROADMAP.md(점검+로드맵), CHANGELOG.md(개발 로그), GROUND_MODE.md(지상전 기획), ASSET_PROMPTS.md(Gemini 생성 요청서)
 ```
 
 ## 규칙·주의
