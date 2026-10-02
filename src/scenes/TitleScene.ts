@@ -6,21 +6,24 @@ import { ScrollingBackground } from '../render/background';
 import { FONT, textStyle } from '../render/hud';
 import { R, S } from '../render/textures';
 import { audio } from '../systems/audio';
-import { loadBest } from '../systems/storage';
+import { loadBest, loadMeta } from '../systems/storage';
 
 const START = { x: W / 2, y: H * 0.8, w: 300, h: 60 };
-const HELP = { x: W / 2, y: H * 0.8 + 62, w: 160, h: 34 };
+const HELP = { x: W / 2 + 80, y: H * 0.8 + 62, w: 150, h: 34 };
+const HANGAR = { x: W / 2 - 80, y: H * 0.8 + 62, w: 150, h: 34 };
 const SOUND = { x: W - 34, y: 34, r: 24 };
 
 const HELP_TEXT = [
   ['조작', '#38bdf8'],
-  ['터치·마우스: 누른 채 드래그 = 이동 + 자동 발사\n오른쪽 아래 버튼 = 폭탄', '#e2e8f0'],
-  ['키보드: 방향키/WASD 이동 · Space 발사 · B 폭탄\nP/ESC 일시정지 · M 음소거', '#e2e8f0'],
-  ['게임패드: 스틱 이동 · A 발사 · B 폭탄 · Start 일시정지', '#e2e8f0'],
-  ['아이템', '#38bdf8'],
-  ['P 파워업 · M 유도미사일 · E 에너지 · B 폭탄\nS 실드(피격 1회 방어) · G 자석 · L 목숨', '#e2e8f0'],
-  ['요령', '#38bdf8'],
-  ['연속으로 처치하면 점수 배율 상승 (피격 시 초기화)\n탄을 아슬아슬하게 스치면 그레이즈 보너스\n스테이지를 피격 없이 클리어하면 S랭크 보너스', '#e2e8f0'],
+  ['터치·마우스: 누른 채 드래그 = 이동 + 자동 발사\n오른쪽 아래 = 폭탄 · 왼쪽 아래 = 필살기/동료', '#e2e8f0'],
+  ['키보드: 방향키/WASD 이동 · Space 발사 · B 폭탄\nR 필살기 · Q 고양이 · E 강아지 · P 일시정지 · M 음소거', '#e2e8f0'],
+  ['게임패드: 스틱 이동 · A 발사 · B 폭탄 · Y 필살기 · LB/LT 동료', '#e2e8f0'],
+  ['성장 (이번 런 한정)', '#38bdf8'],
+  ['적을 잡으면 청록 젬이 떨어집니다 → 모으면 레벨업 → 카드 3장 중 1장 선택\n산탄·관통·유도·드론·레이저를 키우고, 두 모듈이 Lv3이 되면 ★융합 카드(스웜/레일건/헌터)가 등장!', '#e2e8f0'],
+  ['스킬', '#38bdf8'],
+  ['필살기 「자매의 손바닥」: 처치·그레이즈로 게이지 충전 → 화면 전체 강타\n동료 아이템(C/D): 고양이=8초 흡혈+유도탄 · 강아지=8초 방어막 (스테이지당 1회)\n폭탄: 탄 전부 제거 + 보스 큰 피해 + 1.5초 무적', '#e2e8f0'],
+  ['아이템 · 요령', '#38bdf8'],
+  ['P 파워업 · M 유도미사일 · E 에너지 · B 폭탄 · G 자석 · L 목숨\n연속 처치 콤보 / 탄을 스치는 그레이즈 / 무피격 클리어 S랭크 보너스\n격납고(HANGAR)에서 크레딧으로 영구 강화', '#e2e8f0'],
 ] as const;
 
 export class TitleScene extends Phaser.Scene {
@@ -86,9 +89,10 @@ export class TitleScene extends Phaser.Scene {
     this.btn = this.add.graphics(); root.add(this.btn);
     root.add(this.add.text(START.x, START.y, 'START MISSION', textStyle(24, '#f8fafc')).setOrigin(0.5).setShadow(0, 0, '#0ea5e9', 8, true, true));
     root.add(this.add.text(HELP.x, HELP.y, '? HOW TO PLAY', textStyle(13, '#94a3b8')).setOrigin(0.5));
+    root.add(this.add.text(HANGAR.x, HANGAR.y, '⚙ HANGAR', textStyle(13, '#fde047')).setOrigin(0.5));
 
     const best = loadBest();
-    root.add(this.add.text(W / 2, H * 0.935, best.score > 0 ? `BEST ${best.score}  ·  STAGE ${best.stage}` : 'NO RECORD YET', textStyle(13, '#94a3b8')).setOrigin(0.5));
+    root.add(this.add.text(W / 2, H * 0.935, (best.score > 0 ? `BEST ${best.score}  ·  STAGE ${best.stage}` : 'NO RECORD YET') + `   ·   CREDITS ${loadMeta().credits}`, textStyle(13, '#94a3b8')).setOrigin(0.5));
     root.add(this.add.text(W - 10, H - 8, VERSION, textStyle(10, '#475569', false)).setOrigin(1, 1));
     this.muteText = this.add.text(SOUND.x, SOUND.y, '', { fontFamily: FONT, fontSize: '20px', resolution: R }).setOrigin(0.5);
     root.add(this.muteText);
@@ -101,6 +105,7 @@ export class TitleScene extends Phaser.Scene {
       if (e.key === 'Enter' || e.key === ' ') { if (this.helpOpen) this.toggleHelp(false); else this.start(); }
       else if (e.key === 'Escape') this.toggleHelp(false);
       else if (e.key.toLowerCase() === 'h' || e.key === '?') this.toggleHelp(!this.helpOpen);
+      else if (e.key.toLowerCase() === 'g') this.scene.start('HangarScene');
       else if (e.key.toLowerCase() === 'm') audio.toggleMute();
     });
   }
@@ -131,6 +136,7 @@ export class TitleScene extends Phaser.Scene {
     if (this.helpOpen) { this.toggleHelp(false); return; }
     if (Math.hypot(x - SOUND.x, y - SOUND.y) < SOUND.r + 8) { audio.toggleMute(); return; }
     if (Math.abs(x - HELP.x) < HELP.w / 2 && Math.abs(y - HELP.y) < HELP.h / 2 + 6) { this.toggleHelp(true); return; }
+    if (Math.abs(x - HANGAR.x) < HANGAR.w / 2 && Math.abs(y - HANGAR.y) < HANGAR.h / 2 + 6) { this.scene.start('HangarScene'); return; }
     this.start();   // 화면 어디를 눌러도 시작 (모바일 편의)
   }
 

@@ -10,7 +10,7 @@
 - `npm test` — Vitest (코어 규칙 단위 테스트)
 - `npm run sim -- --seeds 200 --skill 0.7 --tier 1` — 브라우저 없이 봇 시뮬레이션으로 난이도 측정 (사람 실력의 하한선)
 - `npm run build` — 타입체크 + 프로덕션 빌드(`dist/`), `npm run preview` 로 확인
-- 에셋 변환: `SHARP_DIR=<sharp가 설치된 폴더> node tools/optimize-assets.js` (원본 `assets-src/originals/` → `public/assets/img/`)
+- 에셋 변환: `SHARP_DIR=<sharp가 설치된 폴더> node tools/optimize-assets.cjs` (원본 `assets-src/originals/` → `public/assets/img/`)
 
 ## 구조
 ```

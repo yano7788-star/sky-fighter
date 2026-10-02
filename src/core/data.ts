@@ -1,12 +1,12 @@
 import type { Boss, BossConfig, EnemyBullet, EnemyType, MidBossConfig, Rank } from './types';
 
-// 보스 1~5 설정 (HP: 200/380/620/970/1500)
+// 보스 1~5 설정 (HP: 650/1200/2000/3100/4900 — 플레이어가 성장하는 로그라이트 구조에 맞춰 상향)
 export const BOSS_CONFIGS: Record<number, BossConfig> = {
-  1: { name: 'STAGE 1: TANK BUSTER',     hp: 200,  color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
-  2: { name: 'STAGE 2: CYBER STEALTH',   hp: 380,  color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
-  3: { name: 'STAGE 3: AEGIS FLAGSHIP',  hp: 620,  color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
-  4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 970,  color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
-  5: { name: 'STAGE 5: VOID ARCHANGEL',  hp: 1500, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 },
+  1: { name: 'STAGE 1: TANK BUSTER',     hp: 650,  color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
+  2: { name: 'STAGE 2: CYBER STEALTH',   hp: 1200, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
+  3: { name: 'STAGE 3: AEGIS FLAGSHIP',  hp: 2000, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
+  4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 3100, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
+  5: { name: 'STAGE 5: VOID ARCHANGEL',  hp: 4900, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 },
 };
 
 // ---------------------------------------------------------------------------
@@ -77,12 +77,12 @@ export function fireBossPattern(b: Boss, c: PatternCtx): void {
 // ---------------------------------------------------------------------------
 // 일반 적 4종 — 체력·점수·충돌 크기, 스테이지별 등장 비중
 // ---------------------------------------------------------------------------
-export interface EnemyDef { hp: number; score: number; hitR: number; bodyR: number; }
+export interface EnemyDef { hp: number; score: number; hitR: number; bodyR: number; xp: number; }
 export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
-  scout:    { hp: 1, score: 10, hitR: 20, bodyR: 14 },   // 직선 강하 + 가끔 사격
-  zigzag:   { hp: 2, score: 20, hitR: 22, bodyR: 15 },   // 좌우로 흔들리며 내려오고 조준탄을 쏨
-  kamikaze: { hp: 1, score: 15, hitR: 20, bodyR: 14 },   // 플레이어 쪽으로 가속하며 돌진
-  sniper:   { hp: 4, score: 40, hitR: 26, bodyR: 18 },   // 상단에 멈춰서 조준 사격 후 퇴장
+  scout:    { hp: 1, score: 10, hitR: 20, bodyR: 14, xp: 2 },   // 직선 강하 + 가끔 사격
+  zigzag:   { hp: 2, score: 20, hitR: 22, bodyR: 15, xp: 4 },   // 좌우로 흔들리며 내려오고 조준탄을 쏨
+  kamikaze: { hp: 1, score: 15, hitR: 20, bodyR: 14, xp: 3 },   // 플레이어 쪽으로 가속하며 돌진
+  sniper:   { hp: 4, score: 40, hitR: 26, bodyR: 18, xp: 8 },   // 상단에 멈춰서 조준 사격 후 퇴장
 };
 /** 스테이지(1~5)별 등장 가중치 */
 export const ENEMY_WEIGHTS: Record<number, Partial<Record<EnemyType, number>>> = {
@@ -97,16 +97,23 @@ export const ENEMY_WEIGHTS: Record<number, Partial<Record<EnemyType, number>>> =
 // 중간보스 (스테이지 2·3): 메인 보스 전 등장, 부채꼴 사격 + 레이저
 // ---------------------------------------------------------------------------
 export const MID_CONFIGS: Record<number, MidBossConfig> = {
-  2: { hp: 260, w: 100, h: 86, fanCount: 3, fanSpeed: 3.2, color: '#38bdf8' },
-  3: { hp: 420, w: 110, h: 94, fanCount: 5, fanSpeed: 3.0, color: '#facc15' },
+  2: { hp: 900, w: 100, h: 86, fanCount: 3, fanSpeed: 3.2, color: '#38bdf8' },
+  3: { hp: 1500, w: 110, h: 94, fanCount: 5, fanSpeed: 3.0, color: '#facc15' },
 };
-export const MID_BOSS_LEAD_SCORE = 220;   // 메인 보스 등장 점수보다 이만큼 일찍 등장
+export const MID_BOSS_AT = 0.55;           // 스테이지 전투 시간의 이 비율 지점에서 중간보스 등장
+
+// ---------------------------------------------------------------------------
+// 스테이지 진행: 점수가 아니라 '전투 시간'으로 보스가 등장한다 (콤보·그레이즈로 점수가 부풀어도 길이가 일정)
+// ---------------------------------------------------------------------------
+export const FIGHT_FRAMES: Record<number, number> = { 1: 2100, 2: 2400, 3: 2700, 4: 3000, 5: 3300 };   // 35 / 40 / 45 / 50 / 55초
+/** 스테이지별 일반 적 스폰 간격(프레임) — 높은 스테이지일수록 촘촘 */
+export const SPAWN_INTERVAL: Record<number, number> = { 1: 34, 2: 30, 3: 27, 4: 24, 5: 21 };
 
 // ---------------------------------------------------------------------------
 // 아이템 드랍: 한 번의 난수로 기본 4종, 별도 난수로 신규 3종
 // ---------------------------------------------------------------------------
-export const DROP_BASE: [number, 'P' | 'M' | 'E' | 'B'][] = [[0.05, 'P'], [0.09, 'M'], [0.13, 'E'], [0.15, 'B']];   // 누적 확률
-export const DROP_EXTRA: [number, 'S' | 'G' | 'L'][] = [[0.03, 'S'], [0.05, 'G'], [0.058, 'L']];
+export const DROP_BASE: [number, 'P' | 'M' | 'E' | 'B'][] = [[0.05, 'P'], [0.09, 'M'], [0.13, 'E'], [0.14, 'B']];   // 누적 확률
+export const DROP_EXTRA: [number, 'G' | 'L'][] = [[0.02, 'G'], [0.028, 'L']];
 
 // ---------------------------------------------------------------------------
 // 콤보 / 랭크
@@ -123,3 +130,39 @@ export function rankFor(hits: number): { rank: Rank; bonus: number } {
   if (hits === 2) return { rank: 'B', bonus: 150 };
   return { rank: 'C', bonus: 0 };
 }
+
+// ---------------------------------------------------------------------------
+// 동료 (고양이: 흡혈+유도탄 / 강아지: 방어막) — 아이템을 먹으면 버튼이 생기고, 누르면 8초간 출동. 스테이지당 각 1회
+// ---------------------------------------------------------------------------
+export const COMPANION_FRAMES = 480;
+export const LIFESTEAL_RATE = 0.2;       // 준 피해의 20%를 에너지로 회복
+export const LIFESTEAL_CAP = 0.8;        // 흡혈은 최대 에너지의 80%까지만
+export const MOB_HIT_VALUE = 8;          // 일반 적 처치 1회를 피해량 8로 환산
+export const SHIELD_R = 52;              // 강아지 방어막 반경
+/** 처치 수가 쌓일수록 동료 아이템 드랍 확률 상승 (스테이지당 한 번은 거의 확실히 등장) */
+export const companionDropChance = (pity: number) => Math.min(0.6, 0.02 + 0.006 * pity);
+
+// ---------------------------------------------------------------------------
+// 폭탄 (강화판): 즉시 피해 + 잠깐 남는 폭발장 + 무적
+// ---------------------------------------------------------------------------
+export const BOMB = {
+  invincibleFrames: 90,
+  fieldFrames: 70,            // 폭발장이 퍼지며 탄을 계속 지우고 피해를 주는 시간
+  bossBurstPct: 0.12,         // 즉시: 보스/중간보스 최대 체력의 12% (최소 minBurst)
+  minBurst: 60,
+  fieldPctTotal: 0.08,        // 폭발장 동안 누적: 최대 체력의 8%
+  fieldRadiusMax: 560,
+};
+
+// ---------------------------------------------------------------------------
+// 궁극기 「자매의 손바닥」 — 게이지가 가득 차면 사용. 컷인 → 손바닥 낙하 → 화면 전체 피해
+// ---------------------------------------------------------------------------
+export const ULT = {
+  frames: { CUTIN: 120, FALL: 75, IMPACT: 60 },
+  enemyPct: 0.5,              // 일반 적·중간보스: 최대 체력의 50%
+  bossPct: 0.3,               // 메인 보스: 30%
+  gaugePerXp: 0.7,            // 처치 시 게이지 = 경험치값 × 0.7
+  gaugePerGraze: 0.2,
+  gaugeMidBoss: 15,
+  gaugeBoss: 20,
+};

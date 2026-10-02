@@ -3,6 +3,7 @@ import { H, W } from './core/config';
 import { R } from './render/textures';
 import { BootScene } from './scenes/BootScene';
 import { GameScene } from './scenes/GameScene';
+import { HangarScene } from './scenes/HangarScene';
 import { TitleScene } from './scenes/TitleScene';
 
 // 논리 해상도 450x800(9:16)을 R배 해상도로 렌더링하고, 화면 크기에 맞춰 FIT으로 확대/축소한다
@@ -16,7 +17,7 @@ const game = new Phaser.Game({
   audio: { noAudio: true },                       // 오디오는 src/systems/audio.ts가 직접 관리
   input: { gamepad: true, activePointers: 3 },
   render: { antialias: true, roundPixels: false },
-  scene: [BootScene, TitleScene, GameScene],
+  scene: [BootScene, TitleScene, GameScene, HangarScene],
 });
 
 // 개발 중 브라우저 콘솔에서 상태를 확인할 수 있게 노출 (빌드에는 포함되지 않음)

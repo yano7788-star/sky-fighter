@@ -19,7 +19,7 @@ export function makeTexture(scene: Phaser.Scene, key: string, w: number, h: numb
   tex.refresh();
 }
 
-const ITEM_COLORS: Record<ItemType, string> = { P: '#10b981', M: '#ec4899', E: '#06b6d4', B: '#ef4444', S: '#3b82f6', G: '#a855f7', L: '#f43f5e' };
+const ITEM_COLORS: Record<ItemType, string> = { P: '#10b981', M: '#ec4899', E: '#06b6d4', B: '#ef4444', G: '#a855f7', L: '#f43f5e', C: '#fb7185', D: '#fb923c' };
 
 /** 부트 시 한 번 만드는 공용 텍스처 */
 export function buildStaticTextures(scene: Phaser.Scene): void {
@@ -50,11 +50,28 @@ export function buildStaticTextures(scene: Phaser.Scene): void {
   makeTexture(scene, 'dot', 8, 8, c => { c.fillStyle = '#fff'; c.beginPath(); c.arc(4, 4, 4, 0, Math.PI * 2); c.fill(); });
   makeTexture(scene, 'star', 6, 6, c => { c.fillStyle = '#fff'; c.beginPath(); c.arc(3, 3, 3, 0, Math.PI * 2); c.fill(); });
   for (const type of Object.keys(ITEM_COLORS) as ItemType[]) {
-    makeTexture(scene, `item_${type}`, 26, 26, c => {
-      c.fillStyle = ITEM_COLORS[type]; c.beginPath(); c.arc(13, 13, 12, 0, Math.PI * 2); c.fill();
-      c.fillStyle = '#fff'; c.font = 'bold 11px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(type, 13, 13.5);
+    const ally = type === 'C' ? 'ally_cat' : type === 'D' ? 'ally_dog' : null;
+    makeTexture(scene, `item_${type}`, 34, 34, c => {
+      if (ally) {   // 동료 아이템: 어두운 원판 + 색 테두리 + 동료 얼굴
+        c.fillStyle = 'rgba(15,23,42,0.92)'; c.beginPath(); c.arc(17, 17, 16, 0, Math.PI * 2); c.fill();
+        c.lineWidth = 2.5; c.strokeStyle = ITEM_COLORS[type]; c.stroke();
+        const img = scene.textures.get(ally).getSourceImage() as HTMLImageElement;
+        const w = 24, h = (w * img.height) / img.width; c.drawImage(img, 17 - w / 2, 17 - h / 2, w, h);
+      } else {
+        c.fillStyle = ITEM_COLORS[type]; c.beginPath(); c.arc(17, 17, 12, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#fff'; c.font = 'bold 11px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(type, 17, 17.5);
+      }
     });
   }
+  // 경험치 젬 (청록 다이아몬드)
+  makeTexture(scene, 'gem', 12, 14, c => {
+    c.fillStyle = '#22d3ee'; c.strokeStyle = '#ecfeff'; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(6, 1); c.lineTo(11, 7); c.lineTo(6, 13); c.lineTo(1, 7); c.closePath(); c.fill(); c.stroke();
+  });
+  makeTexture(scene, 'drone', 22, 22, c => {
+    c.fillStyle = '#065f46'; c.strokeStyle = '#34d399'; c.lineWidth = 2; c.beginPath(); c.arc(11, 11, 8, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.fillStyle = '#a7f3d0'; c.beginPath(); c.arc(11, 11, 3, 0, Math.PI * 2); c.fill();
+  });
   for (let t = 1; t <= 5; t++) {
     const src = scene.textures.get(`boss${t}`).getSourceImage() as HTMLImageElement;
     outlinedBoss(scene, `boss${t}_n`, src, BOSS_CONFIGS[t].subColor, '#ffffff');

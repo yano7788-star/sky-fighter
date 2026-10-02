@@ -14,13 +14,17 @@ export const UI = {
   sound: { x: W - 45, y: 30, hit: 30 },
   pause: { x: W - 95, y: 30, hit: 24 },
   bomb:  { x: W - 55, y: H - 65, hit: 45 },
+  ult:   { x: 44, y: H - 52, hit: 32 },     // 필살기 (게이지 링)
+  cat:   { x: 104, y: H - 50, hit: 28 },    // 동료: 고양이(흡혈)
+  dog:   { x: 154, y: H - 50, hit: 28 },    // 동료: 강아지(방어막)
 };
 export const inZone = (z: { x: number; y: number; hit: number }, x: number, y: number) => Math.hypot(x - z.x, y - z.y) < z.hit;
-export const isUiZone = (x: number, y: number) => inZone(UI.sound, x, y) || inZone(UI.pause, x, y) || inZone(UI.bomb, x, y);
+export const isUiZone = (x: number, y: number) =>
+  inZone(UI.sound, x, y) || inZone(UI.pause, x, y) || inZone(UI.bomb, x, y) || inZone(UI.ult, x, y) || inZone(UI.cat, x, y) || inZone(UI.dog, x, y);
 
 const bannerAlpha = (t: number, total: number, fadeIn = 18, fadeOut = 24) => Math.max(0, Math.min(1, t / fadeIn, (total - t) / fadeOut));
 
-export interface ResultInfo { kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; best: { score: number; stage: number }; newRecord: boolean; }
+export interface ResultInfo { kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
 
 /** 게임 화면 HUD: 에너지 바·점수·폭탄·보스 바·배너·일시정지/결과 오버레이 */
 export class Hud {
@@ -39,6 +43,8 @@ export class Hud {
   private pauseGroup: Phaser.GameObjects.GameObject[] = [];
   private resultGroup: Phaser.GameObjects.GameObject[] = [];
   private resultTexts: Record<string, Phaser.GameObjects.Text> = {};
+  private buildText!: Phaser.GameObjects.Text;
+  private btn: { ult: Phaser.GameObjects.Image; cat: Phaser.GameObjects.Image; dog: Phaser.GameObjects.Image } | null = null;
 
   constructor(private scene: Phaser.Scene, ui: Phaser.GameObjects.Container) {
     const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => { ui.add(o); return o; };
@@ -59,6 +65,15 @@ export class Hud {
     text('stage', W / 2, 34, 18, '#38bdf8', 0.5, 1);
     text('missile', 50, 66, 12, '#ec4899', 0, 1);
     text('combo', 50, 84, 13, '#facc15', 0, 1).setShadow(0, 0, '#000', 4, true, true);
+    text('level', W / 2, 50, 12, '#7dd3fc', 0.5, 1);
+    this.btn = {
+      ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(30, 36)),
+      cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(30, 28)),
+      dog: add(scene.add.image(UI.dog.x, UI.dog.y, 'ally_dog').setDisplaySize(30, 28)),
+    };
+    text('ultLabel', UI.ult.x, UI.ult.y + 36, 9, '#fde68a', 0.5, 0.5);
+    text('catLabel', UI.cat.x, UI.cat.y + 32, 9, '#fb7185', 0.5, 0.5);
+    text('dogLabel', UI.dog.x, UI.dog.y + 32, 9, '#fb923c', 0.5, 0.5);
     text('mute', W - 25, 36, 18, '#38bdf8', 1, 1, false);
     text('lives', W - 20, 65, 18, '#f43f5e', 1, 1, false);
     text('bossName', 0, 0, 11, '#ffffff', 0.5, 1);
@@ -90,8 +105,10 @@ export class Hud {
       add(s.add.rectangle(0, 0, W, H, 0x03050a, 0.72).setOrigin(0, 0)),
       add(s.add.text(W / 2, H / 2 - 20, 'PAUSED', textStyle(34, '#38bdf8')).setOrigin(0.5)),
       add(s.add.text(W / 2, H / 2 + 24, '화면을 탭하거나 P / ESC 로 계속', textStyle(16, '#cbd5e1', false)).setOrigin(0.5)),
-      add(s.add.text(W / 2, H / 2 + 56, '이동 방향키·WASD / 발사 Space / 폭탄 B / 음소거 M', textStyle(13, '#64748b', false)).setOrigin(0.5)),
+      add(s.add.text(W / 2, H / 2 + 56, '이동 방향키·WASD / 발사 Space / 폭탄 B · 필살기 R · 동료 Q/E · 음소거 M', textStyle(11, '#64748b', false)).setOrigin(0.5)),
     ];
+    this.buildText = add(s.add.text(W / 2, H / 2 + 100, '', { ...textStyle(13, '#94a3b8', false), align: 'center', wordWrap: { width: W - 60 }, lineSpacing: 6 }).setOrigin(0.5, 0));
+    this.pauseGroup.push(this.buildText);
     this.pauseGroup.forEach(o => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(false));
   }
 
@@ -104,7 +121,7 @@ export class Hud {
     this.resultGroup.push(add(s.add.rectangle(0, 0, W, H, 0x03050a, 0.9).setOrigin(0, 0)));
     this.resultTexts.dim = this.resultGroup[0] as Phaser.GameObjects.Text;
     mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
-    mk('record', H / 2 + 110, 16); mk('prompt', H / 2 + 150, 16);
+    mk('record', H / 2 + 110, 16); mk('credits', H / 2 + 138, 15); mk('prompt', H / 2 + 176, 16);
     this.resultGroup.forEach(o => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(false));
   }
 
@@ -128,6 +145,8 @@ export class Hud {
     this.whiteFlash = Math.max(0, this.whiteFlash - 0.04);
   }
 
+  setBuildText(t: string): void { this.buildText.setText(t); }
+
   setPaused(v: boolean): void { this.pauseGroup.forEach(o => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(v)); }
 
   showResult(r: ResultInfo | null, canTap = false): void {
@@ -139,7 +158,8 @@ export class Hud {
     t.title.setText(over ? 'MISSION OVER' : 'MISSION CLEAR!').setColor(over ? '#f87171' : '#10b981');
     t.l1.setText(over ? '' : '지구의 평화를 지켰습니다.').setColor('#facc15');
     t.l2.setText(`최종 점수: ${r.score}`).setColor('#fff');
-    t.l3.setText(over ? `최종 도달: STAGE ${r.stage}` : '').setColor('#fff');
+    t.l3.setText(over ? `최종 도달: STAGE ${r.stage}  ·  LV ${r.level}` : `LV ${r.level}`).setColor('#fff');
+    t.credits.setText(`+${r.credits} CREDITS  (격납고에서 강화)`).setColor('#7dd3fc');
     t.record.setText(r.newRecord ? '★ NEW RECORD! ★' : `BEST ${r.best.score} (STAGE ${r.best.stage})`).setColor(r.newRecord ? '#facc15' : '#94a3b8');
     t.prompt.setText(over ? '화면을 탭하여 다시 출격' : '화면을 탭하여 타이틀로').setColor(canTap ? '#38bdf8' : '#94a3b8');
   }
@@ -198,11 +218,54 @@ export class Hud {
       if (alert) { this.setText('phase2', '⚡ PHASE 2: OVERDRIVE ⚡').setColor(sim.frame % 8 < 4 ? '#ef4444' : '#facc15'); }
     } else { this.setText('bossName', ''); this.t.phase2.setVisible(false); }
 
+    // 4-2. 경험치 바(상단 가로줄) + 레벨
+    const xr = Math.max(0, Math.min(1, sim.xp / sim.xpNext));
+    g.fillStyle(0x0f172a, 0.7); g.fillRect(0, 0, W, 5);
+    g.fillStyle(0x22d3ee, 1); g.fillRect(0, 0, W * xr, 5);
+    this.setText('level', `LV ${sim.level}`);
+
+    // 4-3. 스킬 버튼 (필살기 게이지 링 / 동료)
+    this.renderSkillButtons(sim);
+
     // 5. 스테이지 배너
     this.renderBanner(sim);
 
     this.hitRect.setAlpha(this.hitFlash * 0.5);
     this.whiteRect.setAlpha(Math.min(1, this.whiteFlash));
+  }
+
+  private renderSkillButtons(sim: Sim): void {
+    const g = this.g, f = sim.frame, b = this.btn!;
+    const canAct = sim.stagePhase !== 'BOSS_DYING' && sim.stagePhase !== 'CLEAR';
+    const pulse = 0.5 + 0.5 * Math.sin(f * 0.14);
+
+    // 필살기: 항상 표시. 게이지가 차오르고, 가득 차면 빛난다
+    const u = UI.ult, ur = 25, frac = Math.min(1, sim.ult.gauge / 100), ready = sim.ultReady;
+    g.fillStyle(0x0f172a, 0.78); g.fillCircle(u.x, u.y, ur);
+    g.lineStyle(3, 0x334155, 0.9); g.strokeCircle(u.x, u.y, ur - 2);
+    if (frac > 0) { g.lineStyle(3.5, ready ? 0x67e8f9 : 0x22d3ee, ready ? 0.7 + pulse * 0.3 : 0.95); g.beginPath(); g.arc(u.x, u.y, ur - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); g.strokePath(); }
+    if (ready) { g.lineStyle(2, 0xa5f3fc, 0.3 + pulse * 0.4); g.strokeCircle(u.x, u.y, ur + 3 + pulse * 3); }
+    b.ult.setAlpha(ready ? (canAct ? 1 : 0.45) : 0.35);
+    this.setText('ultLabel', ready ? '필살기!' : `${Math.floor(sim.ult.gauge)}%`).setColor(ready ? '#fde68a' : '#64748b');
+
+    // 동료: 보유(펄스 링) → 사용 중(남은 시간 링) → 사용 후 숨김
+    const comp: ['cat' | 'dog', typeof UI.cat, number, string][] = [['cat', UI.cat, 0xfb7185, '흡혈'], ['dog', UI.dog, 0xfb923c, '방어막']];
+    for (const [key, z, color, label] of comp) {
+      const c = sim.comp[key], show = c.ready || c.active;
+      b[key].setVisible(show); this.t[key + 'Label'].setVisible(show);
+      if (!show) continue;
+      const r = 21;
+      g.fillStyle(0x0f172a, 0.78); g.fillCircle(z.x, z.y, r);
+      if (c.active) {
+        g.lineStyle(3, 0x334155, 0.6); g.strokeCircle(z.x, z.y, r - 2);
+        g.lineStyle(3.5, color, 1); g.beginPath(); g.arc(z.x, z.y, r - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (c.timer / 480)); g.strokePath();
+        this.setText(key + 'Label', `${Math.ceil(c.timer / 60)}s`).setColor('#ffffff');
+      } else {
+        g.lineStyle(2.5, color, 0.6 + pulse * 0.4); g.strokeCircle(z.x, z.y, r - 2 + pulse * 1.5);
+        this.setText(key + 'Label', label).setColor('#' + color.toString(16).padStart(6, '0'));
+      }
+      b[key].setAlpha(c.active || canAct ? 1 : 0.4);
+    }
   }
 
   private renderBanner(sim: Sim): void {

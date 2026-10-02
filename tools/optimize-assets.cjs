@@ -123,7 +123,27 @@ async function stats(name) {
   console.log(`${name}: ${w}x${h} seam row0-vs-last=${mad(0, h - 1, 1)} top8-vs-bottom8=${mad(0, h - 8, 8)}`);
 }
 
+// 이미 투명 배경이 있는 스프라이트(레거시에서 추출한 동료/적/중간보스/필살기 손바닥)는 크기만 줄여 WebP로 저장
+async function plainSprite(srcPath, outName, maxSide) {
+  const dst = path.join(OUT, outName + '.webp');
+  await sharp(srcPath).ensureAlpha().resize({ width: maxSide, height: maxSide, fit: 'inside', withoutEnlargement: true })
+    .webp({ lossless: true, effort: 6 }).toFile(dst);
+  console.log(`${outName}: ${kb(srcPath)}KB -> ${kb(dst)}KB`);
+}
+async function photo(srcPath, outName, maxW, quality) {
+  const dst = path.join(OUT, outName + '.webp');
+  await sharp(srcPath).resize({ width: maxW, withoutEnlargement: true }).webp({ quality, effort: 6 }).toFile(dst);
+  console.log(`${outName}: ${kb(srcPath)}KB -> ${kb(dst)}KB`);
+}
+
 (async () => {
+  const LEG = path.join(ROOT, 'assets-src', 'legacy');
+  await plainSprite(path.join(LEG, 'mob_cat.png'), 'ally_cat', 256);
+  await plainSprite(path.join(LEG, 'mob_dog.png'), 'ally_dog', 256);
+  await plainSprite(path.join(LEG, 'mob_warship.png'), 'enemy_warship', 256);
+  await plainSprite(path.join(LEG, 'mob_midboss.png'), 'midboss', 320);
+  await plainSprite(path.join(LEG, 'skill_palm.png'), 'skill_palm', 360);
+  await photo(path.join(LEG, 'skill_card.jpg'), 'skill_card', 540, 85);
   for (const n of ['bg1', 'bg2', 'bg3', 'bg4', 'bg5']) await bg(n, 1080, 200);
   await sprite('player', 256);
   await sprite('bomb', 256);

@@ -16,3 +16,12 @@ export const store = {
 export interface BestRecord { score: number; stage: number; }
 export const loadBest = (): BestRecord => store.get<BestRecord>('best', { score: 0, stage: 0 });
 export const saveBest = (b: BestRecord): void => store.set('best', b);
+
+// 격납고(영구 성장): 크레딧과 강화 레벨
+import type { MetaLevels } from '../core/meta';
+export interface MetaSave { credits: number; levels: MetaLevels; }
+export const loadMeta = (): MetaSave => {
+  const m = store.get<MetaSave>('meta', { credits: 0, levels: {} });
+  return { credits: Math.max(0, Number(m.credits) || 0), levels: m.levels ?? {} };
+};
+export const saveMeta = (m: MetaSave): void => store.set('meta', m);

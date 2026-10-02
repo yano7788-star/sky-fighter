@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { H, W } from '../src/core/config';
 import { BOSS_PATTERNS } from '../src/core/data';
 import { Sim } from '../src/core/sim';
-import { ENEMY_DEFS, comboMultiplier, rankFor } from '../src/core/data';
-import type { Boss, Enemy, EnemyBullet, EnemyType, SimInput } from '../src/core/types';
+import { ENEMY_DEFS, FIGHT_FRAMES, comboMultiplier, rankFor } from '../src/core/data';
+import type { Boss, Bullet, Enemy, EnemyBullet, EnemyType, SimInput } from '../src/core/types';
 
 const mkEnemy = (type: EnemyType, x: number, y: number, hp = ENEMY_DEFS[type].hp): Enemy =>
   ({ type, x, y, hp, maxHp: hp, speed: type === 'sniper' ? 2.6 : 3, baseX: x, age: 0, fireCd: 999, hold: 0 });
+const bullet = (x: number, y: number, dmg = 1, pierce = 0): Bullet => ({ x, y, vx: 0, vy: 0, dmg, pierce });
 const idle = (s: Sim, fire = false): SimInput => ({ targetX: s.player.x, targetY: s.player.y, fire, bomb: false });
 
 function makeBoss(tier: number, phase2: boolean, mode: 1 | 2): Boss {
@@ -58,6 +59,7 @@ describe('시뮬레이션', () => {
     let last = '';
     for (let i = 0; i < 60 * 60 * 20 && s.state === 'PLAYING'; i++) {
       s.player.invincible = 999;
+      if (s.pending) s.chooseCard(0);
       s.step({ targetX: s.boss ? s.boss.x : s.midBoss ? s.midBoss.x : 225, targetY: 650, fire: true, bomb: false });
       const key = `${s.bossTier}:${s.stagePhase}`;
       if (key !== last) { phases.push(key); last = key; }
@@ -128,17 +130,17 @@ describe('시뮬레이션', () => {
     expect(s.player.x).toBeLessThanOrEqual(W - 38); expect(s.player.y).toBeLessThanOrEqual(H - 45);
   });
 
-  it('파워업 아이템은 무기 레벨을 3까지만 올린다', () => {
+  it('파워업 아이템은 무기 레벨을 5까지만 올린다', () => {
     const s = new Sim(1);
-    for (let i = 0; i < 5; i++) { s.items.push({ x: s.player.x, y: s.player.y, type: 'P' }); s.step(idle(s)); }
-    expect(s.weaponLevel).toBe(3);
+    for (let i = 0; i < 8; i++) { s.items.push({ x: s.player.x, y: s.player.y, type: 'P' }); s.step(idle(s)); }
+    expect(s.weaponLevel).toBe(5);
   });
 });
 
 describe('적 4종', () => {
   it('1스테이지는 정찰기만, 5스테이지는 4종이 모두 등장한다', () => {
     const seen = (tier: number) => {
-      const s = new Sim(3); s.startAtTier(tier); s.stagePhase = 'FIGHT'; s.nextBossScore = 1e9;
+      const s = new Sim(3); s.startAtTier(tier); s.stagePhase = 'FIGHT'; s.stageFrames = -1e9;
       const types = new Set<string>();
       for (let i = 0; i < 4000; i++) { s.player.invincible = 999; s.step(idle(s)); for (const e of s.enemies) types.add(e.type); }
       return types;
@@ -150,10 +152,10 @@ describe('적 4종', () => {
   it('지그재그는 체력 2: 한 발로는 안 죽는다', () => {
     const s = new Sim(1);
     s.enemies.push(mkEnemy('zigzag', 225, 300));
-    s.bullets.push({ x: 225, y: 300, vx: 0, vy: 0 });
+    s.bullets.push(bullet(225, 300));
     s.step(idle(s));
     expect(s.enemies).toHaveLength(1); expect(s.enemies[0].hp).toBe(1);
-    s.bullets.push({ x: s.enemies[0].x, y: s.enemies[0].y, vx: 0, vy: 0 });
+    s.bullets.push(bullet(s.enemies[0].x, s.enemies[0].y));
     s.step(idle(s));
     expect(s.enemies).toHaveLength(0);
   });
@@ -215,10 +217,9 @@ describe('콤보 / 그레이즈 / 랭크', () => {
 });
 
 describe('아이템', () => {
-  it('실드는 피격 1회를 흡수하고 사라진다', () => {
+  it('방벽은 피격 1회를 흡수하고 사라진다', () => {
     const s = new Sim(1);
-    s.items.push({ x: s.player.x, y: s.player.y, type: 'S' }); s.step(idle(s));
-    expect(s.player.shield).toBeGreaterThan(0);
+    s.player.shield = 1;
     s.player.invincible = 0; s.applyDamage(50);
     expect(s.player.energy).toBe(100); expect(s.player.shield).toBe(0);
     s.player.invincible = 0; s.applyDamage(50);
@@ -243,11 +244,11 @@ describe('아이템', () => {
 describe('중간보스', () => {
   it('스테이지 2에서 메인 보스 전에 등장하고, 처치 전에는 경고 단계로 넘어가지 않으며, 목숨을 떨군다', () => {
     const s = new Sim(1);
-    s.bossTier = 2; s.nextBossScore = 1000; s.score = 1000 - 220;
+    s.bossTier = 2; s.stageFrames = Math.ceil(FIGHT_FRAMES[2] * 0.55) - 1;
     s.player.invincible = 99999;
     s.step(idle(s));
     expect(s.midBoss).not.toBeNull();
-    s.score = 5000;                       // 메인 보스 조건 충족
+    s.stageFrames = FIGHT_FRAMES[2];       // 메인 보스 조건 충족
     for (let i = 0; i < 20; i++) s.step(idle(s));
     expect(s.stagePhase).toBe('FIGHT');   // 중간보스가 살아 있으면 대기
     s.midBoss!.hp = 0;
@@ -259,7 +260,7 @@ describe('중간보스', () => {
   });
   it('레이저는 예고(CHARGE) 후 발사(FIRE)되고 맞으면 피해를 준다', () => {
     const s = new Sim(1);
-    s.bossTier = 2; s.nextBossScore = 1000; s.score = 800; s.step(idle(s));
+    s.bossTier = 2; s.stageFrames = Math.ceil(FIGHT_FRAMES[2] * 0.55) - 1; s.step(idle(s));
     const m = s.midBoss!; m.y = m.targetY; m.state = 'CHARGE'; m.stateTimer = 60; m.laserX = s.player.x;
     for (let i = 0; i < 12 && (m.state as string) !== 'FIRE'; i++) s.step(idle(s));
     expect(m.state as string).toBe('FIRE');

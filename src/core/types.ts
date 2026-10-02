@@ -1,7 +1,8 @@
 export type GameState = 'PLAYING' | 'GAMEOVER' | 'GAMECLEAR';
 export type StagePhase = 'FIGHT' | 'WARNING' | 'BOSS' | 'BOSS_DYING' | 'CLEAR' | 'INTRO';
-/** P 파워업 · M 유도미사일 · E 에너지 · B 폭탄 · S 실드 · G 자석 · L 목숨 */
-export type ItemType = 'P' | 'M' | 'E' | 'B' | 'S' | 'G' | 'L';
+/** P 파워업 · M 유도미사일 · E 에너지 · B 폭탄 · G 자석 · L 목숨 · C 동료(고양이) · D 동료(강아지) */
+export type ItemType = 'P' | 'M' | 'E' | 'B' | 'G' | 'L' | 'C' | 'D';
+export type SkillKey = 'cat' | 'dog' | 'ult';
 export type EnemyType = 'scout' | 'zigzag' | 'kamikaze' | 'sniper';
 export type Rank = 'S' | 'A' | 'B' | 'C';
 
@@ -11,11 +12,15 @@ export interface PlayerState {
   radius: number;
   energy: number; maxEnergy: number;
   invincible: number;
-  shield: number;   // 실드 남은 프레임 (0이면 없음) — 다음 피격 1회를 막아 줌
+  shield: number;   // 방벽 남은 프레임 (0이면 없음) — 다음 피격 1회를 막아 줌 (자동 방벽 카드)
+  aegisTimer: number; // 자동 방벽 재생성까지 남은 프레임
   magnet: number;   // 자석 남은 프레임
 }
-export interface Bullet { x: number; y: number; vx: number; vy: number; }
-export interface Missile { x: number; y: number; vx: number; vy: number; speed: number; }
+export interface Bullet { x: number; y: number; vx: number; vy: number; dmg: number; pierce: number; homing?: boolean; hits?: object[]; }
+export interface Missile { x: number; y: number; vx: number; vy: number; speed: number; dmg: number; }
+export interface Gem { x: number; y: number; v: number; }
+export interface Companion { ready: boolean; active: boolean; timer: number; used: boolean; pity: number; }
+export type UltPhase = 'IDLE' | 'CUTIN' | 'FALL' | 'IMPACT';
 export interface EnemyBullet { x: number; y: number; vx: number; vy: number; color: string; r: number; grazed?: boolean; }
 export interface Enemy {
   type: EnemyType;
@@ -74,6 +79,12 @@ export type SimEvent =
   | { t: 'hitspark'; x: number; y: number }
   | { t: 'graze'; x: number; y: number }
   | { t: 'combo'; combo: number; mult: number }
+  | { t: 'bomb'; x: number; y: number }
+  | { t: 'levelup'; level: number }
+  | { t: 'skill'; key: SkillKey }
+  | { t: 'ult'; phase: UltPhase }
+  | { t: 'heal'; x: number; y: number }
+  | { t: 'gem'; x: number; y: number }
   | { t: 'gameover' }
   | { t: 'gameclear' };
 
@@ -82,4 +93,5 @@ export interface SimInput {
   targetX: number; targetY: number;   // 플레이어가 향할 목표 좌표 (논리 좌표)
   fire: boolean;
   bomb: boolean;                      // 이번 틱에 폭탄 버튼을 눌렀는가 (에지)
+  skill?: SkillKey | null;            // 이번 틱에 누른 스킬 버튼 (고양이/강아지/필살기)
 }

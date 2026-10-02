@@ -14,16 +14,21 @@ const START_TIER = arg('tier', 1);
 const SKILL = arg('skill', 0.7);          // 0~1: 회피 반응거리/폭탄 판단 정확도
 const MAX_SECONDS = arg('max', 900);
 
-interface RunResult { stage: number; cleared: boolean; seconds: number; score: number; lives: number; bombsUsed: number; deathPhase: string; }
+interface RunResult { phaseFrames: Record<string, number>; level: number; stage: number; cleared: boolean; seconds: number; score: number; lives: number; bombsUsed: number; deathPhase: string; }
 
 function runOne(seed: number): RunResult {
   const s = new Sim(seed);
   if (START_TIER > 1) s.startAtTier(START_TIER);
-  let bombsUsed = 0, laserSide = 0;
+  let bombsUsed = 0, laserSide = 0, distracted = 0;
+  const phaseFrames: Record<string, number> = {};   // 'T1:fight' 등 구간별 프레임
+  let lastKey = '', lastF = 0;
   const reaction = 70 + SKILL * 70;       // 이 거리 안의 탄을 피한다
   const maxF = 60 * MAX_SECONDS;
   for (let f = 0; f < maxF && s.state === 'PLAYING'; f++) {
     const p = s.player;
+    if (distracted > 0) distracted--; else if (Math.random() < (1 - SKILL) * 0.012) distracted = 25 + Math.random() * 30;   // 실수: 잠깐 딴짓(회피 중단)
+    const key = `T${s.bossTier}:${s.boss ? 'boss' : s.midBoss ? 'mid' : s.stagePhase === 'FIGHT' ? 'fight' : 'other'}`;
+    if (key !== lastKey) { if (lastKey) phaseFrames[lastKey] = (phaseFrames[lastKey] ?? 0) + (f - lastF); lastKey = key; lastF = f; }
     let tx = s.boss ? s.boss.x : s.midBoss ? s.midBoss.x : (s.enemies.length ? nearestEnemyX(s) : W / 2);
     let near: { x: number; y: number } | null = null, nd = 1e9, danger = 0;
     for (const b of s.enemyBullets) {
@@ -32,7 +37,7 @@ function runOne(seed: number): RunResult {
       if (d < reaction) danger++;
       if (d < nd) { nd = d; near = b; }
     }
-    if (near && nd < reaction) {
+    if (near && nd < reaction && distracted <= 0) {
       const dir = near.x < p.x ? 1 : -1;
       tx = p.x + dir * 70;
       if (p.x < 70) tx = p.x + 70; else if (p.x > W - 70) tx = p.x - 70;
@@ -43,12 +48,25 @@ function runOne(seed: number): RunResult {
       if (laserSide === 0) laserSide = Math.random() < 0.4 + SKILL * 0.6 ? (m.laserX < W / 2 ? 1 : -1) : 0.001;   // 낮은 실력: 못 보고 지나침
       if (laserSide !== 0.001) tx = Math.max(40, Math.min(W - 40, m.laserX + laserSide * 110));
     } else laserSide = 0;
+    // 레벨업 카드: 융합 > 모듈 > 패시브 순으로 (사람처럼 한 빌드를 키움)
+    if (s.pending) {
+      const pick = s.pending.findIndex(id => ['swarm', 'railgun', 'hunter'].includes(id));
+      const mod = s.pending.findIndex(id => ['spread', 'pierce', 'homing', 'drone', 'laser'].includes(id));
+      s.chooseCard(pick >= 0 ? pick : mod >= 0 ? mod : 0);
+    }
+    // 스킬: 동료는 보스전/위험할 때, 필살기는 게이지가 차면 보스나 적이 많을 때
+    let skill: 'cat' | 'dog' | 'ult' | null = null;
+    const bossFight = !!s.boss || !!s.midBoss;
+    if (s.ultReady && (bossFight || s.enemies.length >= 4)) skill = 'ult';
+    else if (s.comp.dog.ready && (danger > 8 || bossFight)) skill = 'dog';
+    else if (s.comp.cat.ready && (bossFight || p.energy < 60)) skill = 'cat';
     const bomb = s.bombs > 0 && (nd < 45 * SKILL + 15 || danger > 14) && (f % 7 === 0);
     if (bomb) bombsUsed++;
-    s.step({ targetX: Math.max(40, Math.min(W - 40, tx)), targetY: H - 120, fire: true, bomb });
+    s.step({ targetX: Math.max(40, Math.min(W - 40, tx)), targetY: H - 120, fire: true, bomb, skill });
     s.drainEvents();
   }
-  return { stage: s.bossTier, cleared: s.state === 'GAMECLEAR', seconds: s.frame / 60, score: s.score, lives: s.lives, bombsUsed, deathPhase: s.stagePhase };
+  phaseFrames[lastKey] = (phaseFrames[lastKey] ?? 0) + (s.frame - lastF);
+  return { phaseFrames, level: s.level, stage: s.bossTier, cleared: s.state === 'GAMECLEAR', seconds: s.frame / 60, score: s.score, lives: s.lives, bombsUsed, deathPhase: s.stagePhase };
 }
 function nearestEnemyX(s: Sim): number {
   let best = s.enemies[0];
@@ -62,6 +80,7 @@ for (let i = 1; i <= SEEDS; i++) results.push(runOne(i));
 const pct = (n: number) => (100 * n / results.length).toFixed(1) + '%';
 const avg = (f: (r: RunResult) => number) => (results.reduce((a, r) => a + f(r), 0) / results.length).toFixed(1);
 console.log(`seeds=${SEEDS} startTier=${START_TIER} skill=${SKILL}`);
+console.log(`평균 레벨 ${avg(r => r.level)}`);
 console.log(`클리어율 ${pct(results.filter(r => r.cleared).length)} | 평균 플레이 ${avg(r => r.seconds)}s | 평균 점수 ${avg(r => r.score)} | 평균 폭탄 사용 ${avg(r => r.bombsUsed)}`);
 console.log('스테이지별 도달/탈락 (게임오버가 난 스테이지):');
 for (let t = START_TIER; t <= 5; t++) {
@@ -72,3 +91,9 @@ for (let t = START_TIER; t <= 5; t++) {
 const phases: Record<string, number> = {};
 for (const r of results.filter(r => !r.cleared)) phases[r.deathPhase] = (phases[r.deathPhase] ?? 0) + 1;
 console.log('탈락 시점 단계:', phases);
+
+console.log('스테이지별 평균 시간(초): 일반전투 / 중간보스 / 보스전');
+for (let t = START_TIER; t <= 5; t++) {
+  const a = (k: string) => (results.reduce((x, r) => x + (r.phaseFrames[`T${t}:${k}`] ?? 0), 0) / results.length / 60).toFixed(0);
+  console.log(`  stage ${t}: ${a('fight')} / ${a('mid')} / ${a('boss')}`);
+}
