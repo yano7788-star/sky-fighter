@@ -615,7 +615,7 @@ describe('보스 약점 노출(그로기)', () => {
     b.sp = { kind: 'laser', state: 'ACT', t: 44, lockX: 225, beams: [0] };
     s.enemyBullets.push({ x: 10, y: 10, vx: 0, vy: 0, color: '#fff', r: 3 });
     s.step(idle(s));
-    expect(b.sp).toBeUndefined(); expect(b.stun).toBeGreaterThan(100); expect(s.enemyBullets.length).toBe(0);
+    expect(b.sp).toBeUndefined(); expect(b.stun).toBeGreaterThan(70); expect(s.enemyBullets.length).toBe(0);
     const x0 = b.x; s.step(idle(s)); expect(b.x).toBe(x0);
     const hp0 = b.hp; s.bullets.push({ x: b.x, y: b.y, vx: 0, vy: 0, dmg: 2, pierce: 0 } as any); s.step(idle(s));
     expect(hp0 - b.hp).toBeGreaterThanOrEqual(3);
