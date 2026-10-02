@@ -20,7 +20,9 @@ export interface Bullet { x: number; y: number; vx: number; vy: number; dmg: num
 export interface Missile { x: number; y: number; vx: number; vy: number; speed: number; dmg: number; }
 export interface Gem { x: number; y: number; v: number; }
 export interface Companion { ready: boolean; active: boolean; timer: number; used: boolean; pity: number; }
-export type UltPhase = 'IDLE' | 'CUTIN' | 'FALL' | 'IMPACT';
+export type UltPhase = 'IDLE' | 'CUTIN' | 'FALL' | 'IMPACT' | 'ACTIVE';
+/** 궁극기 종류: 에이스=자매의 손바닥, 언니=미사일 포격, 동생=시간 정지 */
+export type UltKind = 'palm' | 'barrage' | 'timestop';
 export interface EnemyBullet { x: number; y: number; vx: number; vy: number; color: string; r: number; grazed?: boolean; }
 export interface Enemy {
   type: EnemyType;

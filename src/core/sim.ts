@@ -1,15 +1,15 @@
 import { CARDS, hasFusion, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W } from './config';
 import {
-  BOMB, BOSS_CONFIGS, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
+  BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
   FIGHT_FRAMES, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
   fireBossPattern, rankFor,
 } from './data';
-import { NO_META, type MetaParams } from './meta';
+import { NO_META, pilotOf, type MetaParams } from './meta';
 import { createRng, type Rng } from './rng';
 import type {
   Boss, Bullet, Companion, Enemy, EnemyBullet, EnemyType, GameState, Gem, Item, ItemType, MidBoss, Missile, PlayerState, Rank,
-  SimEvent, SimInput, SkillKey, StagePhase, UltPhase,
+  SimEvent, SimInput, SkillKey, StagePhase, UltKind, UltPhase,
 } from './types';
 
 const MAGNET_FRAMES = 600;
@@ -49,7 +49,7 @@ export class Sim {
 
   // 동료 / 궁극기
   comp: { cat: Companion; dog: Companion } = { cat: newCompanion(), dog: newCompanion() };
-  ult: { gauge: number; phase: UltPhase; t: number } = { gauge: 0, phase: 'IDLE', t: 0 };
+  ult: { gauge: number; phase: UltPhase; t: number; kind: UltKind } = { gauge: 0, phase: 'IDLE', t: 0, kind: 'palm' };
 
   // 폭탄 폭발장 / 레이저 상태 (렌더링이 읽는다)
   bombT = 0; bombX = 0; bombY = 0;
@@ -92,10 +92,13 @@ export class Sim {
     this.player.maxEnergy += meta.energyBonus; this.player.energy = this.player.maxEnergy;
     this.bombs += meta.startBombs;
     this.ult.gauge = meta.ultStart;
+    this.ult.kind = pilotOf(meta.pilot).ult;
   }
 
   get multiplier(): number { return comboMultiplier(this.combo); }
   get maxBombs(): number { return PLAYER.maxBombs + this.stats.bombCapBonus + this.meta.startBombs; }
+  /** 동생의 궁극기(시간 정지) 진행 중: 적·적 탄·보스는 움직이지 않는다 (피격은 계속 받음) */
+  get timeStopped(): boolean { return this.ult.phase === 'ACTIVE' && this.ult.kind === 'timestop'; }
   get ultReady(): boolean { return this.ult.gauge >= 100 && this.ult.phase === 'IDLE'; }
   get xpNext(): number { return xpNeeded(this.level); }
 
@@ -190,7 +193,8 @@ export class Sim {
     this.updateAegis();
     this.updateCompanions();
     if (this.ult.phase === 'IMPACT' && ++this.ult.t >= ULT.frames.IMPACT) { this.ult.phase = 'IDLE'; this.ult.t = 0; }
-    if (this.comboTimer > 0 && --this.comboTimer === 0 && this.combo > 0) { this.combo = 0; this.emit({ t: 'combo', combo: 0, mult: 1 }); }
+    if (this.ult.phase === 'ACTIVE') this.runUltActive();
+    if (!this.timeStopped && this.comboTimer > 0 && --this.comboTimer === 0 && this.combo > 0) { this.combo = 0; this.emit({ t: 'combo', combo: 0, mult: 1 }); }
 
     // 플레이어 이동
     p.x += (p.targetX - p.x) * 0.25; p.y += (p.targetY - p.y) * 0.25;
@@ -201,7 +205,7 @@ export class Sim {
     this.updateBullets();
     this.updateMissiles();
     this.updateBombField();
-    this.updateStagePhase();
+    if (!this.timeStopped) this.updateStagePhase();
     if (this.boss) this.updateBoss();
     if (this.midBoss) this.updateMidBoss();
     this.updateEnemyBullets();
@@ -247,12 +251,44 @@ export class Sim {
   private stepUltCinematic(): void {
     const u = this.ult;
     u.t++;
-    if (u.phase === 'CUTIN' && u.t >= ULT.frames.CUTIN) { u.phase = 'FALL'; u.t = 0; this.emit({ t: 'ult', phase: 'FALL' }); }
-    else if (u.phase === 'FALL' && u.t >= ULT.frames.FALL) {
+    if (u.phase === 'CUTIN' && u.t >= ULT_KIND[u.kind].cutin) {
+      if (u.kind === 'palm') { u.phase = 'FALL'; u.t = 0; this.emit({ t: 'ult', phase: 'FALL' }); }
+      else { u.phase = 'ACTIVE'; u.t = 0; this.startUltActive(); this.emit({ t: 'ult', phase: 'ACTIVE' }); }
+    } else if (u.phase === 'FALL' && u.t >= ULT.frames.FALL) {
       u.phase = 'IMPACT'; u.t = 0;
       this.applyUltDamage();
       this.emit({ t: 'ult', phase: 'IMPACT' });
     }
+  }
+
+  /** 언니(미사일 포격)/동생(시간 정지) 궁극기가 컷인 직후 시작될 때 */
+  private startUltActive(): void {
+    const p = this.player, u = this.ult;
+    this.vacuum = Math.max(this.vacuum, 60);
+    if (u.kind === 'barrage') {
+      this.enemyBullets.length = 0;
+      p.invincible = Math.max(p.invincible, ULT_KIND.barrage.invincible);
+      this.emit({ t: 'shake', v: 14 }); this.emit({ t: 'flash', kind: 'bomb', v: 0.6 }); this.emit({ t: 'vibrate', pattern: [90, 40, 140] });
+    } else if (u.kind === 'timestop') {
+      p.invincible = Math.max(p.invincible, ULT_KIND.timestop.active);
+      for (let i = this.enemyBullets.length - 1; i >= 0; i--) if (Math.hypot(this.enemyBullets[i].x - p.x, this.enemyBullets[i].y - p.y) < 90) this.enemyBullets.splice(i, 1);   // 정지된 탄에 끼지 않도록 주변 탄 제거
+      this.emit({ t: 'shake', v: 6 }); this.emit({ t: 'flash', kind: 'respawn', v: 0.5 });
+    }
+  }
+
+  /** ACTIVE 단계 매 틱: 미사일 포격은 화면 위에서 미사일을 쏟아붓는다. 끝나면 IDLE */
+  private runUltActive(): void {
+    const u = this.ult, k = ULT_KIND[u.kind];
+    if (u.kind === 'palm') return;
+    u.t++;
+    if (u.kind === 'barrage' && u.t % ULT_KIND.barrage.interval === 0 && this.missiles.length < 140) {
+      for (let i = 0; i < 2; i++) {
+        const x = 20 + this.rng() * (W - 40);
+        this.missiles.push({ x, y: -12, vx: (this.rng() - 0.5) * 2, vy: 8, speed: 9, dmg: ULT_KIND.barrage.dmg * this.stats.dmgMult });
+      }
+      if (u.t % 9 === 0) this.emit({ t: 'sfx', name: 'missile' });
+    }
+    if ('active' in k && u.t >= k.active) { u.phase = 'IDLE'; u.t = 0; this.emit({ t: 'ult', phase: 'IDLE' }); }
   }
 
   /** 손바닥이 닿는 순간: 모든 적 총알 제거 + 화면의 적/중간보스 최대 체력의 50%, 보스 30% */
@@ -284,7 +320,7 @@ export class Sim {
     if (this.droneCd > 0) this.droneCd--;
     if (this.droneMissileCd > 0) this.droneMissileCd--;
 
-    const baseDmg = st.dmgMult * (1 + 0.15 * st.pierce);
+    const baseDmg = st.dmgMult * (1 + 0.15 * st.pierce) * (this.timeStopped ? ULT_KIND.timestop.boost : 1);
     const pierceN = st.pierce + (st.railgun ? 2 : 0);
 
     if (wantFire && this.fireCd <= 0) {
@@ -501,6 +537,8 @@ export class Sim {
           this.rng() < 0.5 ? b.subColor : '#f59e0b', 10);
       }
       if (b.deathTimer % 16 === 1) this.emit({ t: 'sfx', name: 'boom' });
+    } else if (this.timeStopped) {
+      // 시간 정지 중: 이동·공격 정지
     } else if (b.y < b.targetY) {
       b.y += 1.5;
     } else {
@@ -586,7 +624,9 @@ export class Sim {
       return;
     }
 
-    if (m.y < m.targetY) {
+    if (this.timeStopped) {
+      // 시간 정지 중: 이동·공격 정지
+    } else if (m.y < m.targetY) {
       m.y += 2;
     } else if (m.state === 'MOVE') {
       m.x += m.vx;
@@ -636,6 +676,7 @@ export class Sim {
 
   // ---------------------------------------------------------------------
   private updateEnemyBullets(): void {
+    if (this.timeStopped) return;   // 시간 정지: 적 탄은 허공에 멈춰 있다
     const p = this.player, dogOn = this.comp.dog.active;
     for (let i = this.enemyBullets.length - 1; i >= 0; i--) {
       if (i >= this.enemyBullets.length) continue;   // applyDamage(리스폰)가 탄을 전부 지운 경우
@@ -723,12 +764,12 @@ export class Sim {
     const spawnOk = this.stagePhase === 'FIGHT' || this.stagePhase === 'BOSS' ||
       (this.stagePhase === 'INTRO' && this.phaseTimer < PHASE_FRAMES.INTRO - 50);
     const interval = SPAWN_INTERVAL[Math.min(MAX_TIER, this.bossTier)];
-    if (spawnOk && this.frame % (this.boss || this.midBoss ? interval * 2 : interval) === 0) this.spawnEnemy();
+    if (spawnOk && !this.timeStopped && this.frame % (this.boss || this.midBoss ? interval * 2 : interval) === 0) this.spawnEnemy();
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
       const def = ENEMY_DEFS[e.type];
-      this.moveEnemy(e);
+      if (!this.timeStopped) this.moveEnemy(e);
       const vulnerable = e.y >= ON_SCREEN_Y;   // 화면에 들어오기 전에는 무적
 
       for (let j = this.bullets.length - 1; vulnerable && j >= 0; j--) {

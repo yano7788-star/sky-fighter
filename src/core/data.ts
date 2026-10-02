@@ -161,6 +161,13 @@ export const BOMB = {
 // ---------------------------------------------------------------------------
 // 궁극기 「자매의 손바닥」 — 게이지가 가득 차면 사용. 컷인 → 손바닥 낙하 → 화면 전체 피해
 // ---------------------------------------------------------------------------
+/** 파일럿별 궁극기 */
+export const ULT_KIND = {
+  palm:     { name: '자매의 손바닥', owner: '에이스', cutin: 120 },
+  barrage:  { name: '미사일 포격',   owner: '언니',   cutin: 90, active: 200, invincible: 150, dmg: 4.2, interval: 3 },   // 약 3.3초간 위에서 미사일 비
+  timestop: { name: '시간 정지',     owner: '동생',   cutin: 90, active: 150, boost: 1.5 },                                // 2.5초간 적·탄 정지, 내 피해 1.5배
+} as const;
+
 export const ULT = {
   frames: { CUTIN: 120, FALL: 75, IMPACT: 60 },
   enemyPct: 0.5,              // 일반 적·중간보스: 최대 체력의 50%

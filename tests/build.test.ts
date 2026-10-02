@@ -303,3 +303,66 @@ describe('미사일 타격감', () => {
     expect(byX(400).hp).toBe(6);
   });
 });
+
+describe('파일럿 전용 궁극기', () => {
+  const fill = (s: Sim) => { s.ult.gauge = 100; };
+  it('파일럿에 따라 궁극기 종류가 정해진다', () => {
+    expect(new Sim(1, metaParams({}, 'ace')).ult.kind).toBe('palm');
+    expect(new Sim(1, metaParams({}, 'sister1')).ult.kind).toBe('barrage');
+    expect(new Sim(1, metaParams({}, 'sister2')).ult.kind).toBe('timestop');
+  });
+  it('언니: 컷인 동안 정지 → 탄 제거 → 3초간 위에서 미사일이 쏟아지고 끝나면 IDLE', () => {
+    const s = new Sim(1, metaParams({}, 'sister1')); fill(s);
+    s.enemyBullets.push({ x: 100, y: 300, vx: 0, vy: 0, color: '#fff', r: 4 });
+    s.step(idle(s, false, { skill: 'ult' }));
+    const f = s.frame;
+    for (let i = 0; i < 89; i++) { s.step(idle(s)); expect(s.frame).toBe(f); }
+    s.step(idle(s));
+    expect(s.ult.phase).toBe('ACTIVE'); expect(s.enemyBullets).toHaveLength(0); expect(s.player.invincible).toBeGreaterThan(100);
+    let maxMissiles = 0, fromTop = false;
+    for (let i = 0; i < 80; i++) { s.step(idle(s)); maxMissiles = Math.max(maxMissiles, s.missiles.length); if (s.missiles.some(m => m.vy > 0)) fromTop = true; }
+    expect(maxMissiles).toBeGreaterThan(20); expect(fromTop).toBe(true);
+    for (let i = 0; i < 160; i++) s.step(idle(s));
+    expect(s.ult.phase).toBe('IDLE');
+  });
+  it('언니의 미사일 포격은 보스에게 큰 피해를 준다', () => {
+    const s = new Sim(1, metaParams({}, 'sister1'));
+    s.bossTier = 3; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s));
+    const boss = s.boss!; boss.y = 135; const hp0 = boss.hp;
+    fill(s); s.step(idle(s, false, { skill: 'ult' }));
+    for (let i = 0; i < 90 + 220; i++) { s.player.invincible = 99999; s.step(idle(s)); }
+    expect(boss.hp).toBeLessThan(hp0 * 0.9);
+  });
+  it('동생: 시간 정지 동안 적·적 탄·보스는 움직이지 않지만 내 공격은 들어간다', () => {
+    const s = new Sim(1, metaParams({}, 'sister2'));
+    s.enemies.push({ ...mkEnemy('scout', 200, 200), hp: 50, maxHp: 50, speed: 3 });
+    s.enemyBullets.push({ x: 300, y: 300, vx: 0, vy: 3, color: '#fff', r: 4 });
+    fill(s); s.step(idle(s, false, { skill: 'ult' }));
+    for (let i = 0; i < 90; i++) s.step(idle(s));     // 컷인
+    expect(s.timeStopped).toBe(true);
+    const ey = s.enemies[0].y, by = s.enemyBullets[0].y;
+    for (let i = 0; i < 60; i++) s.step(idle(s, true));
+    expect(s.enemies[0].y).toBe(ey); expect(s.enemyBullets[0].y).toBe(by);
+    s.bullets.push({ x: 200, y: 200, vx: 0, vy: 0, dmg: 4, pierce: 0 }); s.step(idle(s));
+    expect(s.enemies[0].hp).toBeLessThan(50);          // 정지 중에도 피해는 들어간다
+    for (let i = 0; i < 100; i++) s.step(idle(s));
+    expect(s.timeStopped).toBe(false);
+    s.step(idle(s)); expect(s.enemies[0].y).toBeGreaterThan(ey); // 해제 후 다시 움직임
+  });
+  it('시간 정지 중에는 새 적이 나오지 않고, 플레이어는 피해를 받지 않는다', () => {
+    const s = new Sim(1, metaParams({}, 'sister2'));
+    fill(s); s.step(idle(s, false, { skill: 'ult' }));
+    for (let i = 0; i < 90; i++) s.step(idle(s));
+    const n = s.enemies.length;
+    for (let i = 0; i < 120; i++) s.step(idle(s));
+    expect(s.enemies.length).toBe(n);
+    const e0 = s.player.energy; s.applyDamage(50);
+    expect(s.player.energy).toBe(e0);
+  });
+  it('시간 정지 중에는 내 탄 피해가 1.5배', () => {
+    const a = new Sim(1, metaParams({}, 'sister2')), b = new Sim(1, metaParams({}, 'sister2'));
+    fill(b); b.step(idle(b, false, { skill: 'ult' })); for (let i = 0; i < 90; i++) b.step(idle(b));
+    a.step(idle(a, true)); b.step(idle(b, true));
+    expect(b.bullets[0].dmg).toBeCloseTo(a.bullets[0].dmg * 1.5);
+  });
+});

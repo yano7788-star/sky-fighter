@@ -359,7 +359,11 @@ export class GameScene extends Phaser.Scene {
       case 'levelup': audio.sfx('item'); break;
       case 'heal': this.fx.explosion(e.x, e.y, '#4ade80', 10); break;
       case 'skill': if (e.key === 'ult') { this.activeId = null; this.firing = false; } break;
-      case 'ult': if (e.phase === 'IMPACT') { this.fx.ring(W / 2, H * 0.55, '#a5f3fc', 500); audio.sfx('boom'); } else if (e.phase === 'CUTIN') audio.sfx('enrage'); break;
+      case 'ult':
+        if (e.phase === 'IMPACT') { this.fx.ring(W / 2, H * 0.55, '#a5f3fc', 500); audio.sfx('boom'); }
+        else if (e.phase === 'CUTIN') audio.sfx('enrage');
+        else if (e.phase === 'ACTIVE') { audio.sfx(this.sim.ult.kind === 'barrage' ? 'boom' : 'laserCharge'); this.fx.ring(W / 2, H * 0.5, this.sim.ult.kind === 'barrage' ? '#fb923c' : '#7dd3fc', 420); }
+        break;
       case 'gem': break;
       case 'hitspark': if (this.sim.frame % 3 === 0) this.fx.ring(e.x, e.y, '#fde047', 16); break;
       case 'gameover': case 'gameclear': this.finishRun(e.t === 'gameover' ? 'GAMEOVER' : 'GAMECLEAR'); break;
