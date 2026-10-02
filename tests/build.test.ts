@@ -5,6 +5,7 @@ import { createRng } from '../src/core/rng';
 import { creditsFor, metaParams } from '../src/core/meta';
 import { dailyMutator, dailySeed, dayKey, offerMutators } from '../src/core/mutators';
 import type { EnemyBullet } from '../src/core/types';
+import { ACHIEVEMENTS, newlyUnlocked } from '../src/core/achievements';
 import { Sim } from '../src/core/sim';
 import type { Enemy, EnemyType, SimInput } from '../src/core/types';
 
@@ -545,5 +546,27 @@ describe('스테이지 장애물', () => {
     const s = at(3); s.hazards.push({ kind: 'meteor', x: 100, y: -24, t: 0, warn: 60, dur: 0 });
     (s as any).ult.phase = 'ACTIVE'; (s as any).ult.kind = 'timestop';
     s.step(idle(s)); expect(s.hazards[0].t).toBe(0);
+  });
+});
+
+describe('업적', () => {
+  const base = { score: 0, bossTier: 1, cleared: false, endless: false, kills: 0, maxCombo: 0, graze: 0, hits: 0, bombs: 0, ults: 0, fusions: 0, mutator: null, daily: false };
+  it('조건을 만족한 업적만 새로 해금되고, 이미 가진 것은 제외된다', () => {
+    const ids = (r: any, have: string[] = []) => newlyUnlocked({ ...base, ...r }, have).map(a => a.id);
+    expect(ids({})).toEqual([]);
+    expect(ids({ bossTier: 3, hits: 0 })).toEqual(expect.arrayContaining(['stage2', 'stage3', 'untouched']));
+    expect(ids({ bossTier: 3 }, ['stage2'])).not.toContain('stage2');
+    expect(ids({ cleared: true, bossTier: 5, mutator: 'swift' })).toEqual(expect.arrayContaining(['clear', 'mutclear']));
+    expect(ids({ bossTier: 4, bombs: 1 })).not.toContain('nobomb');
+  });
+  it('Sim이 처치·콤보·피격·폭탄 통계를 센다', () => {
+    const s = new Sim(3); s.player.invincible = 0;
+    s.bombs = 2; s.frame = 100; s.step(idle(s, false, { bomb: true }));
+    expect(s.run.bombs).toBe(1);
+    s.player.invincible = 0; s.applyDamage(10); expect(s.run.hits).toBe(1);
+    expect(s.runStats(true)).toMatchObject({ hits: 1, bombs: 1, daily: true, cleared: false });
+  });
+  it('업적 id는 중복되지 않는다', () => {
+    expect(new Set(ACHIEVEMENTS.map(a => a.id)).size).toBe(ACHIEVEMENTS.length);
   });
 });

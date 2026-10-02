@@ -1,3 +1,4 @@
+import { FUSION_IDS, type RunStats } from './achievements';
 import { CARDS, hasFusion, type FusionId, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config';
 import {
@@ -78,6 +79,7 @@ export class Sim {
   enemies: Enemy[] = [];
   items: Item[] = [];
   hazards: Hazard[] = [];
+  run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0 };   // 업적용 한 판 통계
   windDir = 0; windWarn = 0; windT = 0;     // 바람: 예고(windWarn) 후 windT 동안 windDir 방향으로 분다
   private hazCd: Record<string, number> = {};
   events: SimEvent[] = [];
@@ -195,8 +197,11 @@ export class Sim {
     this.frame++;
     const p = this.player;
     p.targetX = inp.targetX; p.targetY = inp.targetY;
+    const ultPhase0 = this.ult.phase, bombs0 = this.bombs;
     if (inp.skill) this.activateSkill(inp.skill);
     if (inp.bomb) this.fireBomb();
+    if (ultPhase0 === 'IDLE' && this.ult.phase !== 'IDLE') this.run.ults++;
+    if (this.bombs < bombs0) this.run.bombs++;
     if (p.invincible > 0) p.invincible--;
     if (p.magnet > 0) p.magnet--;
     this.updateAegis();
@@ -914,6 +919,7 @@ export class Sim {
   /** 처치 점수: 연속 처치(콤보)에 따라 배율 적용 */
   private killScore(base: number): number {
     this.combo++; this.comboTimer = COMBO_WINDOW;
+    this.run.kills++; this.run.maxCombo = Math.max(this.run.maxCombo, this.combo);
     const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score);
     this.score += pts;
     this.emit({ t: 'combo', combo: this.combo, mult: comboMultiplier(this.combo) });
@@ -1088,7 +1094,7 @@ export class Sim {
 
     p.energy = Math.max(0, p.energy - dmg);
     p.invincible = 40;
-    this.stageHits++;
+    this.stageHits++; this.run.hits++;
     if (this.combo > 0) { this.combo = 0; this.comboTimer = 0; this.emit({ t: 'combo', combo: 0, mult: 1 }); }
     this.emit({ t: 'sfx', name: 'boom' }); this.boom(p.x, p.y, '#ef4444', 16);
     this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'flash', kind: 'hit', v: 0.45 });
@@ -1106,6 +1112,14 @@ export class Sim {
         this.emit({ t: 'gameover' }); this.emit({ t: 'vibrate', pattern: [120, 60, 220] });
       }
     }
+  }
+
+  /** 업적 판정용 한 판 기록 */
+  runStats(daily = false): RunStats {
+    const fusions = FUSION_IDS.filter(id => hasFusion(this.build, id)).length;
+    return { score: this.score, bossTier: this.bossTier, cleared: this.state === 'GAMECLEAR' || this.endless, endless: this.endless,
+      kills: this.run.kills, maxCombo: this.run.maxCombo, graze: this.grazeCount, hits: this.run.hits, bombs: this.run.bombs, ults: this.run.ults,
+      fusions, mutator: this.meta.mutator ?? null, daily };
   }
 
   /** 현재 빌드에서 융합 카드 보유 여부 (렌더링/HUD용) */

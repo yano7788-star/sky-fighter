@@ -32,7 +32,7 @@ const bannerAlpha = (t: number, total: number, fadeIn = 18, fadeOut = 24) => Mat
 export const RESULT_BTN = { cont: { x: W / 2, y: H / 2 + 172, w: 300, h: 46 }, title: { x: W / 2, y: H / 2 + 228, w: 300, h: 40 } };
 export const inRect = (z: { x: number; y: number; w: number; h: number }, x: number, y: number) => Math.abs(x - z.x) < z.w / 2 && Math.abs(y - z.y) < z.h / 2;
 
-export interface ResultInfo { dailyBest?: number; kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
+export interface ResultInfo { newAch?: string[]; dailyBest?: number; kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
 
 /** 게임 화면 HUD: 에너지 바·점수·폭탄·보스 바·배너·일시정지/결과 오버레이 */
 export class Hud {
@@ -131,7 +131,7 @@ export class Hud {
     };
     this.resultGroup.push(add(s.add.rectangle(0, 0, W, H, 0x03050a, 0.9).setOrigin(0, 0)));
     this.resultTexts.dim = this.resultGroup[0] as Phaser.GameObjects.Text;
-    mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
+    mk('ach', H / 2 - 84, 14); mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
     mk('record', H / 2 + 110, 16); mk('credits', H / 2 + 138, 15); mk('prompt', H / 2 + 176, 16);
     this.resultG = add(s.add.graphics()); this.resultGroup.push(this.resultG);
     mk('btnC', RESULT_BTN.cont.y, 19); mk('btnT', RESULT_BTN.title.y, 15);
@@ -169,6 +169,7 @@ export class Hud {
     const t = this.resultTexts;
     const over = r.kind === 'GAMEOVER';
     t.title.setText(over ? 'MISSION OVER' : 'MISSION CLEAR!').setColor(over ? '#f87171' : '#10b981');
+    t.ach.setText(r.newAch && r.newAch.length ? '🏆 ' + r.newAch.join(' · ') : '').setColor('#fbbf24');
     t.l1.setText(over ? '' : '지구의 평화를 지켰습니다.').setColor('#facc15');
     t.l2.setText(`최종 점수: ${r.score}`).setColor('#fff');
     t.l3.setText(over ? `최종 도달: STAGE ${r.stage}  ·  LV ${r.level}` : `LV ${r.level}`).setColor('#fff');

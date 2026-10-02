@@ -13,7 +13,8 @@ import { LevelUpOverlay } from '../render/levelup';
 import { UltFx } from '../render/ultfx';
 import { R, S, bulletTexture } from '../render/textures';
 import { audio, type BgmName } from '../systems/audio';
-import { loadBest, loadDaily, loadMeta, saveBest, saveDaily, saveMeta, type BestRecord } from '../systems/storage';
+import { newlyUnlocked } from '../core/achievements';
+import { loadAch, saveAch, loadBest, loadDaily, loadMeta, saveBest, saveDaily, saveMeta, type BestRecord } from '../systems/storage';
 
 const MOVE_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' '];
 const PREVENT_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '];
@@ -48,6 +49,7 @@ export class GameScene extends Phaser.Scene {
   private compPos = { cat: { x: 0, y: 0 }, dog: { x: 0, y: 0 } };
   private skillQueued: SkillKey | null = null;
   private runCredits = 0;
+  private newAch: string[] = [];
   private creditsPaid = 0;      // 이번 런에서 이미 지급한 크레딧 (미션 클리어 후 무한 모드 이어하기 대응)
   private bestBefore = 0;       // 런 시작 시점의 최고 점수 (신기록 판정 기준)
 
@@ -154,7 +156,7 @@ export class GameScene extends Phaser.Scene {
     this.resultKind = null; this.newRecord = false;
     this.targetX = W / 2; this.targetY = PLAYER.spawnY;
     this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
-    this.runCredits = 0; this.creditsPaid = 0; this.bestBefore = loadBest().score; this.shownPending = null; this.levelup.hide();
+    this.runCredits = 0; this.creditsPaid = 0; this.newAch = []; this.bestBefore = loadBest().score; this.shownPending = null; this.levelup.hide();
     this.bg.reset(); this.overlay.setStage(1); this.fx.clear(); this.hud.resetState(this.sim);
     this.hud.showResult(null); this.hud.setPaused(false);
     audio.rewind(); audio.resume();
@@ -416,12 +418,19 @@ export class GameScene extends Phaser.Scene {
     const total = Math.floor(creditsFor(s.score, s.bossTier, s.endless || kind === 'GAMECLEAR') * s.meta.mut.credit * dailyBonus);
     const meta = loadMeta(); meta.credits += Math.max(0, total - this.creditsPaid); saveMeta(meta);   // 무한 모드로 이어 간 경우 이미 지급한 크레딧은 제외
     this.creditsPaid = Math.max(this.creditsPaid, total); this.runCredits = total;
+    const have = loadAch(), got = newlyUnlocked(s.runStats(!!this.daily), have);   // 업적: 새로 달성한 것만 보상 지급
+    this.newAch = got.map(a => a.icon + ' ' + a.name);
+    if (got.length) {
+      saveAch([...have, ...got.map(a => a.id)]);
+      const m2 = loadMeta(); m2.credits += got.reduce((n, a) => n + a.reward, 0); saveMeta(m2);
+      this.runCredits += got.reduce((n, a) => n + a.reward, 0);
+    }
     this.resultKind = kind; this.resultTimer = 90;
     this.activeId = null; this.firing = false;
     this.hud.showResult(this.resultInfo(), false);
   }
   private resultInfo() {
-    return { dailyBest: this.daily ? loadDaily(this.daily.key).best : undefined, kind: this.resultKind!, score: this.sim.score, stage: this.sim.bossTier, level: this.sim.level, credits: this.runCredits, best: this.best, newRecord: this.newRecord };
+    return { newAch: this.newAch, dailyBest: this.daily ? loadDaily(this.daily.key).best : undefined, kind: this.resultKind!, score: this.sim.score, stage: this.sim.bossTier, level: this.sim.level, credits: this.runCredits, best: this.best, newRecord: this.newRecord };
   }
   /** 플레이 도중 탭을 닫아도 신기록이 사라지지 않게 저장 (메모리의 best는 건드리지 않아 NEW RECORD 판정 유지) */
   persistBestInRun(): void {
