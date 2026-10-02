@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { H, PHASE_FRAMES, W } from '../core/config';
-import { BOSS_CONFIGS } from '../core/data';
+import { BOSS_CONFIGS, HYPER } from '../core/data';
+import { store } from '../systems/storage';
 import { mutatorOf } from '../core/mutators';
 import type { Sim } from '../core/sim';
 import { contentCenter, R } from './textures';
@@ -40,6 +41,7 @@ export interface ResultInfo { newAch?: string[]; dailyBest?: number; kind: 'GAME
 
 /** 게임 화면 HUD: 에너지 바·점수·폭탄·보스 바·배너·일시정지/결과 오버레이 */
 export class Hud {
+  hyperSeen = !!store.get('hyperSeen', false);   // 하이퍼를 한 번이라도 발동했으면 설명 문구를 줄인다
   daily = false;   // 일일 도전 중이면 모디파이어 배지 앞에 표시
   private displayEnergy = 100;
   private displayHp = 0;
@@ -88,6 +90,8 @@ export class Hud {
       dog: add(scene.add.image(UI.dog.x, UI.dog.y, 'ally_dog').setDisplaySize(38, 36)),
     };
     text('hyperLabel', W / 2, H - 34, 9, '#8b5cf6', 0.5, 1);
+    text('hyperBanner', W / 2, H * 0.36, 30, '#f0abfc', 0.5, 0.5).setShadow(0, 0, '#a855f7', 14, true, true);
+    text('hyperSub', W / 2, H * 0.36 + 30, 13, '#fae8ff', 0.5, 0.5).setShadow(0, 0, '#000', 4, true, true);
     text('ultLabel', UI.ult.x, UI.ult.y + BTN_R + 9, 9, '#fde68a', 0.5, 0.5);
     text('catLabel', UI.cat.x, UI.cat.y + BTN_R + 9, 9, '#fb7185', 0.5, 0.5);
     text('dogLabel', UI.dog.x, UI.dog.y + BTN_R + 9, 9, '#fb923c', 0.5, 0.5);
@@ -289,7 +293,16 @@ export class Hud {
     g.fillStyle(0x0f172a, 0.7); g.fillRoundedRect(hx, hyY, 120, 8, 4);
     if (hy.gauge > 0) { g.fillStyle(on ? (Math.floor(f / 4) % 2 === 0 ? 0xf0abfc : 0xffffff) : 0xc084fc, 1); g.fillRoundedRect(hx, hyY, 120 * Math.min(1, hy.gauge / 100), 8, 4); }
     g.lineStyle(1.5, on ? 0xf0abfc : 0x7c3aed, 0.9); g.strokeRoundedRect(hx, hyY, 120, 8, 4);
-    this.setText('hyperLabel', on ? 'HYPER x2' : 'HYPER').setColor(on ? '#f0abfc' : '#8b5cf6');
+    this.setText('hyperLabel', on ? `HYPER x2  ${Math.ceil(hy.t / 60)}s` : this.hyperSeen ? 'HYPER' : 'HYPER · 탄을 스치면 충전').setColor(on ? '#f0abfc' : '#8b5cf6');
+    // 발동 순간 중앙 배너 (처음엔 효과 설명까지)
+    const since = HYPER.frames - hy.t, showB = on && since < 90;
+    this.t.hyperBanner.setVisible(showB); this.t.hyperSub.setVisible(showB);
+    if (showB) {
+      const a = Math.min(1, since / 8, (90 - since) / 25);
+      this.setText('hyperBanner', 'HYPER MODE!').setAlpha(a).setScale(1 + 0.25 * Math.max(0, 1 - since / 14));
+      this.setText('hyperSub', '탄 소거 · 점수 ×2 · 연사 +20%').setAlpha(a);
+    }
+    if (on && !this.hyperSeen) { this.hyperSeen = true; store.set('hyperSeen', true); }
 
     // 필살기: 항상 표시. 게이지가 차오르고, 가득 차면 빛난다
     const u = UI.ult, ur = BTN_R, frac = Math.min(1, sim.ult.gauge / 100), ready = sim.ultReady;

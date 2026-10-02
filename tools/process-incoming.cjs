@@ -200,7 +200,22 @@ async function overlay(base, outName) {
   console.log(outName + ': ' + kb(dst) + 'KB (원본 ' + m.width + 'x' + m.height + ')');
 }
 
+/** 신규 적 시트(3열×2행): 드론/기뢰/(포대 기단)/포대/운석 괴수 — 칸마다 잘라 크로마키 후 저장 */
+async function newEnemies() {
+  const f = findIn('enemies_new_sheet'); if (!f) { console.log('(건너뜀) enemies_new_sheet 없음'); return; }
+  const full = await raw(f), cw = Math.floor(full.w / 3), ch = Math.floor(full.h / 2), inset = 8;   // inset: 칸 사이 검은 구분선 제외
+  const cell = async (cx, cy) => {
+    const { data, info } = await sharp(f).ensureAlpha().extract({ left: cx * cw + inset, top: cy * ch + inset, width: cw - inset * 2, height: ch - inset * 2 }).raw().toBuffer({ resolveWithObject: true });
+    const img = { data, w: info.width, h: info.height }; keyGreen(img); cleanBlobs(img, { dropBorder: true }); return img;
+  };
+  await save(await cell(0, 0), 'enemy_drone', { maxSide: 220 });
+  await save(await cell(2, 0), 'enemy_mine', { maxSide: 220 });
+  await save(await cell(1, 1), 'enemy_turret', { maxSide: 220 });
+  await save(await cell(2, 1), 'enemy_rock', { maxSide: 220 });
+}
+
 const ALL = {
+  newenemies: newEnemies,
   bosses: async () => { await sprite('boss1', 'boss1', { key: 'magenta' }); for (let i = 2; i <= 5; i++) await sprite('boss' + i, 'boss' + i); },
   player: async () => { await sprite('player', 'player', { maxSide: 300 }); await sprite('player_skin_2', 'player_skin2', { maxSide: 300 }); await sprite('player_skin_3', 'player_skin3', { maxSide: 300 }); },
   pilots: async () => { await sprite('pilot_sister1', 'pilot1', { maxSide: 512, borderBlobs: false }); await sprite('pilot_sister2', 'pilot2', { maxSide: 512, borderBlobs: false }); },
