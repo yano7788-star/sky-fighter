@@ -729,6 +729,12 @@ export class GameScene extends Phaser.Scene {
       g.lineStyle(1.5, 0xf43f5e, 0.45); g.strokeCircle(cx, cy, b.width / 2 + pulse * 0.6);
     }
 
+    if ((b.stun ?? 0) > 0 && !b.dying) {   // 약점 노출: 노란 링이 깜빡이고 보스가 노랗게 달아오른다
+      const k = Math.abs(Math.sin(frame * 0.3));
+      g.lineStyle(3, 0xfde047, 0.5 + 0.5 * k); g.strokeCircle(cx, cy, b.width / 2 + 10 + k * 8);
+      g.lineStyle(2, 0xffffff, 0.4 * k); g.strokeCircle(cx, cy, b.width / 2 + 24);
+      g.fillStyle(0xfde047, 0.12 + 0.1 * k); g.fillCircle(cx, cy, b.width / 2);
+    }
     if (b.sp && !b.dying) this.renderBossSpecial(b, g);
     else if (!b.dying && b.y >= b.targetY && b.shootCooldown > b.shotCdMax - 12) {   // 일반 탄막 직전: 보스 둘레에 수축하는 링으로 예고
       const k = (b.shootCooldown - (b.shotCdMax - 12)) / 12;
@@ -741,6 +747,7 @@ export class GameScene extends Phaser.Scene {
     const outlined = this.textures.get(key).getSourceImage() as HTMLImageElement;
     this.bossImg.setTexture(key).setVisible(true).setPosition(cx, cy).setRotation(Math.PI).setAlpha(alpha)
       .setDisplaySize(outlined.width * scale, outlined.height * scale);
+    if ((b.stun ?? 0) > 0 && !b.dying) this.bossImg.setTint(Math.floor(frame / 4) % 2 === 0 ? 0xfff3a0 : 0xffffff); else this.bossImg.clearTint();
   }
 }
 

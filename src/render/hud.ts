@@ -11,13 +11,15 @@ export const textStyle = (size: number, color: string, bold = true): Phaser.Type
 });
 
 // UI 버튼 판정 영역 (논리 좌표)
+export const BTN_R = 30;   // 스킬 버튼 공통 반지름
 export const UI = {
   sound: { x: W - 45, y: 30, hit: 30 },
   pause: { x: W - 95, y: 30, hit: 24 },
-  bomb:  { x: W - 55, y: H - 65, hit: 45 },
-  ult:   { x: 44, y: H - 52, hit: 32 },     // 필살기 (게이지 링)
-  cat:   { x: 104, y: H - 50, hit: 28 },    // 동료: 고양이(흡혈)
-  dog:   { x: 154, y: H - 50, hit: 28 },    // 동료: 강아지(방어막)
+  // 스킬 버튼은 전부 같은 크기(반지름 BTN_R). 오른쪽 엄지: 폭탄(가장 자주 씀, 모서리) + 필살기 / 왼쪽: 동료
+  bomb:  { x: W - 44, y: H - 58, hit: BTN_R + 6 },
+  ult:   { x: W - 114, y: H - 58, hit: BTN_R + 6 },    // 필살기 (게이지 링)
+  cat:   { x: 44, y: H - 58, hit: BTN_R + 6 },         // 동료: 고양이(흡혈)
+  dog:   { x: 114, y: H - 58, hit: BTN_R + 6 },        // 동료: 강아지(방어막)
 };
 export const inZone = (z: { x: number; y: number; hit: number }, x: number, y: number) => Math.hypot(x - z.x, y - z.y) < z.hit;
 /** 동료 버튼은 보유/사용 중일 때만 존재한다 (없을 땐 이동·발사 입력을 막지 않는다) */
@@ -68,7 +70,7 @@ export class Hud {
 
     this.g = add(scene.add.graphics());
     this.bombCenter = contentCenter(scene, 'bomb');
-    this.bombImg = add(scene.add.image(UI.bomb.x, UI.bomb.y, 'bomb').setDisplaySize(70, 70));
+    this.bombImg = add(scene.add.image(UI.bomb.x, UI.bomb.y, 'bomb').setDisplaySize(BTN_R * 2 - 4, BTN_R * 2 - 4));
     text('bombCount', 0, 0, 22, '#ffffff', 0.5, 0.5).setShadow(0, 0, '#000', 4, true, true);
 
     text('eng', 23, 66, 11, '#94a3b8', 0.5, 1);
@@ -81,13 +83,13 @@ export class Hud {
     text('level', W / 2, 50, 12, '#7dd3fc', 0.5, 1);
     text('mut', W / 2, 63, 10.5, '#fbbf24', 0.5, 1);
     this.btn = {
-      ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(30, 36)),
-      cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(30, 28)),
-      dog: add(scene.add.image(UI.dog.x, UI.dog.y, 'ally_dog').setDisplaySize(30, 28)),
+      ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(34, 40)),
+      cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(38, 36)),
+      dog: add(scene.add.image(UI.dog.x, UI.dog.y, 'ally_dog').setDisplaySize(38, 36)),
     };
-    text('ultLabel', UI.ult.x, UI.ult.y + 36, 9, '#fde68a', 0.5, 0.5);
-    text('catLabel', UI.cat.x, UI.cat.y + 32, 9, '#fb7185', 0.5, 0.5);
-    text('dogLabel', UI.dog.x, UI.dog.y + 32, 9, '#fb923c', 0.5, 0.5);
+    text('ultLabel', UI.ult.x, UI.ult.y + BTN_R + 9, 9, '#fde68a', 0.5, 0.5);
+    text('catLabel', UI.cat.x, UI.cat.y + BTN_R + 9, 9, '#fb7185', 0.5, 0.5);
+    text('dogLabel', UI.dog.x, UI.dog.y + BTN_R + 9, 9, '#fb923c', 0.5, 0.5);
     text('mute', W - 25, 36, 18, '#38bdf8', 1, 1, false);
     text('lives', W - 20, 65, 18, '#f43f5e', 1, 1, false);
     text('bossName', 0, 0, 11, '#ffffff', 0.5, 1);
@@ -220,9 +222,12 @@ export class Hud {
     this.setText('eng', 'ENG'); this.setText('engPct', `${Math.round(p.energy)}%`);
 
     // 2. 폭탄 버튼
+    const bz = UI.bomb;
+    this.g.fillStyle(0x0f172a, 0.78); this.g.fillCircle(bz.x, bz.y, BTN_R);
+    this.g.lineStyle(3, sim.bombs > 0 ? 0xf59e0b : 0x334155, 0.9); this.g.strokeCircle(bz.x, bz.y, BTN_R - 2);
     this.bombImg.setAlpha(sim.bombs > 0 ? 1 : 0.4);
     const bc = this.bombCenter;
-    this.t.bombCount.setPosition(UI.bomb.x + (bc.x - 0.5) * 70, UI.bomb.y + (bc.y - 0.5) * 70).setAlpha(sim.bombs > 0 ? 1 : 0.4);
+    this.t.bombCount.setPosition(UI.bomb.x + (bc.x - 0.5) * (BTN_R * 2 - 4), UI.bomb.y + (bc.y - 0.5) * (BTN_R * 2 - 4)).setAlpha(sim.bombs > 0 ? 1 : 0.4);
     this.setText('bombCount', `x${sim.bombs}`);
 
     // 3. 상단 UI
@@ -247,7 +252,7 @@ export class Hud {
       g.fillStyle(col, 1); g.fillRect(bx, by, bw * Math.max(0, this.displayHp / b.maxHp), 12);
       g.lineStyle(1.5, Phaser.Display.Color.HexStringToColor(b.phase2 ? '#f87171' : b.subColor).color, 1); g.strokeRect(bx, by, bw, 12);
       this.t.bossName.setPosition(bx + bw / 2, by - 3);
-      this.setText('bossName', `${b.name}${b.phase3 ? ' [FINAL PHASE]' : b.phase2 ? ' [PHASE 2]' : ''} (${Math.max(0, b.hp)} / ${b.maxHp})`);
+      this.setText('bossName', `${b.name}${b.phase3 ? ' [FINAL PHASE]' : b.phase2 ? ' [PHASE 2]' : ''}${(b.stun ?? 0) > 0 ? '  ▼ WEAK x2!' : ''} (${Math.max(0, b.hp)} / ${b.maxHp})`);
       const a3 = (b.phase3Alert ?? 0) > 0, alert = b.phase2Alert > 0 || a3;
       this.t.phase2.setVisible(alert);
       if (alert) { this.setText('phase2', a3 ? '☠ FINAL PHASE ☠' : '⚡ PHASE 2: OVERDRIVE ⚡').setColor(sim.frame % 8 < 4 ? (a3 ? '#e879f9' : '#ef4444') : '#facc15'); }
@@ -277,7 +282,7 @@ export class Hud {
     const pulse = 0.5 + 0.5 * Math.sin(f * 0.14);
 
     // 필살기: 항상 표시. 게이지가 차오르고, 가득 차면 빛난다
-    const u = UI.ult, ur = 25, frac = Math.min(1, sim.ult.gauge / 100), ready = sim.ultReady;
+    const u = UI.ult, ur = BTN_R, frac = Math.min(1, sim.ult.gauge / 100), ready = sim.ultReady;
     g.fillStyle(0x0f172a, 0.78); g.fillCircle(u.x, u.y, ur);
     g.lineStyle(3, 0x334155, 0.9); g.strokeCircle(u.x, u.y, ur - 2);
     if (frac > 0) { g.lineStyle(3.5, ready ? 0x67e8f9 : 0x22d3ee, ready ? 0.7 + pulse * 0.3 : 0.95); g.beginPath(); g.arc(u.x, u.y, ur - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); g.strokePath(); }
@@ -291,7 +296,7 @@ export class Hud {
       const c = sim.comp[key], show = c.ready || c.active;
       b[key].setVisible(show); this.t[key + 'Label'].setVisible(show);
       if (!show) continue;
-      const r = 21;
+      const r = BTN_R;
       g.fillStyle(0x0f172a, 0.78); g.fillCircle(z.x, z.y, r);
       if (c.active) {
         g.lineStyle(3, 0x334155, 0.6); g.strokeCircle(z.x, z.y, r - 2);

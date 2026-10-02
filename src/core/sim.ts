@@ -412,7 +412,7 @@ export class Sim {
     p.energy = Math.min(cap, p.energy + dmg * LIFESTEAL_RATE);
   }
   private damageEnemy(e: Enemy, dmg: number): void { e.hp -= dmg; this.lifesteal(dmg); }
-  private damageBoss(dmg: number): void { this.boss!.hp -= dmg; this.lifesteal(dmg); }
+  private damageBoss(dmg: number): void { const b = this.boss!; if ((b.stun ?? 0) > 0) dmg *= BOSS_SP.stunDmg; b.hp -= dmg; this.lifesteal(dmg); }
   private damageMid(dmg: number): void { this.midBoss!.hp -= dmg; this.lifesteal(dmg); }
 
   private steer(b: Bullet, turnMax: number): void {
@@ -579,6 +579,8 @@ export class Sim {
       // 시간 정지 중: 이동·공격 정지
     } else if (b.sp) {
       this.updateBossSpecial(b);
+    } else if ((b.stun ?? 0) > 0) {
+      b.stun!--;                                   // 그로기: 제자리에서 멈춘다
     } else if (b.y < b.targetY) {
       b.y += 1.5;
     } else {
@@ -617,7 +619,7 @@ export class Sim {
 
     // 체력이 0이 되어도 바로 사라지지 않고 '폭발 연출 → 클리어 → 다음 스테이지' 순서로 이어짐
     if (!b.dying && b.hp <= 0) {
-      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0; b.sp = undefined;
+      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0; b.sp = undefined; b.stun = 0;
       this.stagePhase = 'BOSS_DYING'; this.phaseTimer = PHASE_FRAMES.BOSS_DYING;
       const { rank, bonus } = rankFor(this.stageHits);
       this.stageRank = rank;
@@ -653,7 +655,12 @@ export class Sim {
   private updateBossSpecial(b: Boss): void {
     const sp = b.sp!, p = this.player;
     const cdIdx = b.phase3 ? 2 : b.phase2 ? 1 : 0;
-    const finish = () => { b.sp = undefined; b.spCd = Math.round(BOSS_SP.cd[cdIdx] * (1 - 0.05 * this.loopCount)); b.shootCooldown = 0; };
+    const finish = () => {
+      b.sp = undefined; b.spCd = Math.round(BOSS_SP.cd[cdIdx] * (1 - 0.05 * this.loopCount)); b.shootCooldown = 0;
+      b.stun = Math.round(BOSS_SP.stun * (b.phase3 ? 0.8 : 1));   // 약점 노출
+      this.enemyBullets.length = 0;
+      this.emit({ t: 'ring', x: b.x, y: b.y, color: '#fde047', max: 130 }); this.emit({ t: 'sfx', name: 'item' });
+    };
     sp.t++;
     if (sp.kind === 'laser') {
       if (sp.state === 'WARN') {

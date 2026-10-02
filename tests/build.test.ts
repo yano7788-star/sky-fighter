@@ -607,3 +607,23 @@ describe('보스 특수 공격(레이저/돌진)', () => {
     (s as any).ult.phase = 'IDLE'; b.hp = 0; s.step(idle(s)); expect(b.sp).toBeUndefined();
   });
 });
+
+describe('보스 약점 노출(그로기)', () => {
+  const boss = () => { const s = new Sim(1); s.bossTier = 2; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s)); s.boss!.y = s.boss!.targetY; return s; };
+  it('특수 공격이 끝나면 보스가 멈추고 탄이 지워지며 피해가 2배가 된다', () => {
+    const s = boss(); const b = s.boss!;
+    b.sp = { kind: 'laser', state: 'ACT', t: 44, lockX: 225, beams: [0] };
+    s.enemyBullets.push({ x: 10, y: 10, vx: 0, vy: 0, color: '#fff', r: 3 });
+    s.step(idle(s));
+    expect(b.sp).toBeUndefined(); expect(b.stun).toBeGreaterThan(100); expect(s.enemyBullets.length).toBe(0);
+    const x0 = b.x; s.step(idle(s)); expect(b.x).toBe(x0);
+    const hp0 = b.hp; s.bullets.push({ x: b.x, y: b.y, vx: 0, vy: 0, dmg: 2, pierce: 0 } as any); s.step(idle(s));
+    expect(hp0 - b.hp).toBeGreaterThanOrEqual(4);
+  });
+  it('그로기가 끝나면 다시 움직이고, 보스가 죽으면 그로기는 해제된다', () => {
+    const s = boss(); const b = s.boss!; b.stun = 3;
+    for (let i = 0; i < 6; i++) { s.player.invincible = 99999; s.step(idle(s)); }
+    expect(b.stun).toBe(0);
+    b.stun = 50; b.hp = 0; s.step(idle(s)); expect(b.stun).toBe(0);
+  });
+});
