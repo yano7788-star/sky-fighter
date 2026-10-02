@@ -1,6 +1,6 @@
 import { store } from './storage';
 
-export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit';
+export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam';
 export type BgmName = 'normal' | 'solar' | 'boss';
 
 const BASE = import.meta.env.BASE_URL;
@@ -65,6 +65,32 @@ class AudioSystem {
       case 'boom':    osc.type = 'sawtooth'; f.setValueAtTime(140, t); exp(30, 0.4);    g.setValueAtTime(0.4, t);  g.exponentialRampToValueAtTime(0.01, t + 0.4);  osc.start(t); osc.stop(t + 0.4);  break;
       case 'enrage':  osc.type = 'sawtooth'; f.setValueAtTime(180, t); f.linearRampToValueAtTime(540, t + 0.35); g.setValueAtTime(0.35, t); g.exponentialRampToValueAtTime(0.01, t + 0.4); osc.start(t); osc.stop(t + 0.4); break;
       case 'item':    osc.type = 'sine';     f.setValueAtTime(440, t); exp(1100, 0.16); g.setValueAtTime(0.18, t); g.exponentialRampToValueAtTime(0.01, t + 0.16); osc.start(t); osc.stop(t + 0.16); break;
+      case 'laserCharge': {   // 충전음: 낮은 톱니파가 1.15초 동안 높게 차오르며 떨림이 빨라진다
+        osc.type = 'sawtooth'; f.setValueAtTime(110, t); exp(920, 1.15);
+        g.setValueAtTime(0.02, t); g.linearRampToValueAtTime(0.17, t + 1.05); g.linearRampToValueAtTime(0.0001, t + 1.2);
+        osc.start(t); osc.stop(t + 1.2);
+        const o2 = ctx.createOscillator(), g2 = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+        o2.type = 'square'; o2.frequency.setValueAtTime(55, t); o2.frequency.exponentialRampToValueAtTime(460, t + 1.15);
+        lfo.frequency.setValueAtTime(6, t); lfo.frequency.linearRampToValueAtTime(34, t + 1.15); lg.gain.value = 0.05;
+        lfo.connect(lg); lg.connect(g2.gain); g2.gain.setValueAtTime(0.06, t); g2.gain.linearRampToValueAtTime(0.1, t + 1.1); g2.gain.linearRampToValueAtTime(0.0001, t + 1.2);
+        o2.connect(g2); g2.connect(ctx.destination); o2.start(t); lfo.start(t); o2.stop(t + 1.2); lfo.stop(t + 1.2);
+        break;
+      }
+      case 'laserBeam': {   // 발사음: 날카로운 '쩡' + 0.75초 동안 이어지는 굵은 저음 + 쉬익 하는 노이즈
+        osc.type = 'sawtooth'; f.setValueAtTime(95, t); f.exponentialRampToValueAtTime(58, t + 0.8);
+        g.setValueAtTime(0.0001, t); g.linearRampToValueAtTime(0.4, t + 0.04); g.setValueAtTime(0.34, t + 0.55); g.exponentialRampToValueAtTime(0.01, t + 0.8);
+        osc.start(t); osc.stop(t + 0.8);
+        const z = ctx.createOscillator(), zg = ctx.createGain();
+        z.type = 'square'; z.frequency.setValueAtTime(1500, t); z.frequency.exponentialRampToValueAtTime(260, t + 0.22);
+        zg.gain.setValueAtTime(0.16, t); zg.gain.exponentialRampToValueAtTime(0.005, t + 0.24); z.connect(zg); zg.connect(ctx.destination); z.start(t); z.stop(t + 0.25);
+        const len = Math.floor(ctx.sampleRate * 0.8), buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1);
+        const ns = ctx.createBufferSource(), ng = ctx.createGain(), bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass'; bp.Q.value = 0.8; bp.frequency.setValueAtTime(2400, t); bp.frequency.exponentialRampToValueAtTime(500, t + 0.8);
+        ns.buffer = buf; ns.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+        ng.gain.setValueAtTime(0.0001, t); ng.gain.linearRampToValueAtTime(0.2, t + 0.05); ng.gain.exponentialRampToValueAtTime(0.01, t + 0.8); ns.start(t);
+        break;
+      }
       case 'missileHit': {   // 묵직한 둔탁음 + 노이즈 버스트 (미사일 착탄)
         osc.type = 'sine'; f.setValueAtTime(170, t); exp(42, 0.2); g.setValueAtTime(0.55, t); g.exponentialRampToValueAtTime(0.01, t + 0.2); osc.start(t); osc.stop(t + 0.2);
         const len = Math.floor(ctx.sampleRate * 0.14), buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);

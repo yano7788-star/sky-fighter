@@ -46,7 +46,7 @@ const both = (...fns: Pattern[]): Pattern => (b, c) => { for (const f of fns) f(
 
 type PhasePatterns = { 1: Pattern; 2: Pattern };
 
-export const BOSS_PATTERNS: Record<number, [PhasePatterns, PhasePatterns]> = {
+export const BOSS_PATTERNS: Record<number, [PhasePatterns, PhasePatterns, PhasePatterns?]> = {
   1: [
     { 1: line([-20, 20], 3.4, '#facc15', 4.5, 35),            2: fan([-0.3, 0, 0.3], 2.0, '#fb923c', 5.5, 35) },
     { 1: line([-32, -12, 12, 32], 4.2, '#facc15', 4.8, 35),   2: fan([-0.22, 0, 0.22], 3.2, '#ea580c', 6.5, 35, true) },
@@ -67,11 +67,16 @@ export const BOSS_PATTERNS: Record<number, [PhasePatterns, PhasePatterns]> = {
     { 1: ring(8, 3.8, '#c084fc', 4.5, 20, f => f * 0.04),     2: ring(12, 2.0, '#f472b6', 6.5, 20, f => -f * 0.02) },
     { 1: ring(12, 4.2, '#c084fc', 4.8, 20, f => f * 0.06),
       2: both(fan([-0.18, 0, 0.18], 5.2, '#f472b6', 6.0, 20, true), ring(8, 1.8, '#e879f9', 7.0, 20, f => -f * 0.03)) },
+    // 3페이즈 (최종 폭주): 촘촘한 회전 탄막 + 조준 부채꼴
+    { 1: both(ring(14, 4.4, '#e879f9', 5.0, 20, f => f * 0.09), fan([-0.5, -0.25, 0, 0.25, 0.5], 5.6, '#fb7185', 6.0, 20, true)),
+      2: both(ring(16, 2.4, '#c084fc', 6.5, 20, f => -f * 0.05), ring(10, 3.6, '#f472b6', 5.0, 20, f => f * 0.11)) },
   ],
 };
 
 export function fireBossPattern(b: Boss, c: PatternCtx): void {
-  BOSS_PATTERNS[b.tier][b.phase2 ? 1 : 0][b.attackMode](b, c);
+  const tbl = BOSS_PATTERNS[b.tier];
+  const set = (b.phase3 && tbl[2]) ? tbl[2] : tbl[b.phase2 ? 1 : 0];
+  set![b.attackMode](b, c);
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +117,15 @@ export const SPAWN_INTERVAL: Record<number, number> = { 1: 30, 2: 26, 3: 23, 4: 
 export const enemyHpScale = (tier: number) => 1 + 0.14 * (tier - 1);
 /** 적이 이 높이(y) 아래로 내려와 '화면 안'에 들어오기 전에는 맞지 않는다 (화면 밖에서 죽는 문제 방지) */
 export const ON_SCREEN_Y = 14;
+
+/** 스테이지 장애물 출현 간격(프레임). 2: 바람 / 3: 운석 / 4: 용암 기둥 / 5: 전부. 무한 모드 루프마다 12프레임씩 빨라진다 */
+export const HAZARDS: Record<number, { meteor?: number; lava?: number; wind?: number }> = {
+  2: { wind: 780 },
+  3: { meteor: 210 },
+  4: { lava: 240 },
+  5: { meteor: 300, lava: 360, wind: 960 },
+};
+export const HAZARD = { meteorWarn: 60, meteorSpeed: 10, meteorR: 14, lavaWarn: 70, lavaDur: 40, lavaHalfW: 22, damage: 15, windWarn: 60, windDur: 180, windPush: 3.5, windBullet: 0.9, grace: 300 };
 
 // ---------------------------------------------------------------------------
 // 아이템 드랍: 한 번의 난수로 기본 4종, 별도 난수로 신규 3종
@@ -161,6 +175,13 @@ export const BOMB = {
 // ---------------------------------------------------------------------------
 // 궁극기 「자매의 손바닥」 — 게이지가 가득 차면 사용. 컷인 → 손바닥 낙하 → 화면 전체 피해
 // ---------------------------------------------------------------------------
+/** 파일럿별 궁극기 */
+export const ULT_KIND = {
+  palm:     { name: '자매의 손바닥', owner: '에이스', cutin: 120 },
+  barrage:  { name: '미사일 포격',   owner: '언니',   cutin: 90, active: 200, invincible: 210, dmg: 4.2, interval: 3 },   // 약 3.3초간 위에서 미사일 비
+  timestop: { name: '시간 정지',     owner: '동생',   cutin: 90, active: 150, boost: 1.5 },                                // 2.5초간 적·탄 정지, 내 피해 1.5배
+} as const;
+
 export const ULT = {
   frames: { CUTIN: 120, FALL: 75, IMPACT: 60 },
   enemyPct: 0.5,              // 일반 적·중간보스: 최대 체력의 50%

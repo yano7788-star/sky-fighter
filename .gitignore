@@ -6,3 +6,4 @@ dist/
 # 생성 원본(수십 MB의 큰 PNG)은 저장소에 올리지 않는다 — 변환 결과(public/assets/img)만 커밋. 원본은 로컬/클라우드에 보관할 것
 assets-src/incoming/*
 !assets-src/incoming/.gitkeep
+.vite/

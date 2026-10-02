@@ -27,3 +27,15 @@ export const loadMeta = (): MetaSave => {
   return { credits: Math.max(0, Number(m.credits) || 0), levels: m.levels ?? {}, pilots: { owned, selected } };
 };
 export const saveMeta = (m: MetaSave): void => store.set('meta', m);
+
+// 일일 도전 기록 (날짜가 바뀌면 초기화)
+export interface DailySave { date: string; best: number; runs: number; }
+export const loadDaily = (key: string): DailySave => {
+  const d = store.get<Partial<DailySave>>('daily', {});
+  return d.date === key ? { date: key, best: Number(d.best) || 0, runs: Number(d.runs) || 0 } : { date: key, best: 0, runs: 0 };
+};
+export const saveDaily = (d: DailySave): void => store.set('daily', d);
+
+// 업적: 달성한 id 목록
+export const loadAch = (): string[] => { const a = store.get<unknown>('ach', []); return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []; };
+export const saveAch = (a: string[]): void => store.set('ach', a);

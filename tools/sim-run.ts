@@ -19,6 +19,7 @@ interface RunResult { phaseFrames: Record<string, number>; level: number; stage:
 function runOne(seed: number): RunResult {
   const s = new Sim(seed);
   if (START_TIER > 1) s.startAtTier(START_TIER);
+  const seenHaz = new Map<object, boolean>();
   let bombsUsed = 0, laserSide = 0, distracted = 0;
   const phaseFrames: Record<string, number> = {};   // 'T1:fight' 등 구간별 프레임
   let lastKey = '', lastF = 0;
@@ -48,9 +49,16 @@ function runOne(seed: number): RunResult {
       if (laserSide === 0) laserSide = Math.random() < 0.4 + SKILL * 0.6 ? (m.laserX < W / 2 ? 1 : -1) : 0.001;   // 낮은 실력: 못 보고 지나침
       if (laserSide !== 0.001) tx = Math.max(40, Math.min(W - 40, m.laserX + laserSide * 110));
     } else laserSide = 0;
+    // 장애물(운석/용암): 예고를 보고 그 열에서 비킨다 (낮은 실력은 못 보고 지나칠 수 있음)
+    for (const h of s.hazards) {
+      if (!seenHaz.has(h)) seenHaz.set(h, Math.random() < 0.35 + SKILL * 0.6);
+      if (!seenHaz.get(h) || distracted > 0) continue;
+      const half = h.kind === 'lava' ? 22 + 30 : 14 + 30;
+      if (Math.abs(p.x - h.x) < half && (h.kind === 'lava' || h.y < p.y + 10)) tx = h.x + (p.x < h.x ? -1 : 1) * (half + 14);
+    }
     // 레벨업 카드: 융합 > 모듈 > 패시브 순으로 (사람처럼 한 빌드를 키움)
     if (s.pending) {
-      const pick = s.pending.findIndex(id => ['swarm', 'railgun', 'hunter'].includes(id));
+      const pick = s.pending.findIndex(id => ['swarm', 'railgun', 'hunter', 'aegisorbit', 'prism', 'overdrive'].includes(id));
       const mod = s.pending.findIndex(id => ['spread', 'pierce', 'homing', 'drone', 'laser'].includes(id));
       s.chooseCard(pick >= 0 ? pick : mod >= 0 ? mod : 0);
     }

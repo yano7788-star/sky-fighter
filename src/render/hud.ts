@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { H, PHASE_FRAMES, W } from '../core/config';
 import { BOSS_CONFIGS } from '../core/data';
+import { mutatorOf } from '../core/mutators';
 import type { Sim } from '../core/sim';
 import { contentCenter, R } from './textures';
 
@@ -27,10 +28,15 @@ export const isUiZone = (x: number, y: number, sim?: Sim) =>
 
 const bannerAlpha = (t: number, total: number, fadeIn = 18, fadeOut = 24) => Math.max(0, Math.min(1, t / fadeIn, (total - t) / fadeOut));
 
-export interface ResultInfo { kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
+/** 미션 클리어 화면의 버튼 판정 영역 (무한 모드 계속 / 타이틀로) */
+export const RESULT_BTN = { cont: { x: W / 2, y: H / 2 + 172, w: 300, h: 46 }, title: { x: W / 2, y: H / 2 + 228, w: 300, h: 40 } };
+export const inRect = (z: { x: number; y: number; w: number; h: number }, x: number, y: number) => Math.abs(x - z.x) < z.w / 2 && Math.abs(y - z.y) < z.h / 2;
+
+export interface ResultInfo { newAch?: string[]; dailyBest?: number; kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
 
 /** 게임 화면 HUD: 에너지 바·점수·폭탄·보스 바·배너·일시정지/결과 오버레이 */
 export class Hud {
+  daily = false;   // 일일 도전 중이면 모디파이어 배지 앞에 표시
   private displayEnergy = 100;
   private displayHp = 0;
   private hitFlash = 0;
@@ -46,6 +52,7 @@ export class Hud {
   private pauseGroup: Phaser.GameObjects.GameObject[] = [];
   private resultGroup: Phaser.GameObjects.GameObject[] = [];
   private resultTexts: Record<string, Phaser.GameObjects.Text> = {};
+  private resultG!: Phaser.GameObjects.Graphics;
   private buildText!: Phaser.GameObjects.Text;
   private btn: { ult: Phaser.GameObjects.Image; cat: Phaser.GameObjects.Image; dog: Phaser.GameObjects.Image } | null = null;
 
@@ -69,6 +76,7 @@ export class Hud {
     text('missile', 50, 66, 12, '#ec4899', 0, 1);
     text('combo', 50, 84, 13, '#facc15', 0, 1).setShadow(0, 0, '#000', 4, true, true);
     text('level', W / 2, 50, 12, '#7dd3fc', 0.5, 1);
+    text('mut', W / 2, 63, 10.5, '#fbbf24', 0.5, 1);
     this.btn = {
       ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(30, 36)),
       cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(30, 28)),
@@ -123,8 +131,10 @@ export class Hud {
     };
     this.resultGroup.push(add(s.add.rectangle(0, 0, W, H, 0x03050a, 0.9).setOrigin(0, 0)));
     this.resultTexts.dim = this.resultGroup[0] as Phaser.GameObjects.Text;
-    mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
+    mk('ach', H / 2 - 84, 14); mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
     mk('record', H / 2 + 110, 16); mk('credits', H / 2 + 138, 15); mk('prompt', H / 2 + 176, 16);
+    this.resultG = add(s.add.graphics()); this.resultGroup.push(this.resultG);
+    mk('btnC', RESULT_BTN.cont.y, 19); mk('btnT', RESULT_BTN.title.y, 15);
     this.resultGroup.forEach(o => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(false));
   }
 
@@ -159,12 +169,22 @@ export class Hud {
     const t = this.resultTexts;
     const over = r.kind === 'GAMEOVER';
     t.title.setText(over ? 'MISSION OVER' : 'MISSION CLEAR!').setColor(over ? '#f87171' : '#10b981');
+    t.ach.setText(r.newAch && r.newAch.length ? '🏆 ' + r.newAch.join(' · ') : '').setColor('#fbbf24');
     t.l1.setText(over ? '' : '지구의 평화를 지켰습니다.').setColor('#facc15');
     t.l2.setText(`최종 점수: ${r.score}`).setColor('#fff');
     t.l3.setText(over ? `최종 도달: STAGE ${r.stage}  ·  LV ${r.level}` : `LV ${r.level}`).setColor('#fff');
     t.credits.setText(`+${r.credits} CREDITS  (격납고에서 강화)`).setColor('#7dd3fc');
-    t.record.setText(r.newRecord ? '★ NEW RECORD! ★' : `BEST ${r.best.score} (STAGE ${r.best.stage})`).setColor(r.newRecord ? '#facc15' : '#94a3b8');
-    t.prompt.setText(over ? '화면을 탭하여 다시 출격' : '화면을 탭하여 타이틀로').setColor(canTap ? '#38bdf8' : '#94a3b8');
+    t.record.setText(r.dailyBest !== undefined ? `📅 오늘의 최고 ${r.dailyBest}${r.newRecord ? '  ★ NEW RECORD!' : ''}` : r.newRecord ? '★ NEW RECORD! ★' : `BEST ${r.best.score} (STAGE ${r.best.stage})`).setColor(r.newRecord ? '#facc15' : '#94a3b8');
+    t.prompt.setText('화면을 탭하여 다시 출격').setColor(canTap ? '#38bdf8' : '#94a3b8').setVisible(over);
+    // 미션 클리어: [무한 모드 계속] [타이틀로] 두 버튼
+    const g = this.resultG; g.clear(); g.setVisible(!over);
+    t.btnC.setVisible(!over).setText('∞ 무한 모드 계속').setColor(canTap ? '#0b1220' : '#475569');
+    t.btnT.setVisible(!over).setText('타이틀로').setColor(canTap ? '#cbd5e1' : '#64748b');
+    if (!over) {
+      const c = RESULT_BTN.cont, tt = RESULT_BTN.title;
+      g.fillStyle(canTap ? 0xfde047 : 0x334155, 1); g.fillRoundedRect(c.x - c.w / 2, c.y - c.h / 2, c.w, c.h, 12);
+      g.lineStyle(2, canTap ? 0x64748b : 0x334155, 1); g.strokeRoundedRect(tt.x - tt.w / 2, tt.y - tt.h / 2, tt.w, tt.h, 10);
+    }
   }
 
   private setText(key: string, v: string): Phaser.GameObjects.Text {
@@ -215,10 +235,10 @@ export class Hud {
       g.fillStyle(col, 1); g.fillRect(bx, by, bw * Math.max(0, this.displayHp / b.maxHp), 12);
       g.lineStyle(1.5, Phaser.Display.Color.HexStringToColor(b.phase2 ? '#f87171' : b.subColor).color, 1); g.strokeRect(bx, by, bw, 12);
       this.t.bossName.setPosition(bx + bw / 2, by - 3);
-      this.setText('bossName', `${b.name}${b.phase2 ? ' [PHASE 2]' : ''} (${Math.max(0, b.hp)} / ${b.maxHp})`);
-      const alert = b.phase2Alert > 0;
+      this.setText('bossName', `${b.name}${b.phase3 ? ' [FINAL PHASE]' : b.phase2 ? ' [PHASE 2]' : ''} (${Math.max(0, b.hp)} / ${b.maxHp})`);
+      const a3 = (b.phase3Alert ?? 0) > 0, alert = b.phase2Alert > 0 || a3;
       this.t.phase2.setVisible(alert);
-      if (alert) { this.setText('phase2', '⚡ PHASE 2: OVERDRIVE ⚡').setColor(sim.frame % 8 < 4 ? '#ef4444' : '#facc15'); }
+      if (alert) { this.setText('phase2', a3 ? '☠ FINAL PHASE ☠' : '⚡ PHASE 2: OVERDRIVE ⚡').setColor(sim.frame % 8 < 4 ? (a3 ? '#e879f9' : '#ef4444') : '#facc15'); }
     } else { this.setText('bossName', ''); this.t.phase2.setVisible(false); }
 
     // 4-2. 경험치 바(상단 가로줄) + 레벨
@@ -226,6 +246,8 @@ export class Hud {
     g.fillStyle(0x0f172a, 0.7); g.fillRect(0, 0, W, 5);
     g.fillStyle(0x22d3ee, 1); g.fillRect(0, 0, W * xr, 5);
     this.setText('level', `LV ${sim.level}`);
+    const md = mutatorOf(sim.meta.mutator);
+    this.setText('mut', (this.daily ? '📅 ' : '') + (md ? `${md.icon} ${md.name}` : '')).setColor(md?.color ?? '#fbbf24');
 
     // 4-3. 스킬 버튼 (필살기 게이지 링 / 동료)
     this.renderSkillButtons(sim);
@@ -281,14 +303,14 @@ export class Hud {
       const total = PHASE_FRAMES.WARNING, t = total - sim.phaseTimer, a = bannerAlpha(t, total, 12, 20);
       this.warnRect.setFillStyle(0xef4444, (0.06 + 0.05 * Math.sin(sim.frame * 0.25)) * a);
       main.setAlpha(a).setFontSize(30).setColor('#ef4444').setText('⚠ WARNING ⚠').setVisible(Math.floor(sim.frame / 10) % 2 === 0);
-      sub.setAlpha(a).setColor('#fca5a5').setText(BOSS_CONFIGS[sim.bossTier].name);
+      sub.setAlpha(a).setColor('#fca5a5').setText(BOSS_CONFIGS[sim.stageTier].name.replace(/STAGE \d+/, 'STAGE ' + sim.bossTier));
     } else if (ph === 'CLEAR') {
       const total = PHASE_FRAMES.CLEAR, a = bannerAlpha(total - sim.phaseTimer, total, 15, 25);
       main.setAlpha(a).setFontSize(34).setColor('#10b981').setText(`STAGE ${sim.bossTier} CLEAR!`);
       sub.setAlpha(a).setColor('#facc15').setText(`BOSS BONUS +${sim.clearBonus}${sim.stageRank ? `  ·  RANK ${sim.stageRank}` : ''}`).setPosition(W / 2, H * 0.36 + 36);
     } else {
       const total = PHASE_FRAMES.INTRO - 15, t = PHASE_FRAMES.INTRO - sim.phaseTimer - 15;   // 배경이 바뀌기 시작한 뒤에 등장
-      const cfg = BOSS_CONFIGS[sim.bossTier], a = bannerAlpha(t, total, 20, 30);
+      const cfg = BOSS_CONFIGS[sim.stageTier], a = bannerAlpha(t, total, 20, 30);
       main.setAlpha(a).setFontSize(40).setColor(cfg.subColor).setText(`STAGE ${sim.bossTier}`);
       sub.setAlpha(a).setColor('#e2e8f0').setText(cfg.name.replace(/^STAGE \d+:\s*/, '')).setPosition(W / 2, H * 0.36 + 34);
     }

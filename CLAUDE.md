@@ -53,3 +53,4 @@ docs/         DESIGN.md(게임 디자인·아이디어), ROADMAP.md(점검+로�
 - 패럴랙스 오버레이(`overlay_clouds`)는 스테이지별로 색조가 바뀌며 `ParallaxOverlay`가 그린다. 이미지는 흰색+알파로 복원한 것(`tools/process-incoming.cjs overlay`).
 - 키: 이동 방향키/WASD, 발사 Space, 폭탄 B/X/Shift, 필살기 R, 고양이 Q, 강아지 E, 카드 1·2·3, 일시정지 P/ESC, 음소거 M.
 - 적은 화면 안(y>=ON_SCREEN_Y)에 들어온 뒤에만 피격된다(화면 밖에서 죽던 문제). 중간보스 레이저는 보스 코에서 곧게 발사되며, CHARGE 동안 보스가 조준 위치(lockX)로 미끄러져 간다.
+- 스테이지 장애물(`HAZARDS`/`HAZARD` in data.ts, `Sim.updateHazards`): 2 바람(플레이어·적 탄을 밀음), 3 운석(예고 후 낙하), 4 용암 기둥(예고 후 분출), 5 전부. 일반 전투 구간에서만 나오고 중간보스·보스·시간 정지 중에는 멈추거나 사라진다. 렌더는 `GameScene.renderHazards`. 약한 봇 클리어율 약 12%.

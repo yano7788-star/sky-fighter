@@ -1,18 +1,20 @@
 import Phaser from 'phaser';
 import { CARDS, lv, type CardId } from '../core/build';
 import { H, PLAYER, STEP_MS, W } from '../core/config';
-import { BOMB, COMPANION_FRAMES, SHIELD_R } from '../core/data';
+import { BOMB, COMPANION_FRAMES, HAZARD, SHIELD_R } from '../core/data';
 import { creditsFor, metaParams, pilotOf } from '../core/meta';
+import { dailyMutator, dailySeed, dayKey } from '../core/mutators';
 import { Sim } from '../core/sim';
 import type { SimEvent, SkillKey } from '../core/types';
 import { ParallaxOverlay, ScrollingBackground } from '../render/background';
 import { Fx } from '../render/fx';
-import { Hud, UI, companionZoneActive, inZone, isUiZone } from '../render/hud';
+import { Hud, RESULT_BTN, UI, companionZoneActive, inRect, inZone, isUiZone } from '../render/hud';
 import { LevelUpOverlay } from '../render/levelup';
 import { UltFx } from '../render/ultfx';
 import { R, S, bulletTexture } from '../render/textures';
 import { audio, type BgmName } from '../systems/audio';
-import { loadBest, loadMeta, saveBest, saveMeta, type BestRecord } from '../systems/storage';
+import { newlyUnlocked } from '../core/achievements';
+import { loadAch, saveAch, loadBest, loadDaily, loadMeta, saveBest, saveDaily, saveMeta, type BestRecord } from '../systems/storage';
 
 const MOVE_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' '];
 const PREVENT_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '];
@@ -36,6 +38,7 @@ export class GameScene extends Phaser.Scene {
   private bossImg!: Phaser.GameObjects.Image;
   private bossG!: Phaser.GameObjects.Graphics;
   private midG!: Phaser.GameObjects.Graphics;
+  private hazG!: Phaser.GameObjects.Graphics;
   private midImg!: Phaser.GameObjects.Image;
   private auraG!: Phaser.GameObjects.Graphics;
   private beamG!: Phaser.GameObjects.Graphics;
@@ -46,6 +49,9 @@ export class GameScene extends Phaser.Scene {
   private compPos = { cat: { x: 0, y: 0 }, dog: { x: 0, y: 0 } };
   private skillQueued: SkillKey | null = null;
   private runCredits = 0;
+  private newAch: string[] = [];
+  private creditsPaid = 0;      // 이번 런에서 이미 지급한 크레딧 (미션 클리어 후 무한 모드 이어하기 대응)
+  private bestBefore = 0;       // 런 시작 시점의 최고 점수 (신기록 판정 기준)
 
   private paused = false;
   private acc = 0;
@@ -70,7 +76,16 @@ export class GameScene extends Phaser.Scene {
   private padY = 0;
   private padPrev: Record<string, boolean> = {};
 
+  private mutatorId: string | null = null;
+  private daily: { key: string; seed: number } | null = null;   // 일일 도전: 날짜 고정 시드 + 고정 모디파이어
+
   constructor() { super('GameScene'); }
+
+  /** 출격 전에 고른 런 모디파이어를 받는다 (MutatorScene에서 전달) */
+  init(data: { mutator?: string | null; daily?: boolean }): void {
+    if (data?.daily) { const key = dayKey(); this.daily = { key, seed: dailySeed(key) }; this.mutatorId = dailyMutator(key); }
+    else { this.daily = null; this.mutatorId = data?.mutator ?? null; }
+  }
 
   create(): void {
     // Phaser는 같은 씬 인스턴스를 재사용하므로, 이전 실행에서 파괴된 오브젝트 참조를 반드시 버린다
@@ -90,6 +105,7 @@ export class GameScene extends Phaser.Scene {
     this.overlay = new ParallaxOverlay(this, this.layers.bg);
     this.fx = new Fx(this, this.layers.fx);
     this.hud = new Hud(this, this.ui);
+    this.hud.daily = !!this.daily;
     this.levelup = new LevelUpOverlay(this, this.ui);
     this.ultfx = new UltFx(this, this.ui);
 
@@ -105,9 +121,10 @@ export class GameScene extends Phaser.Scene {
     this.bossG = this.add.graphics();
     this.bossImg = this.add.image(0, 0, 'boss1_n').setVisible(false);
     this.midG = this.add.graphics();
+    this.hazG = this.add.graphics();
     this.midImg = this.add.image(0, 0, 'boss2_n').setVisible(false);
     this.auraG = this.add.graphics();
-    this.layers.boss.add([this.bossG, this.bossImg, this.midImg, this.midG]);
+    this.layers.boss.add([this.hazG, this.bossG, this.bossImg, this.midImg, this.midG]);
     this.layers.player.add(this.auraG);
     this.fieldG = this.add.graphics(); this.layers.field.add(this.fieldG);
     this.beamG = this.add.graphics(); this.layers.beam.add(this.beamG);
@@ -124,7 +141,7 @@ export class GameScene extends Phaser.Scene {
   /** 격납고 강화 + 선택한 파일럿 패시브를 반영해 새 런을 시작하고, 파일럿의 기체 스킨을 적용한다 */
   private newSim(): void {
     const m = loadMeta();
-    this.sim = new Sim((Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected));
+    this.sim = new Sim(this.daily ? this.daily.seed : (Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected, this.mutatorId));
     if (this.playerImg) this.applySkin(pilotOf(m.pilots.selected).skin);
   }
 
@@ -139,7 +156,7 @@ export class GameScene extends Phaser.Scene {
     this.resultKind = null; this.newRecord = false;
     this.targetX = W / 2; this.targetY = PLAYER.spawnY;
     this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
-    this.runCredits = 0; this.shownPending = null; this.levelup.hide();
+    this.runCredits = 0; this.creditsPaid = 0; this.newAch = []; this.bestBefore = loadBest().score; this.shownPending = null; this.levelup.hide();
     this.bg.reset(); this.overlay.setStage(1); this.fx.clear(); this.hud.resetState(this.sim);
     this.hud.showResult(null); this.hud.setPaused(false);
     audio.rewind(); audio.resume();
@@ -170,6 +187,7 @@ export class GameScene extends Phaser.Scene {
     const k = e.key.toLowerCase();
     audio.unlock();
     if (e.repeat) { if (!this.paused && !this.resultKind && MOVE_KEYS.includes(k)) this.keys.add(k); return; }
+    if (this.resultKind === 'GAMECLEAR' && k === 'escape') { if (this.resultTimer <= 0) this.scene.start('TitleScene'); return; }
     if (k === 'p' || k === 'escape') { this.setPaused(!this.paused); return; }
     if (this.paused) { if (k === 'enter' || k === ' ') this.setPaused(false); return; }
     if (k === 'm') { audio.toggleMute(); return; }
@@ -191,7 +209,7 @@ export class GameScene extends Phaser.Scene {
   private pressAt(id: number, x: number, y: number): void {
     audio.unlock();
     if (this.paused) { this.setPaused(false); return; }
-    if (this.resultKind) { this.resultTap(); return; }
+    if (this.resultKind) { this.resultTap(x, y); return; }
     if (this.sim.pending) { const i = this.levelup.hit(x, y); if (i >= 0) { this.levelup.select(i); this.pickCard(i); } return; }
     if (inZone(UI.sound, x, y)) { audio.toggleMute(); return; }
     if (inZone(UI.pause, x, y)) { this.setPaused(true); return; }
@@ -222,10 +240,25 @@ export class GameScene extends Phaser.Scene {
     return `LV ${this.sim.level}  ·  기본 대포 Lv${this.sim.weaponLevel}\n${body}`;
   }
 
-  private resultTap(): void {
+  /** 결과 화면 입력: 게임오버=재출격, 미션 클리어=[무한 모드 계속]/[타이틀로] (좌표가 없으면 키보드·패드 → 무한 모드 계속) */
+  private resultTap(x?: number, y?: number): void {
     if (this.resultTimer > 0) return;
-    if (this.resultKind === 'GAMEOVER') this.resetRun();
-    else this.scene.start('TitleScene');
+    if (this.resultKind === 'GAMEOVER') { if (this.daily) this.scene.start('GameScene', { daily: true }); else this.scene.start('MutatorScene'); return; }   // 재출격: 일일 도전은 같은 조건으로, 일반 출격은 모디파이어를 다시 고른다
+    let choice: 'continue' | 'title' = 'continue';
+    if (x !== undefined && y !== undefined) {
+      if (inRect(RESULT_BTN.title, x, y)) choice = 'title';
+      else if (inRect(RESULT_BTN.cont, x, y)) choice = 'continue';
+      else return;   // 버튼 밖 탭은 무시 (실수로 나가지 않도록)
+    }
+    if (choice === 'title') this.scene.start('TitleScene'); else this.startEndless();
+  }
+
+  private startEndless(): void {
+    this.sim.startEndless();
+    this.resultKind = null; this.resultTimer = 0;
+    this.hud.showResult(null);
+    this.activeId = null; this.firing = false;
+    audio.sfx('item');
   }
 
   private setPaused(v: boolean): void {
@@ -279,7 +312,7 @@ export class GameScene extends Phaser.Scene {
     const s = this.sim;
     if (this.paused || this.resultKind || s.state !== 'PLAYING') return null;
     if (s.boss || s.stagePhase === 'WARNING') return 'boss';
-    return s.bossTier >= 4 ? 'solar' : 'normal';   // 후반 스테이지는 새 곡(Target Solar Core)
+    return s.stageTier >= 4 ? 'solar' : 'normal';   // 후반 스테이지는 새 곡(Target Solar Core)
   }
 
   private tick(): void {
@@ -310,8 +343,8 @@ export class GameScene extends Phaser.Scene {
     for (const e of s.drainEvents()) this.handleEvent(e);
     if (s.midBoss && s.midBoss.state === 'FIRE') this.shake = Math.max(this.shake, 3);   // 레이저 발사 중 진동
     if (s.frame % 2 === 0) for (const m of s.missiles) this.fx.trail(m.x, m.y, '#ec4899');
-    if (s.stagePhase === 'INTRO') this.bg.setTier(s.bossTier);
-    if (this.overlay.stage() !== s.bossTier) this.overlay.setStage(s.bossTier);
+    if (s.stagePhase === 'INTRO') this.bg.setTier(s.stageTier);
+    if (this.overlay.stage() !== s.stageTier) this.overlay.setStage(s.stageTier);
   }
 
   private pollKeyboardMove(): void {
@@ -359,7 +392,11 @@ export class GameScene extends Phaser.Scene {
       case 'levelup': audio.sfx('item'); break;
       case 'heal': this.fx.explosion(e.x, e.y, '#4ade80', 10); break;
       case 'skill': if (e.key === 'ult') { this.activeId = null; this.firing = false; } break;
-      case 'ult': if (e.phase === 'IMPACT') { this.fx.ring(W / 2, H * 0.55, '#a5f3fc', 500); audio.sfx('boom'); } else if (e.phase === 'CUTIN') audio.sfx('enrage'); break;
+      case 'ult':
+        if (e.phase === 'IMPACT') { this.fx.ring(W / 2, H * 0.55, '#a5f3fc', 500); audio.sfx('boom'); }
+        else if (e.phase === 'CUTIN') audio.sfx('enrage');
+        else if (e.phase === 'ACTIVE') { audio.sfx(this.sim.ult.kind === 'barrage' ? 'boom' : 'laserCharge'); this.fx.ring(W / 2, H * 0.5, this.sim.ult.kind === 'barrage' ? '#fb923c' : '#7dd3fc', 420); }
+        break;
       case 'gem': break;
       case 'hitspark': if (this.sim.frame % 3 === 0) this.fx.ring(e.x, e.y, '#fde047', 16); break;
       case 'gameover': case 'gameclear': this.finishRun(e.t === 'gameover' ? 'GAMEOVER' : 'GAMECLEAR'); break;
@@ -369,17 +406,31 @@ export class GameScene extends Phaser.Scene {
   // ------------------------------------------------------------------ 결과 / 기록
   private finishRun(kind: 'GAMEOVER' | 'GAMECLEAR'): void {
     const s = this.sim;
-    this.newRecord = s.score > this.best.score;
+    this.newRecord = s.score > this.bestBefore;
+    let dailyBonus = 1;
+    if (this.daily) {   // 일일 도전 기록 저장, 첫 도전에는 크레딧 +25%
+      const d = loadDaily(this.daily.key);
+      if (d.runs === 0) dailyBonus = 1.25;
+      this.newRecord = s.score > d.best; d.best = Math.max(d.best, s.score); d.runs++; saveDaily(d);
+    }
     this.best = { score: Math.max(this.best.score, s.score), stage: Math.max(this.best.stage, s.bossTier) };
     saveBest(this.best);
-    this.runCredits = creditsFor(s.score, s.bossTier, kind === 'GAMECLEAR');
-    const meta = loadMeta(); meta.credits += this.runCredits; saveMeta(meta);
+    const total = Math.floor(creditsFor(s.score, s.bossTier, s.endless || kind === 'GAMECLEAR') * s.meta.mut.credit * dailyBonus);
+    const meta = loadMeta(); meta.credits += Math.max(0, total - this.creditsPaid); saveMeta(meta);   // 무한 모드로 이어 간 경우 이미 지급한 크레딧은 제외
+    this.creditsPaid = Math.max(this.creditsPaid, total); this.runCredits = total;
+    const have = loadAch(), got = newlyUnlocked(s.runStats(!!this.daily), have);   // 업적: 새로 달성한 것만 보상 지급
+    this.newAch = got.map(a => a.icon + ' ' + a.name);
+    if (got.length) {
+      saveAch([...have, ...got.map(a => a.id)]);
+      const m2 = loadMeta(); m2.credits += got.reduce((n, a) => n + a.reward, 0); saveMeta(m2);
+      this.runCredits += got.reduce((n, a) => n + a.reward, 0);
+    }
     this.resultKind = kind; this.resultTimer = 90;
     this.activeId = null; this.firing = false;
     this.hud.showResult(this.resultInfo(), false);
   }
   private resultInfo() {
-    return { kind: this.resultKind!, score: this.sim.score, stage: this.sim.bossTier, level: this.sim.level, credits: this.runCredits, best: this.best, newRecord: this.newRecord };
+    return { newAch: this.newAch, dailyBest: this.daily ? loadDaily(this.daily.key).best : undefined, kind: this.resultKind!, score: this.sim.score, stage: this.sim.bossTier, level: this.sim.level, credits: this.runCredits, best: this.best, newRecord: this.newRecord };
   }
   /** 플레이 도중 탭을 닫아도 신기록이 사라지지 않게 저장 (메모리의 best는 건드리지 않아 NEW RECORD 판정 유지) */
   persistBestInRun(): void {
@@ -426,6 +477,7 @@ export class GameScene extends Phaser.Scene {
     this.renderPlayerAuras();
     this.renderWeaponFx();
     this.renderCompanions();
+    this.renderHazards();
     this.renderBoss();
     this.ultfx.render(s);
     this.levelup.update(this.time.now);
@@ -439,10 +491,13 @@ export class GameScene extends Phaser.Scene {
     const s = this.sim, p = s.player, g = this.beamG, f = this.fieldG;
     g.clear(); f.clear();
     if (s.laser.on) {
-      const w = s.laser.w * (1 + Math.sin(s.frame * 0.6) * 0.08), rail = s.hasFusion('railgun');
-      g.fillStyle(rail ? 0x38bdf8 : 0x3b82f6, 0.35); g.fillRect(p.x - w / 2 - 3, 0, w + 6, p.y - 24);
-      g.fillStyle(rail ? 0xe0f2fe : 0x93c5fd, 0.8); g.fillRect(p.x - w / 2, 0, w, p.y - 24);
-      g.fillStyle(0xffffff, 0.95); g.fillRect(p.x - w * 0.18, 0, w * 0.36, p.y - 24);
+      const w = s.laser.w * (1 + Math.sin(s.frame * 0.6) * 0.08), rail = s.hasFusion('railgun'), prism = s.hasFusion('prism');
+      for (const o of s.laser.offs) {
+        const bx = p.x + o;
+        g.fillStyle(prism ? 0xe879f9 : rail ? 0x38bdf8 : 0x3b82f6, 0.35); g.fillRect(bx - w / 2 - 3, 0, w + 6, p.y - 24);
+        g.fillStyle(prism ? 0xf5d0fe : rail ? 0xe0f2fe : 0x93c5fd, 0.8); g.fillRect(bx - w / 2, 0, w, p.y - 24);
+        g.fillStyle(0xffffff, 0.95); g.fillRect(bx - w * 0.18, 0, w * 0.36, p.y - 24);
+      }
     }
     if (s.bombT > 0) {   // 폭탄 폭발장: 퍼져 나가는 원
       const k = 1 - s.bombT / BOMB.fieldFrames, r = BOMB.fieldRadiusMax * Math.sqrt(k), a = 1 - k;
@@ -492,6 +547,44 @@ export class GameScene extends Phaser.Scene {
     }
     if (p.magnet > 0 && (p.magnet > 120 || Math.floor(f / 5) % 2 === 0)) {
       g.lineStyle(1.5, 0xc084fc, 0.35); g.strokeCircle(p.x, p.y, 150);
+    }
+  }
+
+  /** 장애물: 예고(깜빡이는 표시) → 위험 구간. 바람은 화면을 가로지르는 줄무늬로 표현 */
+  private renderHazards(): void {
+    const s = this.sim, g = this.hazG, f = s.frame;
+    g.clear();
+    for (const h of s.hazards) {
+      if (h.kind === 'meteor') {
+        if (h.t <= h.warn) {   // 낙하 예고: 위쪽에 깜빡이는 화살표와 흐린 궤적
+          const a = 0.2 + 0.5 * Math.abs(Math.sin(h.t * 0.3));
+          g.lineStyle(2, 0xfb923c, a * 0.5); g.beginPath(); g.moveTo(h.x, 0); g.lineTo(h.x, H); g.strokePath();
+          g.fillStyle(0xfb923c, a); g.fillTriangle(h.x - 12, 10, h.x + 12, 10, h.x, 30);
+        } else {
+          g.lineStyle(10, 0xf97316, 0.25); g.beginPath(); g.moveTo(h.x, h.y - 70); g.lineTo(h.x, h.y); g.strokePath();
+          g.fillStyle(0xea580c, 0.9); g.fillCircle(h.x, h.y, 15); g.fillStyle(0xfde68a, 0.95); g.fillCircle(h.x, h.y, 8);
+        }
+      } else {
+        const hw = HAZARD.lavaHalfW;
+        if (h.t <= h.warn) {
+          const a = 0.1 + 0.25 * Math.abs(Math.sin(h.t * 0.25));
+          g.fillStyle(0xef4444, a); g.fillRect(h.x - hw, 0, hw * 2, H);
+          g.lineStyle(1, 0xfca5a5, a * 2); g.strokeRect(h.x - hw, 0, hw * 2, H);
+        } else {
+          const k = Math.min(1, (h.t - h.warn) / 5) * Math.min(1, (h.warn + h.dur - h.t) / 8 + 0.3);
+          g.fillStyle(0xdc2626, 0.5 * k); g.fillRect(h.x - hw * 1.5, 0, hw * 3, H);
+          g.fillStyle(0xf97316, 0.75 * k); g.fillRect(h.x - hw, 0, hw * 2, H);
+          g.fillStyle(0xfef3c7, 0.9 * k); g.fillRect(h.x - hw * 0.35, 0, hw * 0.7, H);
+        }
+      }
+    }
+    if (s.windWarn > 0 || s.windT > 0) {   // 바람 줄무늬
+      const a = s.windT > 0 ? 0.28 : 0.1 + 0.1 * Math.abs(Math.sin(f * 0.3));
+      for (let i = 0; i < 16; i++) {
+        const y = (i * 53 + 17) % H, len = 50 + (i % 4) * 25, sp = 14 + (i % 3) * 5;
+        const x = (((f * sp * s.windDir + i * 97) % (W + 160)) + (W + 160)) % (W + 160) - 80;
+        g.lineStyle(2, 0xe0f2fe, a); g.beginPath(); g.moveTo(x, y); g.lineTo(x - s.windDir * len, y); g.strokePath();
+      }
     }
   }
 
@@ -569,6 +662,10 @@ export class GameScene extends Phaser.Scene {
         g.strokePath();
       };
       corner(-1, -1); corner(1, -1); corner(-1, 1); corner(1, 1);
+    }
+    if (b.phase3 && !b.dying) {   // 3페이즈: 보라색 외곽 오라가 하나 더
+      const p3 = 30 + Math.sin(frame * 0.3) * 8;
+      g.lineStyle(3, 0xe879f9, 0.8); g.strokeCircle(cx, cy, b.width / 2 + p3);
     }
     if (b.phase2 && !b.dying) {   // 2페이즈 각성 오라
       const pulse = 12 + Math.sin(frame * 0.22) * 6;

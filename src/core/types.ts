@@ -20,7 +20,11 @@ export interface Bullet { x: number; y: number; vx: number; vy: number; dmg: num
 export interface Missile { x: number; y: number; vx: number; vy: number; speed: number; dmg: number; }
 export interface Gem { x: number; y: number; v: number; }
 export interface Companion { ready: boolean; active: boolean; timer: number; used: boolean; pity: number; }
-export type UltPhase = 'IDLE' | 'CUTIN' | 'FALL' | 'IMPACT';
+export type UltPhase = 'IDLE' | 'CUTIN' | 'FALL' | 'IMPACT' | 'ACTIVE';
+/** 궁극기 종류: 에이스=자매의 손바닥, 언니=미사일 포격, 동생=시간 정지 */
+export type UltKind = 'palm' | 'barrage' | 'timestop';
+/** 스테이지 장애물: 운석(예고 후 낙하) / 용암 기둥(예고 후 분출) */
+export interface Hazard { kind: 'meteor' | 'lava'; x: number; y: number; t: number; warn: number; dur: number; hit?: boolean; }
 export interface EnemyBullet { x: number; y: number; vx: number; vy: number; color: string; r: number; grazed?: boolean; }
 export interface Enemy {
   type: EnemyType;
@@ -46,6 +50,7 @@ export interface Boss {
   color: string; subColor: string;
   shotCdMax: number;
   phase2: boolean; phase2Alert: number;
+  phase3?: boolean; phase3Alert?: number;   // 최종 보스(5스테이지) 전용 3페이즈: 체력 20% 이하
   dying: boolean; deathTimer: number;
 }
 
@@ -71,7 +76,7 @@ export interface MidBossConfig { hp: number; w: number; h: number; fanCount: num
 
 /** 시뮬레이션이 내보내는 이벤트 — 렌더링/사운드/연출은 이걸 보고 반응한다 (코어는 연출을 모른다) */
 export type SimEvent =
-  | { t: 'sfx'; name: 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' }
+  | { t: 'sfx'; name: 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'laserCharge' | 'laserBeam' }
   | { t: 'explosion'; x: number; y: number; color: string; count: number }
   | { t: 'ring'; x: number; y: number; color: string; max: number }
   | { t: 'shake'; v: number }

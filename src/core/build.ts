@@ -6,7 +6,7 @@ import type { Rng } from './rng';
  */
 export type ModuleId = 'spread' | 'pierce' | 'homing' | 'drone' | 'laser';
 export type PassiveId = 'rate' | 'power' | 'magnet' | 'vitality' | 'scholar' | 'bombcap' | 'luck' | 'aegis';
-export type FusionId = 'swarm' | 'railgun' | 'hunter';
+export type FusionId = 'swarm' | 'railgun' | 'hunter' | 'aegisorbit' | 'prism' | 'overdrive';
 export type CardId = ModuleId | PassiveId | FusionId;
 export type CardKind = 'module' | 'passive' | 'fusion';
 
@@ -42,13 +42,19 @@ export const CARDS: Record<CardId, CardDef> = {
   swarm:   { id: 'swarm',   kind: 'fusion', name: '스웜 바라지',  max: 1, weight: 0, color: '#fb923c', icon: '❖', desc: () => '산탄 + 유도 융합: 보조탄이 적을 추적하고 피해 +40%' },
   railgun: { id: 'railgun', kind: 'fusion', name: '레일건',       max: 1, weight: 0, color: '#38bdf8', icon: '⟫', desc: () => '관통 + 레이저 융합: 레이저가 2배 굵어지고 피해 2배, 기본탄 관통 +2' },
   hunter:  { id: 'hunter',  kind: 'fusion', name: '헌터 스쿼드',  max: 1, weight: 0, color: '#a3e635', icon: '✹', desc: () => '유도 + 드론 융합: 드론이 유도 미사일을 발사' },
+  aegisorbit: { id: 'aegisorbit', kind: 'fusion', name: '아이기스 오빗', max: 1, weight: 0, color: '#22d3ee', icon: '⬡', desc: () => '드론 + 자동 방벽 융합: 드론이 닿는 적 탄을 모두 지워 줌' },
+  prism:   { id: 'prism',   kind: 'fusion', name: '프리즘',       max: 1, weight: 0, color: '#e879f9', icon: '▥', desc: () => '레이저 + 산탄 융합: 레이저가 3줄기로 갈라짐' },
+  overdrive: { id: 'overdrive', kind: 'fusion', name: '오버클럭',  max: 1, weight: 0, color: '#facc15', icon: '⚡', desc: () => '연사 + 화력 융합: 콤보 5 이상일 때 연사 +35%, 피해 +20%' },
 };
 
 /** 융합 조건: 두 모듈이 모두 이 레벨 이상 */
-export const FUSION_REQUIRE: Record<FusionId, { a: ModuleId; b: ModuleId; level: number }> = {
+export const FUSION_REQUIRE: Record<FusionId, { a: CardId; b: CardId; level: number }> = {
   swarm:   { a: 'spread', b: 'homing', level: 3 },
   railgun: { a: 'pierce', b: 'laser',  level: 3 },
   hunter:  { a: 'homing', b: 'drone',  level: 3 },
+  aegisorbit: { a: 'drone', b: 'aegis', level: 2 },   // 패시브와의 융합 (방벽 카드 2레벨 + 드론 2레벨)
+  prism:   { a: 'laser',  b: 'spread', level: 3 },
+  overdrive: { a: 'rate', b: 'power',  level: 3 },
 };
 
 export interface Build {
@@ -94,7 +100,7 @@ export const xpNeeded = (level: number): number => 55 + 30 * (level - 1);
 export interface BuildStats {
   rateMult: number; dmgMult: number; magnetMult: number; xpMult: number; luckMult: number;
   spread: number; pierce: number; homing: number; drones: number; laser: number;
-  swarm: boolean; railgun: boolean; hunter: boolean;
+  swarm: boolean; railgun: boolean; hunter: boolean; aegisorbit: boolean; prism: boolean; overdrive: boolean;
   bombCapBonus: number; aegisSeconds: number; maxEnergyBonus: number;
 }
 export function statsOf(b: Build, meta: { xpMult?: number; rateMult?: number; dmgMult?: number; magnetMult?: number } = {}): BuildStats {
@@ -106,6 +112,7 @@ export function statsOf(b: Build, meta: { xpMult?: number; rateMult?: number; dm
     luckMult: 1 + 0.25 * lv(b, 'luck'),
     spread: lv(b, 'spread'), pierce: lv(b, 'pierce'), homing: lv(b, 'homing'), drones: lv(b, 'drone'), laser: lv(b, 'laser'),
     swarm: hasFusion(b, 'swarm'), railgun: hasFusion(b, 'railgun'), hunter: hasFusion(b, 'hunter'),
+    aegisorbit: hasFusion(b, 'aegisorbit'), prism: hasFusion(b, 'prism'), overdrive: hasFusion(b, 'overdrive'),
     bombCapBonus: lv(b, 'bombcap'),
     aegisSeconds: [0, 28, 20, 14][lv(b, 'aegis')] ?? 0,
     maxEnergyBonus: 25 * lv(b, 'vitality'),
