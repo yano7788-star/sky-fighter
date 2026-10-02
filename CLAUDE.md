@@ -49,4 +49,6 @@ docs/         DESIGN.md(게임 디자인·아이디어), ROADMAP.md(점검+로�
 - 레벨업/궁극기 연출 중에는 `Sim.step`이 즉시 return (정지). `sim.pending`이 null이 아니면 씬이 카드 오버레이를 띄우고 `chooseCard(i)`로 해제.
 - 보스 등장은 `FIGHT_FRAMES`(전투 시간) 기준, 점수 아님. 보스 HP/스폰 간격/XP 곡선은 `npm run sim`으로 맞춘다 (약한 봇 기준 클리어율 30~45%, 한 판 5~6분이 현재 기준선).
 - 레거시 스프라이트(고양이/강아지/워쉽/중간보스/손바닥/컷인)는 `assets-src/legacy/` → `tools/optimize-assets.cjs`가 `public/assets/img/`로 변환.
+- BGM: 일반 전투 1~3스테이지 `under_heavy_fire`, 4~5스테이지 `target_solar_core`, 보스전 `titan_at_the_gate` (GameScene.wantedBgm에서 매핑, 한 곳만 고치면 됨).
+- 패럴랙스 오버레이(`overlay_clouds`)는 스테이지별로 색조가 바뀌며 `ParallaxOverlay`가 그린다. 이미지는 흰색+알파로 복원한 것(`tools/process-incoming.cjs overlay`).
 - 키: 이동 방향키/WASD, 발사 Space, 폭탄 B/X/Shift, 필살기 R, 고양이 Q, 강아지 E, 카드 1·2·3, 일시정지 P/ESC, 음소거 M.

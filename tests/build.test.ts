@@ -261,3 +261,45 @@ describe('파일럿', () => {
     expect(s.stats.xpMult).toBeCloseTo(1.3 * 1.1);
   });
 });
+
+describe('미사일 타격감', () => {
+  const E2 = (x: number, y: number, hp: number, type: EnemyType = 'zigzag'): Enemy => ({ ...mkEnemy(type, x, y), hp, maxHp: hp });
+  it('미사일이 맞으면 착탄 이벤트·피격 섬광·넉백이 생긴다', () => {
+    const s = new Sim(1);
+    s.enemies.push(E2(225, 300, 8));
+    s.missiles.push({ x: 225, y: 300, vx: 0, vy: 0, speed: 7.5, dmg: 3 });
+    s.step(idle(s));
+    const ev = s.drainEvents().filter(e => e.t === 'missileHit');
+    expect(ev).toHaveLength(1);
+    expect(ev[0].t === 'missileHit' && ev[0].kill).toBe(false);
+    expect(s.enemies[0].flash).toBeGreaterThan(0);
+    expect(s.enemies[0].y).toBeLessThan(300);          // 넉백
+  });
+  it('미사일 처치는 kill 이벤트에 missile=true, 점수 팝업용 pts가 담긴다', () => {
+    const s = new Sim(1);
+    s.enemies.push(E2(225, 300, 2));
+    s.missiles.push({ x: 225, y: 300, vx: 0, vy: 0, speed: 7.5, dmg: 3 });
+    s.step(idle(s));
+    const ev = s.drainEvents();
+    const hit = ev.find(e => e.t === 'missileHit'), kill = ev.find(e => e.t === 'kill');
+    expect(hit && hit.t === 'missileHit' && hit.kill).toBe(true);
+    expect(kill && kill.t === 'kill' && kill.missile && kill.pts > 0).toBe(true);
+  });
+  it('총알 처치는 missile=false', () => {
+    const s = new Sim(1);
+    s.enemies.push(E2(225, 300, 1, 'scout'));
+    s.bullets.push({ x: 225, y: 300, vx: 0, vy: 0, dmg: 1, pierce: 0 });
+    s.step(idle(s));
+    const kill = s.drainEvents().find(e => e.t === 'kill');
+    expect(kill && kill.t === 'kill' && kill.missile).toBe(false);
+  });
+  it('폭발 범위 피해: 착탄 지점 주변의 다른 적도 절반 피해를 입고, 먼 적은 무사하다', () => {
+    const s = new Sim(1);
+    s.enemies.push(E2(225, 300, 6, 'scout'), E2(255, 300, 6, 'scout'), E2(400, 300, 6, 'scout'));
+    s.missiles.push({ x: 225, y: 300, vx: 0, vy: 0, speed: 7.5, dmg: 4 });
+    s.step(idle(s));
+    const byX = (x: number) => s.enemies.find(e => Math.abs(e.x - x) < 2)!;
+    expect(byX(255).hp).toBe(4);                       // 4 × 0.5 = 2 피해
+    expect(byX(400).hp).toBe(6);
+  });
+});

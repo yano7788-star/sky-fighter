@@ -1,11 +1,12 @@
 import { store } from './storage';
 
-export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal';
-export type BgmName = 'normal' | 'boss';
+export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit';
+export type BgmName = 'normal' | 'solar' | 'boss';
 
 const BASE = import.meta.env.BASE_URL;
 const BGM_TRACKS: Record<BgmName, { src: string; vol: number; loopEnd: number }> = {
   normal: { src: `${BASE}assets/audio/under_heavy_fire.mp3`, vol: 0.25, loopEnd: 175.3 },   // loopEnd: 끝부분 무음 구간 건너뛰기
+  solar:  { src: `${BASE}assets/audio/target_solar_core.mp3`, vol: 0.26, loopEnd: 0 },    // 후반(4·5스테이지) 일반 전투곡
   boss:   { src: `${BASE}assets/audio/titan_at_the_gate.mp3`, vol: 0.28, loopEnd: 0 },
 };
 
@@ -36,6 +37,7 @@ class AudioSystem {
       // 두 트랙 모두 이 사용자 제스처 안에서 한 번 재생→정지해 모바일(iOS) 자동재생 제한을 풀어 둔다
       this.primeTrack(this.get('normal'), false);
       this.primeTrack(this.get('boss'), true);
+      this.primeTrack(this.get('solar'), true);
     }
   }
 
@@ -63,6 +65,15 @@ class AudioSystem {
       case 'boom':    osc.type = 'sawtooth'; f.setValueAtTime(140, t); exp(30, 0.4);    g.setValueAtTime(0.4, t);  g.exponentialRampToValueAtTime(0.01, t + 0.4);  osc.start(t); osc.stop(t + 0.4);  break;
       case 'enrage':  osc.type = 'sawtooth'; f.setValueAtTime(180, t); f.linearRampToValueAtTime(540, t + 0.35); g.setValueAtTime(0.35, t); g.exponentialRampToValueAtTime(0.01, t + 0.4); osc.start(t); osc.stop(t + 0.4); break;
       case 'item':    osc.type = 'sine';     f.setValueAtTime(440, t); exp(1100, 0.16); g.setValueAtTime(0.18, t); g.exponentialRampToValueAtTime(0.01, t + 0.16); osc.start(t); osc.stop(t + 0.16); break;
+      case 'missileHit': {   // 묵직한 둔탁음 + 노이즈 버스트 (미사일 착탄)
+        osc.type = 'sine'; f.setValueAtTime(170, t); exp(42, 0.2); g.setValueAtTime(0.55, t); g.exponentialRampToValueAtTime(0.01, t + 0.2); osc.start(t); osc.stop(t + 0.2);
+        const len = Math.floor(ctx.sampleRate * 0.14), buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / len);
+        const ns = ctx.createBufferSource(), ng = ctx.createGain(), bp = ctx.createBiquadFilter();
+        bp.type = 'lowpass'; bp.frequency.value = 1800; ns.buffer = buf; ns.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+        ng.gain.setValueAtTime(0.32, t); ng.gain.exponentialRampToValueAtTime(0.01, t + 0.14); ns.start(t);
+        break;
+      }
       case 'heal':    osc.type = 'sine';     f.setValueAtTime(300, t); exp(800, 0.25);  g.setValueAtTime(0.2, t);  g.exponentialRampToValueAtTime(0.01, t + 0.25); osc.start(t); osc.stop(t + 0.25); break;
     }
   }

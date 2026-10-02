@@ -31,6 +31,8 @@ export interface Enemy {
   age: number;          // 생성 후 경과 프레임
   fireCd: number;       // 사격 쿨다운(저격형/지그재그)
   hold: number;         // 저격형이 제자리에서 버틴 프레임
+  flash?: number;       // 피격 직후 하얗게 번쩍이는 남은 프레임 (연출용)
+  lastHit?: 'bullet' | 'missile' | 'other';   // 마지막으로 맞은 무기 (처치 연출 분기)
 }
 export interface Item { x: number; y: number; type: ItemType; }
 
@@ -80,6 +82,8 @@ export type SimEvent =
   | { t: 'graze'; x: number; y: number }
   | { t: 'combo'; combo: number; mult: number }
   | { t: 'bomb'; x: number; y: number }
+  | { t: 'missileHit'; x: number; y: number; kill: boolean }
+  | { t: 'kill'; x: number; y: number; pts: number; missile: boolean }
   | { t: 'levelup'; level: number }
   | { t: 'skill'; key: SkillKey }
   | { t: 'ult'; phase: UltPhase }

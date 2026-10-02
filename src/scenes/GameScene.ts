@@ -5,7 +5,7 @@ import { BOMB, COMPANION_FRAMES, SHIELD_R } from '../core/data';
 import { creditsFor, metaParams, pilotOf } from '../core/meta';
 import { Sim } from '../core/sim';
 import type { SimEvent, SkillKey } from '../core/types';
-import { ScrollingBackground } from '../render/background';
+import { ParallaxOverlay, ScrollingBackground } from '../render/background';
 import { Fx } from '../render/fx';
 import { Hud, UI, companionZoneActive, inZone, isUiZone } from '../render/hud';
 import { LevelUpOverlay } from '../render/levelup';
@@ -24,6 +24,7 @@ export class GameScene extends Phaser.Scene {
   private ultfx!: UltFx;
   private shownPending: CardId[] | null = null;
   private bg!: ScrollingBackground;
+  private overlay!: ParallaxOverlay;
   private fx!: Fx;
   private world!: Phaser.GameObjects.Container;
   private ui!: Phaser.GameObjects.Container;
@@ -86,6 +87,7 @@ export class GameScene extends Phaser.Scene {
 
     this.newSim();
     this.bg = new ScrollingBackground(this, this.layers.bg, this.sim.rng);
+    this.overlay = new ParallaxOverlay(this, this.layers.bg);
     this.fx = new Fx(this, this.layers.fx);
     this.hud = new Hud(this, this.ui);
     this.levelup = new LevelUpOverlay(this, this.ui);
@@ -138,7 +140,7 @@ export class GameScene extends Phaser.Scene {
     this.targetX = W / 2; this.targetY = PLAYER.spawnY;
     this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
     this.runCredits = 0; this.shownPending = null; this.levelup.hide();
-    this.bg.reset(); this.fx.clear(); this.hud.resetState(this.sim);
+    this.bg.reset(); this.overlay.setStage(1); this.fx.clear(); this.hud.resetState(this.sim);
     this.hud.showResult(null); this.hud.setPaused(false);
     audio.rewind(); audio.resume();
   }
@@ -276,7 +278,8 @@ export class GameScene extends Phaser.Scene {
   private wantedBgm(): BgmName | null {
     const s = this.sim;
     if (this.paused || this.resultKind || s.state !== 'PLAYING') return null;
-    return s.boss || s.stagePhase === 'WARNING' ? 'boss' : 'normal';
+    if (s.boss || s.stagePhase === 'WARNING') return 'boss';
+    return s.bossTier >= 4 ? 'solar' : 'normal';   // 후반 스테이지는 새 곡(Target Solar Core)
   }
 
   private tick(): void {
@@ -292,7 +295,7 @@ export class GameScene extends Phaser.Scene {
       this.fx.tick();
       return;
     }
-    this.hud.tick(s); this.fx.tick(); this.bg.tick();
+    this.hud.tick(s); this.fx.tick(); this.bg.tick(); this.overlay.tick();
     if (this.shake > 0.3) this.shake *= 0.88; else this.shake = 0;
     if (this.muzzle > 0) this.muzzle--;
     if (this.resultTimer > 0) this.resultTimer--;
@@ -307,6 +310,7 @@ export class GameScene extends Phaser.Scene {
     for (const e of s.drainEvents()) this.handleEvent(e);
     if (s.frame % 2 === 0) for (const m of s.missiles) this.fx.trail(m.x, m.y, '#ec4899');
     if (s.stagePhase === 'INTRO') this.bg.setTier(s.bossTier);
+    if (this.overlay.stage() !== s.bossTier) this.overlay.setStage(s.bossTier);
   }
 
   private pollKeyboardMove(): void {
@@ -335,6 +339,22 @@ export class GameScene extends Phaser.Scene {
       case 'bomb':   // 폭탄: 화면을 가르는 3중 충격파
         this.fx.ring(e.x, e.y, '#ffffff', 420); this.fx.ring(e.x, e.y, '#fb923c', 320); this.fx.ring(e.x, e.y, '#fde68a', 220);
         this.fx.explosion(e.x, e.y, '#fb923c', 40); break;
+      case 'missileHit': {   // 미사일 착탄: 충격 링 + 날카로운 스파크 + 섬광 + 흔들림 + 묵직한 소리
+        const k = e.kill;
+        this.fx.ring(e.x, e.y, '#fda4af', k ? 120 : 64); this.fx.ring(e.x, e.y, '#ffffff', k ? 70 : 38);
+        this.fx.sparkBurst(e.x, e.y, '#fecdd3', k ? 22 : 12); this.fx.sparkBurst(e.x, e.y, '#fb923c', k ? 12 : 6);
+        this.fx.flashBlob(e.x, e.y, k ? 110 : 64, 0xfff1f2);
+        this.shake = Math.max(this.shake, k ? 5 : 2.5);
+        if (k) this.hitStop = Math.max(this.hitStop, 2);
+        audio.sfx('missileHit');
+        break;
+      }
+      case 'kill': {   // 처치: 점수 팝업, 미사일로 잡았으면 더 큰 폭발
+        const big = this.sim.multiplier >= 1.5;
+        this.fx.pop(e.x, e.y - 12, `+${e.pts}`, big ? '#fde047' : '#ffffff', big ? 17 : 14);
+        if (e.missile) { this.fx.explosion(e.x, e.y, '#fb923c', 24); this.fx.explosion(e.x, e.y, '#fecdd3', 10); this.fx.ring(e.x, e.y, '#fb923c', 90); }
+        break;
+      }
       case 'levelup': audio.sfx('item'); break;
       case 'heal': this.fx.explosion(e.x, e.y, '#4ade80', 10); break;
       case 'skill': if (e.key === 'ult') { this.activeId = null; this.firing = false; } break;
@@ -384,7 +404,7 @@ export class GameScene extends Phaser.Scene {
     // 화면 흔들림은 월드에만 적용 (HUD는 흔들리지 않음)
     const sh = this.paused ? 0 : this.shake;   // 일시정지 중에는 흔들림 정지
     this.world.setPosition(sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0, sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0);
-    this.bg.render();
+    this.bg.render(); this.overlay.render();
 
     this.sync('items', this.layers.items, s.items, it => `item_${it.type}`, (img, it) => img.setPosition(it.x, it.y).setDisplaySize(32, 32));
     this.sync('gems', this.layers.gems, s.gems, () => 'gem', (img, g) => img.setPosition(g.x, g.y + Math.sin((s.frame + g.x) * 0.1) * 1.5).setDisplaySize(17, 17));
@@ -392,6 +412,7 @@ export class GameScene extends Phaser.Scene {
       // 전용 스프라이트: 정찰기/지그재그/돌진형은 위를 향하는 그림이라 180° 돌려 아래를 보게 하고, 저격형(워쉽)은 그대로
       const w = e.type === 'sniper' ? 64 : e.type === 'scout' ? 46 : e.type === 'zigzag' ? 50 : 40;
       img.setPosition(e.x, e.y).setDisplaySize(w, (w * img.frame.height) / img.frame.width).setRotation(e.type === 'sniper' ? 0 : Math.PI);
+      if (e.flash && e.flash > 0) img.setTintFill(0xffffff); else img.clearTint();   // 피격 순간 하얗게 번쩍
     });
     this.sync('pbullets', this.layers.pbullets, s.bullets, () => 'pbullet', (img, b) => img.setPosition(b.x, b.y));
     this.sync('missiles', this.layers.missiles, s.missiles, () => 'missile', (img, m) => img.setPosition(m.x, m.y).setRotation(Math.atan2(m.vy, m.vx) + Math.PI / 2));

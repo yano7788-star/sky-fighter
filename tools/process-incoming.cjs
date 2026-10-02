@@ -179,6 +179,27 @@ async function explosion() {
   console.log();
 }
 
+
+/** 패럴랙스 오버레이: 초록 위에 얹힌 흰 구름 줄기를 '흰색 + 알파'로 복원한다 (알파 = 키색 대비 밝기 증가분) */
+async function overlay(base, outName) {
+  const f = findIn(base); if (!f) { console.log('(건너뜀) ' + base + ' 없음'); return; }
+  const m = await sharp(f).metadata();
+  const img = await raw(f);
+  const { data, w, h } = img;
+  // 키 색상: 네 모서리 평균
+  let kr = 0; for (const [x, y] of [[2, 2], [w - 3, 2], [2, h - 3], [w - 3, h - 3]]) kr += data[(y * w + x) * 4]; kr /= 4;
+  for (let i = 0; i < w * h; i++) {
+    const p = i * 4, a = Math.max(0, Math.min(1, (data[p] - kr) / (255 - kr)));
+    data[p] = data[p + 1] = data[p + 2] = 255; data[p + 3] = Math.round(Math.min(1, a * 1.35) * 255);
+  }
+  // 우하단 워터마크 영역을 지움
+  for (let y = Math.floor(h * 0.9); y < h; y++) for (let x = Math.floor(w * 0.8); x < w; x++) data[(y * w + x) * 4 + 3] = 0;
+  const dst = path.join(OUT, outName + '.webp');
+  await sharp(data, { raw: { width: w, height: h, channels: 4 } }).extract({ left: 0, top: 0, width: w, height: Math.floor(h * 0.97) })
+    .resize({ width: 720, withoutEnlargement: true }).webp({ quality: 85, alphaQuality: 90, effort: 6 }).toFile(dst);
+  console.log(outName + ': ' + kb(dst) + 'KB (원본 ' + m.width + 'x' + m.height + ')');
+}
+
 const ALL = {
   bosses: async () => { await sprite('boss1', 'boss1', { key: 'magenta' }); for (let i = 2; i <= 5; i++) await sprite('boss' + i, 'boss' + i); },
   player: async () => { await sprite('player', 'player', { maxSide: 300 }); await sprite('player_skin_2', 'player_skin2', { maxSide: 300 }); await sprite('player_skin_3', 'player_skin3', { maxSide: 300 }); },
@@ -188,6 +209,7 @@ const ALL = {
   icons: async () => { await sprite('gem', 'gem', { key: 'magenta', maxSide: 128, borderBlobs: false }); await sprite('drone', 'drone', { key: 'magenta', maxSide: 128, borderBlobs: false }); await items(); },
   logo: async () => { await sprite('logo', 'logo', { maxSide: 720, borderBlobs: false }); },
   explosion,
+  overlay: async () => { await overlay('overlay_clouds', 'overlay_clouds'); },
   backgrounds: async () => { await background('bg1', 'bg1'); await background('bg2', 'bg2'); await background('title_bg', 'title_bg', { cropBottomPct: 0.06 }); },
 };
 

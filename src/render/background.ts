@@ -85,3 +85,56 @@ export class ScrollingBackground {
 }
 
 const R_STAR = 1;   // 별 스케일 보정 (6px 텍스처 기준)
+
+/**
+ * 패럴랙스 오버레이: 배경보다 훨씬 빠르게 흐르는 반투명 구름 줄기 2겹.
+ * 배경 스크롤과 속도 차이가 나서 깊이감(속도감)이 생긴다. 스테이지마다 색조가 바뀐다.
+ * 이미지 위·아래 가장자리가 비어 있어 거울 타일링해도 이음새가 보이지 않는다.
+ */
+const OVERLAY_TINT = [0xffffff, 0xffffff, 0xffd9b0, 0xffe9a8, 0xffb8a8, 0xd9bcff];   // 인덱스 = 스테이지
+
+export class ParallaxOverlay {
+  private layers: { imgs: Phaser.GameObjects.Image[]; speed: number; scroll: number; alpha: number; scale: number; flipX: boolean; xOff: number }[] = [];
+  private tier = 1;
+
+  constructor(scene: Phaser.Scene, parent: Phaser.GameObjects.Container) {
+    const defs = [
+      { speed: 2.7, alpha: 0.55, scale: 1.2, flipX: false, xOff: -40 },
+      { speed: 4.1, alpha: 0.38, scale: 0.85, flipX: true, xOff: 60 },
+    ];
+    for (const d of defs) {
+      const imgs: Phaser.GameObjects.Image[] = [];
+      for (let i = 0; i < 3; i++) { const img = scene.add.image(0, 0, 'overlay_clouds').setOrigin(0, 0).setVisible(false); parent.add(img); imgs.push(img); }
+      this.layers.push({ imgs, scroll: Math.random() * 1000, ...d });
+    }
+    this.setStage(1);
+  }
+
+  setStage(tier: number): void {
+    this.tier = tier;
+    const c = OVERLAY_TINT[Math.min(tier, OVERLAY_TINT.length - 1)];
+    for (const l of this.layers) l.imgs.forEach(i => i.setTint(c));
+  }
+  stage(): number { return this.tier; }
+
+  tick(): void { for (const l of this.layers) l.scroll += l.speed; }
+
+  render(): void {
+    for (const l of this.layers) {
+      const first = l.imgs[0];
+      const drawW = W * l.scale, drawH = Math.ceil(drawW * (first.frame.height / first.frame.width));
+      const period = drawH * 2;
+      const sc = ((l.scroll % period) + period) % period;
+      let n = 0;
+      for (let k = Math.floor(-sc / drawH) - 1; n < l.imgs.length; k++) {
+        const y = Math.floor(sc + k * drawH);
+        if (y >= H) break;
+        if (y + drawH < 0) continue;
+        const img = l.imgs[n++];
+        img.setVisible(true).setAlpha(l.alpha).setPosition(l.xOff - (drawW - W) / 2, y).setDisplaySize(drawW, drawH)
+          .setFlipY(((k % 2) + 2) % 2 === 1).setFlipX(l.flipX);
+      }
+      for (; n < l.imgs.length; n++) l.imgs[n].setVisible(false);
+    }
+  }
+}

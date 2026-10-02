@@ -529,7 +529,7 @@ export class Sim {
         const ms = this.missiles[m];
         if (Math.hypot(ms.x - b.x, ms.y - b.y) < b.width / 2) {
           this.missiles.splice(m, 1); this.damageBoss(ms.dmg);
-          this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 10);
+          this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 10); this.emit({ t: 'missileHit', x: ms.x, y: ms.y, kill: false });
         }
       }
       if (Math.hypot(p.x - b.x, p.y - b.y) < b.width / 2 + 10) this.applyDamage(50);
@@ -620,7 +620,7 @@ export class Sim {
     }
     for (let k = this.missiles.length - 1; k >= 0; k--) {
       const ms = this.missiles[k];
-      if (Math.hypot(ms.x - m.x, ms.y - m.y) < m.width / 2) { this.missiles.splice(k, 1); this.damageMid(ms.dmg); this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 8); }
+      if (Math.hypot(ms.x - m.x, ms.y - m.y) < m.width / 2) { this.missiles.splice(k, 1); this.damageMid(ms.dmg); this.emit({ t: 'sfx', name: 'boom' }); this.boom(ms.x, ms.y, '#ec4899', 8); this.emit({ t: 'missileHit', x: ms.x, y: ms.y, kill: false }); }
     }
     if (Math.hypot(p.x - m.x, p.y - m.y) < m.width / 2 + 10) this.applyDamage(40);
 
@@ -690,6 +690,7 @@ export class Sim {
   private moveEnemy(e: Enemy): void {
     const p = this.player;
     e.age++;
+    if (e.flash && e.flash > 0) e.flash--;
     switch (e.type) {
       case 'scout':
         e.y += e.speed;
@@ -731,20 +732,29 @@ export class Sim {
         const b = this.bullets[j];
         if (b.hits?.includes(e)) continue;
         if (Math.hypot(b.x - e.x, b.y - e.y) < def.hitR) {
-          this.damageEnemy(e, b.dmg); this.emit({ t: 'hitspark', x: b.x, y: b.y });
+          this.damageEnemy(e, b.dmg); e.flash = 3; e.lastHit = 'bullet'; this.emit({ t: 'hitspark', x: b.x, y: b.y });
           if (b.pierce > 0) { (b.hits ??= []).push(e); b.pierce--; } else { this.bullets.splice(j, 1); break; }
         }
       }
       for (let m = this.missiles.length - 1; m >= 0; m--) {
         const ms = this.missiles[m];
-        if (Math.hypot(ms.x - e.x, ms.y - e.y) < def.hitR + 2) { this.missiles.splice(m, 1); this.damageEnemy(e, ms.dmg); break; }
+        if (Math.hypot(ms.x - e.x, ms.y - e.y) < def.hitR + 2) {
+          this.missiles.splice(m, 1); this.damageEnemy(e, ms.dmg);
+          e.flash = 8; e.lastHit = 'missile';
+          const dead = e.hp <= 0;
+          if (!dead) e.y -= 8;                                   // 미사일에 맞으면 뒤로 밀려난다 (묵직한 타격감)
+          this.emit({ t: 'missileHit', x: ms.x, y: ms.y, kill: dead });
+          this.missileSplash(ms.x, ms.y, e, ms.dmg * 0.5);       // 폭발 범위 피해: 뭉친 적을 한꺼번에 쓸어버림
+          break;
+        }
       }
       // 강아지 방어막에 닿은 적은 부서진다
       if (dogOn && e.hp > 0 && Math.hypot(p.x - e.x, p.y - e.y) < SHIELD_R + def.bodyR) e.hp = 0;
 
       if (e.hp <= 0) {
         this.emit({ t: 'sfx', name: 'boom' }); this.boom(e.x, e.y, '#ef4444', 12);
-        this.killScore(def.score);
+        const pts = this.killScore(def.score);
+        this.emit({ t: 'kill', x: e.x, y: e.y, pts, missile: e.lastHit === 'missile' });
         this.lifesteal(MOB_HIT_VALUE);
         this.ult.gauge = Math.min(100, this.ult.gauge + def.xp * ULT.gaugePerXp);
         this.spawnGems(e.x, e.y, def.xp, Math.max(1, Math.round(def.xp / 4)));
@@ -762,10 +772,20 @@ export class Sim {
   }
 
   /** 처치 점수: 연속 처치(콤보)에 따라 배율 적용 */
-  private killScore(base: number): void {
+  private killScore(base: number): number {
     this.combo++; this.comboTimer = COMBO_WINDOW;
-    this.score += Math.round(base * comboMultiplier(this.combo));
+    const pts = Math.round(base * comboMultiplier(this.combo));
+    this.score += pts;
     this.emit({ t: 'combo', combo: this.combo, mult: comboMultiplier(this.combo) });
+    return pts;
+  }
+
+  /** 미사일 착탄 지점 주변(반경 52)의 다른 적에게 절반 피해 */
+  private missileSplash(x: number, y: number, except: Enemy, dmg: number): void {
+    for (const o of this.enemies) {
+      if (o === except || o.y < -10) continue;
+      if (Math.hypot(o.x - x, o.y - y) < 52) { this.damageEnemy(o, dmg); o.flash = 6; o.lastHit = 'missile'; }
+    }
   }
 
   // ---------------------------------------------------------------------
