@@ -26,7 +26,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'score20k', icon: '💯', name: '2만 점', desc: '점수 20,000 달성', reward: 100, test: r => r.score >= 20000 },
   { id: 'score50k', icon: '👑', name: '5만 점', desc: '점수 50,000 달성', reward: 250, test: r => r.score >= 50000 },
   { id: 'mutclear', icon: '⚠', name: '위험을 안고', desc: '모디파이어를 쓰고 클리어', reward: 250, test: r => r.cleared && !!r.mutator },
-  { id: 'daily', icon: '📅', name: '오늘의 도전자', desc: '일일 도전을 한 번 완주', reward: 60, test: r => r.daily },
+  { id: 'daily', icon: '📅', name: '오늘의 도전자', desc: '일일 도전에서 2스테이지에 도달', reward: 60, test: r => r.daily && r.bossTier >= 2 },
 ];
 
 export const FUSION_IDS: FusionId[] = ['swarm', 'railgun', 'hunter', 'aegisorbit', 'prism', 'overdrive'];

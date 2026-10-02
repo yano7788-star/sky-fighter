@@ -222,11 +222,10 @@ export class Sim {
     if (this.hyper.t > 0) { if (--this.hyper.t === 0) { this.hyper.gauge = 0; this.refreshStats(); } else this.hyper.gauge = (100 * this.hyper.t) / HYPER.frames; }
     if (this.hasRelic('r_laststand')) { const low = p.energy <= p.maxEnergy * 0.5; if (low !== this.lowHp) { this.lowHp = low; this.refreshStats(); } }
     p.targetX = inp.targetX; p.targetY = inp.targetY;
-    const ultPhase0 = this.ult.phase, bombs0 = this.bombs;
+    const ultPhase0 = this.ult.phase;
     if (inp.skill) this.activateSkill(inp.skill);
     if (inp.bomb) this.fireBomb();
     if (ultPhase0 === 'IDLE' && this.ult.phase !== 'IDLE') this.run.ults++;
-    if (this.bombs < bombs0) this.run.bombs++;
     if (p.invincible > 0) p.invincible--;
     if (p.magnet > 0) p.magnet--;
     this.updateAegis();
@@ -330,7 +329,7 @@ export class Sim {
       }
       if (u.t % 9 === 0) this.emit({ t: 'sfx', name: 'missile' });
     }
-    if ('active' in k && u.t >= k.active) { u.phase = 'IDLE'; u.t = 0; this.emit({ t: 'ult', phase: 'IDLE' }); }
+    if ('active' in k && u.t >= k.active) { u.phase = 'IDLE'; u.t = 0; this.player.invincible = Math.max(this.player.invincible, 30); this.emit({ t: 'ult', phase: 'IDLE' }); }   // 정지가 풀리는 순간 멈춰 있던 공격에 맞지 않도록 짧은 무적
   }
 
   /** 손바닥이 닿는 순간: 모든 적 총알 제거 + 화면의 적/중간보스 최대 체력의 50%, 보스 30% */
@@ -595,7 +594,7 @@ export class Sim {
     const b = this.boss!;
     const p = this.player;
 
-    if (!b.dying && !b.phase2 && b.hp <= b.maxHp * 0.5) {
+    if (!b.dying && !this.timeStopped && !b.phase2 && b.hp <= b.maxHp * 0.5) {   // 시간 정지가 풀린 뒤에 전환 연출 (정지 화면과 겹치지 않게)
       b.phase2 = true; b.phase2Alert = 80; this.emit({ t: 'slowmo', ms: 450, scale: 0.3 });
       b.shotCdMax = Math.max(16, Math.round(b.shotCdMax * 0.74));   // 공격 주기 26% 가속
       b.vx = (b.vx > 0 ? 1 : -1) * Math.abs(b.vx) * 1.3;            // 이동 속도 30% 증속
@@ -605,7 +604,7 @@ export class Sim {
       this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'vibrate', pattern: 150 });
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ef4444', max: 120 });
     }
-    if (!b.dying && b.tier === 5 && b.phase2 && !b.phase3 && b.hp <= b.maxHp * 0.2) {   // 최종 보스 3페이즈
+    if (!b.dying && !this.timeStopped && b.tier === 5 && b.phase2 && !b.phase3 && b.hp <= b.maxHp * 0.2) {   // 최종 보스 3페이즈
       b.phase3 = true; b.phase3Alert = 100; this.emit({ t: 'slowmo', ms: 500, scale: 0.28 });
       b.shotCdMax = Math.max(14, Math.round(b.shotCdMax * 0.8));
       b.vx = (b.vx > 0 ? 1 : -1) * Math.abs(b.vx) * 1.2;
@@ -614,8 +613,7 @@ export class Sim {
       this.emit({ t: 'shake', v: 16 }); this.emit({ t: 'vibrate', pattern: [120, 60, 200] });
       this.boom(b.x, b.y, '#e879f9', 40); this.emit({ t: 'ring', x: b.x, y: b.y, color: '#e879f9', max: 200 });
     }
-    if (b.phase2Alert > 0) b.phase2Alert--;
-    if (b.phase3Alert && b.phase3Alert > 0) b.phase3Alert--;
+    if (!this.timeStopped) { if (b.phase2Alert > 0) b.phase2Alert--; if (b.phase3Alert && b.phase3Alert > 0) b.phase3Alert--; }
 
     if (b.dying) {
       // 폭발 중: 이동·공격 정지, 기체 위에서 연쇄 폭발
@@ -1250,7 +1248,7 @@ export class Sim {
     if (this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'CLEAR') return;   // 연출 중 폭탄 낭비 방지
     if (this.frame - this.lastBombFrame < 20) return;
     this.lastBombFrame = this.frame;
-    this.bombs--;
+    this.bombs--; this.run.bombs++;
     const p = this.player;
     p.invincible = Math.max(p.invincible, BOMB.invincibleFrames);
     this.bombT = BOMB.fieldFrames; this.bombX = p.x; this.bombY = p.y;

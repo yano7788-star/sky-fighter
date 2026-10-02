@@ -51,7 +51,8 @@ export class LevelUpOverlay {
     this.title.setText(route ? 'ROUTE SELECT' : relic ? 'RELIC GET!' : 'LEVEL UP!').setColor(route ? '#7dd3fc' : relic ? '#f0abfc' : '#fde047');
     this.hint.setText(route ? '다음 스테이지로 가는 항로를 고르세요 (위험할수록 보상 ↑)' : relic ? '보스 격파 보상: 유물을 하나 고르세요 (이번 런 내내 적용)' : '강화할 카드를 선택하세요');
     this.cards = cards; this.visible = true;
-    cards.forEach((_, i) => { const cx = this.cardX(i) + CARD_W / 2, t = this.cardTexts[i]; for (const o of [t.icon, t.name, t.lvl, t.desc, t.tag]) o.setX(cx); });   // 카드 장수에 맞춰 가운데 정렬 this.selected = Math.min(1, cards.length - 1);
+    cards.forEach((_, i) => { const cx = this.cardX(i) + CARD_W / 2, t = this.cardTexts[i]; for (const o of [t.icon, t.name, t.lvl, t.desc, t.tag]) o.setX(cx); });   // 카드 장수에 맞춰 가운데 정렬
+    this.selected = Math.min(1, cards.length - 1);
     this.root.setVisible(true);
     cards.forEach((id, i) => {
       const c = CARDS[id], cur = lv(build, id), t = this.cardTexts[i];

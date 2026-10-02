@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { H, PHASE_FRAMES, W } from '../core/config';
-import { BOSS_CONFIGS, HYPER } from '../core/data';
+import { BOSS_CONFIGS, HYPER, ULT_KIND } from '../core/data';
 import { store } from '../systems/storage';
 import { mutatorOf } from '../core/mutators';
 import type { Sim } from '../core/sim';
@@ -83,8 +83,8 @@ export class Hud {
     text('missile', 50, 66, 12, '#ec4899', 0, 1);
     text('combo', 50, 84, 13, '#facc15', 0, 1).setShadow(0, 0, '#000', 4, true, true);
     text('level', W / 2, 50, 12, '#7dd3fc', 0.5, 1);
-    text('mut', W / 2, 63, 10.5, '#fbbf24', 0.5, 1);
-    text('route', W / 2, 76, 10.5, '#7dd3fc', 0.5, 1);
+    text('mut', W - 14, 84, 10.5, '#fbbf24', 1, 1);     // 모디파이어·항로 배지: 오른쪽 한 줄 (왼쪽 버프 줄과 겹치지 않게)
+    text('route', W - 14, 84, 10.5, '#7dd3fc', 1, 1).setVisible(false);
     this.btn = {
       ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(34, 40)),
       cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(38, 36)),
@@ -241,13 +241,13 @@ export class Hud {
     this.setText('score', `SCORE ${sim.score}`);
     this.setText('best', `BEST ${Math.max(bestScore, sim.score)}`);
     this.setText('stage', `STAGE ${sim.bossTier}`);
-    this.t.horde.setVisible(sim.hordeWarn > 0 && Math.floor(sim.frame / 8) % 2 === 0); if (sim.hordeWarn > 0) this.setText('horde', '⚠ 대군 접근! ⚠');
+    this.t.horde.setVisible(sim.hordeWarn > 0 && (sim.timeStopped || Math.floor(sim.frame / 8) % 2 === 0)); if (sim.hordeWarn > 0) this.setText('horde', '⚠ 대군 접근! ⚠');
     const buffs: string[] = [];
     if (sim.hasHomingMissile) buffs.push(`MISSILE ${Math.ceil(sim.missileTimer / 60)}s`);
     if (p.shield > 0) buffs.push('SHIELD');
     if (p.magnet > 0) buffs.push(`MAGNET ${Math.ceil(p.magnet / 60)}s`);
     this.setText('missile', buffs.join('  ·  '));
-    this.setText('combo', sim.combo >= 2 ? `COMBO ${sim.combo}  ×${sim.multiplier.toFixed(2).replace(/.?0+$/, '')}` : '');
+    this.setText('combo', sim.combo >= 2 ? `COMBO ${sim.combo}  ×${+sim.multiplier.toFixed(2)}` : '');
     this.setText('mute', muted ? '🔇' : '🔊').setColor(muted ? '#64748b' : '#38bdf8');
     this.setText('lives', '♥ '.repeat(sim.lives));
 
@@ -272,8 +272,8 @@ export class Hud {
     g.fillStyle(0x22d3ee, 1); g.fillRect(0, 0, W * xr, 5);
     this.setText('level', `LV ${sim.level}`);
     const md = mutatorOf(sim.meta.mutator);
-    const rd = sim.routeDef; this.setText('route', rd ? `${rd.icon} ${rd.name}` : '').setColor(rd?.color ?? '#7dd3fc');
-    this.setText('mut', (this.daily ? '📅 ' : '') + (md ? `${md.icon} ${md.name}` : '')).setColor(md?.color ?? '#fbbf24');
+    const rd = sim.routeDef, badge = [(this.daily ? '📅 ' : '') + (md ? `${md.icon} ${md.name}` : ''), rd ? `${rd.icon} ${rd.name}` : ''].filter(x => x.trim()).join('  ·  ');
+    this.setText('mut', badge).setColor(md?.color ?? rd?.color ?? '#fbbf24');
 
     // 4-3. 스킬 버튼 (필살기 게이지 링 / 동료)
     this.renderSkillButtons(sim);
@@ -307,13 +307,14 @@ export class Hud {
     if (on && !this.hyperSeen) { this.hyperSeen = true; store.set('hyperSeen', true); }
 
     // 필살기: 항상 표시. 게이지가 차오르고, 가득 차면 빛난다
-    const u = UI.ult, ur = BTN_R, frac = Math.min(1, sim.ult.gauge / 100), ready = sim.ultReady;
+    const u = UI.ult, ur = BTN_R, ak = ULT_KIND[sim.ult.kind], act = sim.ult.phase === 'ACTIVE' && 'active' in ak;
+    const frac = act ? Math.max(0, 1 - sim.ult.t / (ak as { active: number }).active) : Math.min(1, sim.ult.gauge / 100), ready = sim.ultReady;   // 발동 중에는 남은 시간이 링으로 줄어든다
     g.fillStyle(0x0f172a, 0.78); g.fillCircle(u.x, u.y, ur);
     g.lineStyle(3, 0x334155, 0.9); g.strokeCircle(u.x, u.y, ur - 2);
     if (frac > 0) { g.lineStyle(3.5, ready ? 0x67e8f9 : 0x22d3ee, ready ? 0.7 + pulse * 0.3 : 0.95); g.beginPath(); g.arc(u.x, u.y, ur - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); g.strokePath(); }
     if (ready) { g.lineStyle(2, 0xa5f3fc, 0.3 + pulse * 0.4); g.strokeCircle(u.x, u.y, ur + 3 + pulse * 3); }
     b.ult.setAlpha(ready ? (canAct ? 1 : 0.45) : 0.35);
-    this.setText('ultLabel', ready ? '필살기!' : `${Math.floor(sim.ult.gauge)}%`).setColor(ready ? '#fde68a' : '#64748b');
+    this.setText('ultLabel', act ? `${Math.max(0, ((ak as { active: number }).active - sim.ult.t) / 60).toFixed(1)}s` : ready ? '필살기!' : `${Math.floor(sim.ult.gauge)}%`).setColor(act ? '#7dd3fc' : ready ? '#fde68a' : '#64748b');
 
     // 동료: 보유(펄스 링) → 사용 중(남은 시간 링) → 사용 후 숨김
     const comp: ['cat' | 'dog', typeof UI.cat, number, string][] = [['cat', UI.cat, 0xfb7185, '흡혈'], ['dog', UI.dog, 0xfb923c, '방어막']];

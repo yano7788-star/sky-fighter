@@ -79,15 +79,18 @@ export class UltFx {
         g.fillStyle(cfg.col, 0.08 + 0.1 * pulse);
         g.fillRect(0, 0, W, 22); g.fillRect(0, H - 22, W, 22); g.fillRect(0, 0, 18, H); g.fillRect(W - 18, 0, 18, H);
       } else {   // 시간 정지: 푸른 막 + 시계 문양
-        g.fillStyle(0x1d4ed8, 0.14); g.fillRect(0, 0, W, H);
+        g.fillStyle(0x1d4ed8, 0.1); g.fillRect(0, 0, W, H);
         const cx = W / 2, cy = H * 0.5, r = 150 + Math.sin(t * 0.08) * 6;
         g.lineStyle(3, 0x7dd3fc, 0.5); g.strokeCircle(cx, cy, r); g.lineStyle(1.5, 0xbae6fd, 0.35); g.strokeCircle(cx, cy, r - 14);
         for (let i = 0; i < 12; i++) { const a = (i * Math.PI) / 6; g.lineStyle(i % 3 === 0 ? 4 : 2, 0xbae6fd, 0.55); g.beginPath(); g.moveTo(cx + Math.sin(a) * (r - 10), cy - Math.cos(a) * (r - 10)); g.lineTo(cx + Math.sin(a) * (r + 6), cy - Math.cos(a) * (r + 6)); g.strokePath(); }
         const ha = -t * 0.12; g.lineStyle(3, 0xe0f2fe, 0.7); g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.sin(ha) * (r - 22), cy - Math.cos(ha) * (r - 22)); g.strokePath();
       }
-      this.title.setVisible(true).setText(`${cfg.name}  ${remain.toFixed(1)}s`).setFontSize(20).setColor(cfg.css).setAlpha(0.95).setScale(1).setPosition(W / 2, H * 0.2);
+      void remain;   // 남은 시간은 HUD의 필살기 버튼 링/라벨에 표시 (보스·HUD와 겹치지 않게)
     }
   }
+
+  /** 일시정지·카드 선택·결과 화면 중에는 궁극기 연출이 위를 덮지 않도록 숨긴다 */
+  hide(): void { this.root.setVisible(false); }
 
   render(sim: Sim): void {
     const phase = sim.ult.phase, t = sim.ult.t;
