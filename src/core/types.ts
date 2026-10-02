@@ -50,6 +50,9 @@ export interface Boss {
   color: string; subColor: string;
   shotCdMax: number;
   phase2: boolean; phase2Alert: number;
+  /** 보스 특수 공격: 레이저(예고선 → 발사) / 돌진(예고 레인 → 돌진 → 복귀). 진행 중에는 일반 탄막과 이동을 멈춘다 */
+  sp?: { kind: 'laser' | 'charge'; state: 'WARN' | 'ACT' | 'RET'; t: number; lockX: number; beams: number[] };
+  spCd?: number; spIdx?: number;
   phase3?: boolean; phase3Alert?: number;   // 최종 보스(5스테이지) 전용 3페이즈: 체력 20% 이하
   dying: boolean; deathTimer: number;
 }

@@ -30,6 +30,8 @@ const bannerAlpha = (t: number, total: number, fadeIn = 18, fadeOut = 24) => Mat
 
 /** 미션 클리어 화면의 버튼 판정 영역 (무한 모드 계속 / 타이틀로) */
 export const RESULT_BTN = { cont: { x: W / 2, y: H / 2 + 172, w: 300, h: 46 }, title: { x: W / 2, y: H / 2 + 228, w: 300, h: 40 } };
+/** 일시정지 메뉴 버튼: 계속하기 / 메인 화면으로(두 번 눌러 확인) */
+export const PAUSE_BTN = { resume: { x: W / 2, y: H / 2 - 56, w: 250, h: 42 }, quit: { x: W / 2, y: H / 2 - 4, w: 250, h: 42 } };
 export const inRect = (z: { x: number; y: number; w: number; h: number }, x: number, y: number) => Math.abs(x - z.x) < z.w / 2 && Math.abs(y - z.y) < z.h / 2;
 
 export interface ResultInfo { newAch?: string[]; dailyBest?: number; kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
@@ -50,6 +52,7 @@ export class Hud {
   private whiteRect: Phaser.GameObjects.Rectangle;
   private warnRect: Phaser.GameObjects.Rectangle;
   private pauseGroup: Phaser.GameObjects.GameObject[] = [];
+  private pauseQuit!: Phaser.GameObjects.Text;
   private resultGroup: Phaser.GameObjects.GameObject[] = [];
   private resultTexts: Record<string, Phaser.GameObjects.Text> = {};
   private resultG!: Phaser.GameObjects.Graphics;
@@ -114,11 +117,17 @@ export class Hud {
     const s = this.scene;
     this.pauseGroup = [
       add(s.add.rectangle(0, 0, W, H, 0x03050a, 0.72).setOrigin(0, 0)),
-      add(s.add.text(W / 2, H / 2 - 20, 'PAUSED', textStyle(34, '#38bdf8')).setOrigin(0.5)),
-      add(s.add.text(W / 2, H / 2 + 24, '화면을 탭하거나 P / ESC 로 계속', textStyle(16, '#cbd5e1', false)).setOrigin(0.5)),
-      add(s.add.text(W / 2, H / 2 + 56, '이동 방향키·WASD / 발사 Space / 폭탄 B · 필살기 R · 동료 Q/E · 음소거 M', textStyle(11, '#64748b', false)).setOrigin(0.5)),
+      add(s.add.text(W / 2, H / 2 - 120, 'PAUSED', textStyle(34, '#38bdf8')).setOrigin(0.5)),
+      add(s.add.text(W / 2, H / 2 - 84, '버튼 밖을 탭하거나 P / ESC 로 계속', textStyle(13, '#94a3b8', false)).setOrigin(0.5)),
+      add(s.add.text(W / 2, H / 2 + 44, '이동 방향키·WASD / 발사 Space / 폭탄 B · 필살기 R · 동료 Q/E · 음소거 M', textStyle(11, '#64748b', false)).setOrigin(0.5)),
     ];
-    this.buildText = add(s.add.text(W / 2, H / 2 + 100, '', { ...textStyle(13, '#94a3b8', false), align: 'center', wordWrap: { width: W - 60 }, lineSpacing: 6 }).setOrigin(0.5, 0));
+    const g = add(s.add.graphics()), r = PAUSE_BTN.resume, q = PAUSE_BTN.quit;
+    g.fillStyle(0x0c4a6e, 0.8); g.fillRoundedRect(r.x - r.w / 2, r.y - r.h / 2, r.w, r.h, 12); g.lineStyle(2, 0x38bdf8, 1); g.strokeRoundedRect(r.x - r.w / 2, r.y - r.h / 2, r.w, r.h, 12);
+    g.fillStyle(0x1e293b, 0.9); g.fillRoundedRect(q.x - q.w / 2, q.y - q.h / 2, q.w, q.h, 12); g.lineStyle(2, 0x64748b, 1); g.strokeRoundedRect(q.x - q.w / 2, q.y - q.h / 2, q.w, q.h, 12);
+    this.pauseGroup.push(g, add(s.add.text(r.x, r.y, '▶ 계속하기', textStyle(18, '#f8fafc')).setOrigin(0.5)));
+    this.pauseQuit = add(s.add.text(q.x, q.y, '', textStyle(16, '#cbd5e1')).setOrigin(0.5)); this.pauseGroup.push(this.pauseQuit);
+    this.setPauseConfirm(false);
+    this.buildText = add(s.add.text(W / 2, H / 2 + 80, '', { ...textStyle(13, '#94a3b8', false), align: 'center', wordWrap: { width: W - 60 }, lineSpacing: 6 }).setOrigin(0.5, 0));
     this.pauseGroup.push(this.buildText);
     this.pauseGroup.forEach(o => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(false));
   }
@@ -159,6 +168,9 @@ export class Hud {
   }
 
   setBuildText(t: string): void { this.buildText.setText(t); }
+
+  /** 메인 화면으로 버튼: 한 번 누르면 확인 문구, 두 번째에 실행 */
+  setPauseConfirm(on: boolean): void { this.pauseQuit.setText(on ? '정말 나갈까요? 한 번 더 누르세요' : '⌂ 메인 화면으로').setColor(on ? '#fca5a5' : '#cbd5e1'); }
 
   setPaused(v: boolean): void { this.pauseGroup.forEach(o => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(v)); }
 

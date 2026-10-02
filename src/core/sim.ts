@@ -4,7 +4,7 @@ import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config'
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
   FIGHT_FRAMES, HAZARD, HAZARDS, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
-  fireBossPattern, rankFor,
+  fireBossPattern, rankFor, BOSS_SP, BOSS_SPECIALS,
 } from './data';
 import { NO_META, pilotOf, type MetaParams } from './meta';
 import { createRng, type Rng } from './rng';
@@ -536,6 +536,7 @@ export class Sim {
       vx: 2.3 + tier * 0.25, hp, maxHp: hp, shootCooldown: 0, attackMode: 1,
       color: c.color, subColor: c.subColor, shotCdMax: Math.max(12, Math.round(c.shotCd * (1 - 0.04 * loop) * this.meta.mut.bossShot)),
       phase2: false, phase2Alert: 0, dying: false, deathTimer: 0,
+      spCd: Math.round(BOSS_SP.cd[0] * 0.6), spIdx: 0,
     };
   }
 
@@ -576,9 +577,12 @@ export class Sim {
       if (b.deathTimer % 16 === 1) this.emit({ t: 'sfx', name: 'boom' });
     } else if (this.timeStopped) {
       // 시간 정지 중: 이동·공격 정지
+    } else if (b.sp) {
+      this.updateBossSpecial(b);
     } else if (b.y < b.targetY) {
       b.y += 1.5;
     } else {
+      if (this.startBossSpecialIfReady(b)) { /* 이번 틱은 특수 공격 시작 */ } else {
       b.x += b.vx;
       if (b.x < b.width / 2 + 10 || b.x > W - b.width / 2 - 10) b.vx *= -1;
       b.shootCooldown++;
@@ -586,6 +590,7 @@ export class Sim {
         b.shootCooldown = 0;
         b.attackMode = b.attackMode === 1 ? 2 : 1;
         fireBossPattern(b, { player: p, frame: this.frame, emit: eb => this.enemyBullets.push(eb) });
+      }
       }
     }
 
@@ -612,7 +617,7 @@ export class Sim {
 
     // 체력이 0이 되어도 바로 사라지지 않고 '폭발 연출 → 클리어 → 다음 스테이지' 순서로 이어짐
     if (!b.dying && b.hp <= 0) {
-      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0;
+      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0; b.sp = undefined;
       this.stagePhase = 'BOSS_DYING'; this.phaseTimer = PHASE_FRAMES.BOSS_DYING;
       const { rank, bonus } = rankFor(this.stageHits);
       this.stageRank = rank;
@@ -628,6 +633,54 @@ export class Sim {
       for (const e of this.enemies) e.hp = 0;                         // 잔여 적기 정리
       for (const ms of this.missiles) this.boom(ms.x, ms.y, '#ec4899', 6);
       this.missiles.length = 0;
+    }
+  }
+
+  /** 특수 공격 간격이 끝나면 시작한다 (레이저는 플레이어 x로 미끄러지며 예고, 돌진은 그 x의 레인을 예고) */
+  private startBossSpecialIfReady(b: Boss): boolean {
+    const list = BOSS_SPECIALS[b.tier];
+    if (!list) return false;
+    if ((b.spCd = (b.spCd ?? 0) - 1) > 0) return false;
+    const idx = b.spIdx ?? 0; b.spIdx = idx + 1;
+    const kind = list[idx % list.length];
+    const half = b.width / 2 + 10;
+    b.sp = { kind, state: 'WARN', t: 0, lockX: Math.max(half, Math.min(W - half, this.player.x)), beams: b.phase2 || b.phase3 ? [-BOSS_SP.tripleOff, 0, BOSS_SP.tripleOff] : [0] };
+    b.shootCooldown = 0;
+    this.emit({ t: 'sfx', name: 'laserCharge' });
+    return true;
+  }
+
+  private updateBossSpecial(b: Boss): void {
+    const sp = b.sp!, p = this.player;
+    const cdIdx = b.phase3 ? 2 : b.phase2 ? 1 : 0;
+    const finish = () => { b.sp = undefined; b.spCd = Math.round(BOSS_SP.cd[cdIdx] * (1 - 0.05 * this.loopCount)); b.shootCooldown = 0; };
+    sp.t++;
+    if (sp.kind === 'laser') {
+      if (sp.state === 'WARN') {
+        b.x += Math.max(-6, Math.min(6, (sp.lockX - b.x) * 0.07));   // 조준 위치로 미끄러지며 예고선이 보스 앞에서 곧게 내려온다
+        if (sp.t >= BOSS_SP.laserWarn) { sp.state = 'ACT'; sp.t = 0; this.emit({ t: 'sfx', name: 'laserBeam' }); this.emit({ t: 'shake', v: 9 }); }
+      } else {
+        if (sp.beams.some(o => Math.abs(p.x - (b.x + o)) < BOSS_SP.laserHalf + p.radius * 0.5) && p.y > b.y) this.applyDamage(BOSS_SP.laserDmg);
+        if (sp.t >= BOSS_SP.laserAct) finish();
+      }
+      return;
+    }
+    // 돌진
+    if (sp.state === 'WARN') {
+      b.x += Math.max(-7, Math.min(7, (sp.lockX - b.x) * 0.09));
+      if (sp.t >= BOSS_SP.chargeWarn) { sp.state = 'ACT'; sp.t = 0; this.emit({ t: 'sfx', name: 'laserBeam' }); }
+    } else if (sp.state === 'ACT') {
+      b.y += Math.min(BOSS_SP.dashMax, 4 + sp.t * 0.9);
+      if (b.y >= H - b.height * 0.35) {   // 바닥 충돌: 충격파 + 탄 고리
+        b.y = H - b.height * 0.35; sp.state = 'RET'; sp.t = 0;
+        this.emit({ t: 'shake', v: 16 }); this.emit({ t: 'hitstop', frames: 4 }); this.emit({ t: 'sfx', name: 'boom' });
+        this.emit({ t: 'ring', x: b.x, y: b.y, color: b.subColor, max: 160 }); this.boom(b.x, b.y + b.height * 0.3, '#f59e0b', 22);
+        const n = 14;
+        for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; this.enemyBullets.push({ x: b.x, y: b.y, vx: Math.sin(a) * 3.2, vy: Math.cos(a) * 3.2, color: b.subColor, r: 5 }); }
+      }
+    } else {
+      b.y -= BOSS_SP.retSpeed;
+      if (b.y <= b.targetY) { b.y = b.targetY; finish(); }
     }
   }
 

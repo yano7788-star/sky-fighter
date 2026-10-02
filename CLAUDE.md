@@ -54,3 +54,5 @@ docs/         DESIGN.md(게임 디자인·아이디어), ROADMAP.md(점검+로�
 - 키: 이동 방향키/WASD, 발사 Space, 폭탄 B/X/Shift, 필살기 R, 고양이 Q, 강아지 E, 카드 1·2·3, 일시정지 P/ESC, 음소거 M.
 - 적은 화면 안(y>=ON_SCREEN_Y)에 들어온 뒤에만 피격된다(화면 밖에서 죽던 문제). 중간보스 레이저는 보스 코에서 곧게 발사되며, CHARGE 동안 보스가 조준 위치(lockX)로 미끄러져 간다.
 - 스테이지 장애물(`HAZARDS`/`HAZARD` in data.ts, `Sim.updateHazards`): 2 바람(플레이어·적 탄을 밀음), 3 운석(예고 후 낙하), 4 용암 기둥(예고 후 분출), 5 전부. 일반 전투 구간에서만 나오고 중간보스·보스·시간 정지 중에는 멈추거나 사라진다. 렌더는 `GameScene.renderHazards`. 약한 봇 클리어율 약 12%.
+- 보스 특수 공격(`BOSS_SPECIALS`/`BOSS_SP`, `Sim.updateBossSpecial`): 2 레이저, 3 돌진(바닥 충격파 탄 고리), 4·5 번갈아. 2페이즈부터 레이저 3줄기(틈으로 피함). 진행 중엔 보스 이동·탄막 정지. 일반 탄막 직전에는 수축 링 예고. 렌더 `GameScene.renderBossSpecial`.
+- 게임 중 일시정지 메뉴: 계속하기 / 메인 화면으로(두 번 눌러 확인, 키 Q·T, 패드 B). 나갈 때 점수·크레딧·업적은 정산 저장.

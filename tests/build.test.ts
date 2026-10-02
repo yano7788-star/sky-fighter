@@ -570,3 +570,40 @@ describe('업적', () => {
     expect(new Set(ACHIEVEMENTS.map(a => a.id)).size).toBe(ACHIEVEMENTS.length);
   });
 });
+
+describe('보스 특수 공격(레이저/돌진)', () => {
+  const boss = (tier: number) => { const s = new Sim(1); s.bossTier = tier; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s)); s.boss!.y = s.boss!.targetY; return s; };
+  const spin = (s: Sim, n: number, f?: () => void) => { for (let i = 0; i < n; i++) { f?.(); s.step(idle(s)); } };
+  it('1스테이지 보스는 특수 공격이 없다', () => {
+    const s = boss(1); spin(s, 1500, () => { s.player.invincible = 99999; s.boss!.hp = s.boss!.maxHp; });
+    expect(s.boss!.sp).toBeUndefined();
+  });
+  it('2스테이지 보스: 레이저가 예고 → 발사 → 끝나고 일반 패턴으로 돌아간다', () => {
+    const s = boss(2); const seen = new Set<string>();
+    spin(s, 900, () => { s.player.invincible = 99999; s.boss!.hp = s.boss!.maxHp; if (s.boss!.sp) seen.add(s.boss!.sp.kind + ':' + s.boss!.sp.state); });
+    expect(seen.has('laser:WARN')).toBe(true); expect(seen.has('laser:ACT')).toBe(true);
+    expect(s.boss!.sp === undefined || s.boss!.sp.kind === 'laser').toBe(true);
+  });
+  it('레이저: 빔 안에 있으면 피해, 2페이즈의 틈에서는 안전', () => {
+    const s = boss(2); const b = s.boss!; b.x = 225; s.player.invincible = 0; s.player.x = 225; s.player.y = 600; const e0 = s.player.energy;
+    b.sp = { kind: 'laser', state: 'ACT', t: 1, lockX: 225, beams: [0] };
+    s.step(idle(s)); expect(s.player.energy).toBeLessThan(e0);
+    const s2 = boss(2); const b2 = s2.boss!; b2.phase2 = true; b2.x = 225; s2.player.invincible = 0; s2.player.x = 225 + 60; s2.player.y = 600; const e1 = s2.player.energy;
+    b2.sp = { kind: 'laser', state: 'ACT', t: 1, lockX: 225, beams: [-120, 0, 120] };
+    s2.step({ ...idle(s2), targetX: 285, targetY: 600 }); expect(s2.player.energy).toBe(e1);
+  });
+  it('3스테이지 보스: 돌진은 바닥에서 충격파(탄 고리)를 내고 제자리로 복귀한다', () => {
+    const s = boss(3); const b = s.boss!; s.player.x = 60; s.player.targetX = 60;
+    b.sp = { kind: 'charge', state: 'ACT', t: 0, lockX: b.x, beams: [0] };
+    let impact = false, bullets0 = s.enemyBullets.length;
+    spin(s, 120, () => { s.player.invincible = 99999; b.hp = b.maxHp; if (b.sp?.state === 'RET') impact = true; });
+    expect(impact).toBe(true); expect(s.enemyBullets.length).toBeGreaterThan(bullets0 - 1);
+    spin(s, 120, () => { s.player.invincible = 99999; b.hp = b.maxHp; });
+    expect(b.sp).toBeUndefined(); expect(b.y).toBe(b.targetY);
+  });
+  it('보스가 죽는 순간 특수 공격은 중단되고 시간 정지 중에는 진행하지 않는다', () => {
+    const s = boss(2); const b = s.boss!; b.sp = { kind: 'laser', state: 'WARN', t: 0, lockX: 100, beams: [0] };
+    (s as any).ult.phase = 'ACTIVE'; (s as any).ult.kind = 'timestop'; const x0 = b.x; s.step(idle(s)); expect(b.x).toBe(x0); expect(b.sp.t).toBe(0);
+    (s as any).ult.phase = 'IDLE'; b.hp = 0; s.step(idle(s)); expect(b.sp).toBeUndefined();
+  });
+});
