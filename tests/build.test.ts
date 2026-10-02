@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BOMB, BOSS_PATTERNS, ULT } from '../src/core/data';
-import { CARDS, fusionAvailable, newBuild, offerCards, statsOf, xpNeeded } from '../src/core/build';
+import { BOMB, BOSS_HP_MULT, BOSS_PATTERNS, ULT } from '../src/core/data';
+import { CARDS, fusionAvailable, newBuild, offerCards, offerRelics, statsOf, xpNeeded } from '../src/core/build';
 import { createRng } from '../src/core/rng';
 import { creditsFor, metaParams } from '../src/core/meta';
 import { dailyMutator, dailySeed, dayKey, offerMutators } from '../src/core/mutators';
@@ -387,7 +387,7 @@ describe('무한 모드', () => {
   it('루프 1의 보스는 체력 +50%, 이름은 STAGE 6로 표시, 적 탄은 더 빠르다', () => {
     const s = new Sim(1); s.bossTier = 6; s.endless = true;
     s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
-    expect(s.boss!.name).toContain('STAGE 6'); expect(s.boss!.maxHp).toBe(Math.round(700 * 1.5)); expect(s.boss!.tier).toBe(1);
+    expect(s.boss!.name).toContain('STAGE 6'); expect(s.boss!.maxHp).toBe(Math.round(700 * BOSS_HP_MULT * 1.5)); expect(s.boss!.tier).toBe(1);
     expect(s.enemyBulletSpeed).toBeCloseTo(1.06);
   });
   it('무한 모드에서는 5스테이지를 넘겨도 GAMECLEAR 되지 않고 계속 진행한다', () => {
@@ -625,5 +625,48 @@ describe('보스 약점 노출(그로기)', () => {
     for (let i = 0; i < 6; i++) { s.player.invincible = 99999; s.step(idle(s)); }
     expect(b.stun).toBe(0);
     b.stun = 50; b.hp = 0; s.step(idle(s)); expect(b.stun).toBe(0);
+  });
+});
+
+describe('유물(렐릭)', () => {
+  const clearBoss = (s: Sim) => { s.bossTier = 1; s.stagePhase = 'BOSS_DYING'; s.phaseTimer = 1; s.boss = null; s.step(idle(s)); };
+  it('보스 격파 후 유물 3택1이 나오고, 고른 유물은 다시 나오지 않는다', () => {
+    const s = new Sim(5); s.player.invincible = 99999; clearBoss(s);
+    expect(s.pending).not.toBeNull(); expect(s.pending!.length).toBe(3);
+    expect(s.pending!.every(id => CARDS[id].kind === 'relic')).toBe(true);
+    const pick = s.pending![0]; s.chooseCard(0);
+    expect(s.hasRelic(pick as any)).toBe(true);
+    expect(offerRelics(s.build, () => 0.5).includes(pick as any)).toBe(false);
+  });
+  it('최종 보스(비무한) 격파에서는 유물이 나오지 않고, 레벨업 카드에도 유물이 섞이지 않는다', () => {
+    const s = new Sim(5); s.bossTier = 5; s.stagePhase = 'BOSS_DYING'; s.phaseTimer = 1; s.boss = null; s.step(idle(s));
+    expect(s.pending).toBeNull();
+    for (let i = 0; i < 50; i++) expect(offerCards(newBuild(), createRng(i)).some(id => CARDS[id].kind === 'relic')).toBe(false);
+  });
+  it('스탯 유물: 오버클럭/전술 교본/자기 폭풍', () => {
+    const b = newBuild(); b.levels.r_overclock = 1; b.levels.r_knowledge = 1; b.levels.r_magnet = 1;
+    const st = statsOf(b); expect(st.rateMult).toBeCloseTo(1.15); expect(st.xpMult).toBeCloseTo(1.3); expect(st.magnetMult).toBeCloseTo(2);
+  });
+  it('배수의 진: 에너지 50% 이하에서만 피해 +40%', () => {
+    const s = new Sim(1); s.build.levels.r_laststand = 1; s.player.invincible = 0;
+    s.step(idle(s)); const base = s.stats.dmgMult;
+    s.player.energy = 40; s.step(idle(s)); expect(s.stats.dmgMult).toBeCloseTo(base * 1.4);
+    s.player.energy = 100; s.step(idle(s)); expect(s.stats.dmgMult).toBeCloseTo(base);
+  });
+  it('불사조: 마지막 목숨을 잃어도 한 번만 부활한다', () => {
+    const s = new Sim(1); s.build.levels.r_phoenix = 1; s.lives = 0; s.player.invincible = 0; s.player.energy = 10;
+    s.applyDamage(50); expect(s.state).toBe('PLAYING'); expect(s.player.energy).toBe(50);
+    s.player.invincible = 0; s.player.energy = 10; s.applyDamage(50); expect(s.state).toBe('GAMEOVER');
+  });
+  it('폭탄 상자: 최대 폭탄 +2·즉시 2개 / 응급 키트: 보스 격파 시 에너지 회복', () => {
+    const s = new Sim(1); const m0 = s.maxBombs, b0 = s.bombs;
+    s.pending = ['r_bombpack']; s.chooseCard(0); expect(s.maxBombs).toBe(m0 + 2); expect(s.bombs).toBe(Math.min(m0 + 2, b0 + 2));
+    const t = new Sim(1); t.build.levels.r_medic = 1; t.player.energy = 40; t.player.invincible = 99999;
+    t.bossTier = 1; t.stagePhase = 'BOSS_DYING'; t.phaseTimer = 1; t.boss = null; t.step(idle(t)); expect(t.player.energy).toBe(70);
+  });
+  it('스침의 미학: 20번 스치면 폭탄 +1 / 연쇄 폭발: 주변 적 피해', () => {
+    const s = new Sim(1); s.build.levels.r_grazebomb = 1; s.bombs = 0;
+    for (let i = 0; i < 20; i++) { s.enemyBullets.push({ x: s.player.x + s.player.radius + 8, y: s.player.y, vx: 0, vy: 0, color: '#fff', r: 3 }); s.player.invincible = 0; s.step(idle(s)); }
+    expect(s.bombs).toBe(1);
   });
 });

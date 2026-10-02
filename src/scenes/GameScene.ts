@@ -240,7 +240,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildSummary(): string {
     const b = this.sim.build, ids = (Object.keys(CARDS) as CardId[]).filter(id => lv(b, id) > 0);
-    const body = ids.length ? ids.map(id => `${CARDS[id].name} ${CARDS[id].kind === 'fusion' ? '★' : 'Lv' + lv(b, id)}`).join('  ·  ') : '아직 획득한 카드가 없습니다';
+    const body = ids.length ? ids.map(id => `${CARDS[id].name} ${CARDS[id].kind === 'fusion' || CARDS[id].kind === 'relic' ? '★' : 'Lv' + lv(b, id)}`).join('  ·  ') : '아직 획득한 카드가 없습니다';
     return `LV ${this.sim.level}  ·  기본 대포 Lv${this.sim.weaponLevel}\n${body}`;
   }
 

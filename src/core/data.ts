@@ -117,6 +117,8 @@ export const SPAWN_INTERVAL: Record<number, number> = { 1: 30, 2: 26, 3: 23, 4: 
 export const enemyHpScale = (tier: number) => 1 + 0.14 * (tier - 1);
 /** 적이 이 높이(y) 아래로 내려와 '화면 안'에 들어오기 전에는 맞지 않는다 (화면 밖에서 죽는 문제 방지) */
 export const ON_SCREEN_Y = 14;
+/** 유물·약점 노출 도입 후의 보스 체력 보정 */
+export const BOSS_HP_MULT = 1.5;
 
 /** 보스 특수 공격: 스테이지별 종류(순서대로 번갈아) — 1스테이지는 기본기만 */
 export const BOSS_SPECIALS: Record<number, ('laser' | 'charge')[]> = { 2: ['laser'], 3: ['charge'], 4: ['laser', 'charge'], 5: ['laser', 'charge'] };
