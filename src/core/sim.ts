@@ -1,10 +1,10 @@
 import { FUSION_IDS, type RunStats } from './achievements';
-import { CARDS, hasFusion, type FusionId, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
+import { CARDS, hasFusion, hasRelic, offerRelics, type FusionId, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config';
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
   FIGHT_FRAMES, HAZARD, HAZARDS, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
-  fireBossPattern, rankFor,
+  fireBossPattern, rankFor, BOSS_HP_MULT, BOSS_SP, HYPER, BOSS_SPECIALS,
 } from './data';
 import { NO_META, pilotOf, type MetaParams } from './meta';
 import { createRng, type Rng } from './rng';
@@ -79,7 +79,8 @@ export class Sim {
   enemies: Enemy[] = [];
   items: Item[] = [];
   hazards: Hazard[] = [];
-  run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0 };   // 업적용 한 판 통계
+  run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0, hypers: 0 };
+  hyper = { gauge: 0, t: 0 };     // 하이퍼 모드: gauge 0~100 충전, t>0이면 발동 중(남은 프레임)   // 업적용 한 판 통계
   windDir = 0; windWarn = 0; windT = 0;     // 바람: 예고(windWarn) 후 windT 동안 windDir 방향으로 분다
   private hazCd: Record<string, number> = {};
   events: SimEvent[] = [];
@@ -93,7 +94,7 @@ export class Sim {
   constructor(seed = 1, meta: MetaParams = NO_META) {
     this.rng = createRng(seed);
     this.meta = meta;
-    this.stats = statsOf(this.build, meta);
+    this.stats = this.refreshStats();
     this.player = this.newPlayer();
     this.player.maxEnergy = Math.round((this.player.maxEnergy + meta.energyBonus) * meta.mut.playerHp); this.player.energy = this.player.maxEnergy;
     this.bombs += meta.startBombs;
@@ -101,8 +102,14 @@ export class Sim {
     this.ult.kind = pilotOf(meta.pilot).ult;
   }
 
+  private lowHp = false;
+  private relicGraze = 0;
+  private phoenixUsed = false;
+  private refreshStats(): BuildStats { return (this.stats = statsOf(this.build, { ...this.meta, lowHp: this.lowHp, rateBoost: this.hyper.t > 0 ? HYPER.rate : 1 })); }
+  hasRelic(id: Parameters<typeof hasRelic>[1]): boolean { return hasRelic(this.build, id); }
+
   get multiplier(): number { return comboMultiplier(this.combo); }
-  get maxBombs(): number { return PLAYER.maxBombs + this.stats.bombCapBonus + this.meta.startBombs; }
+  get maxBombs(): number { return PLAYER.maxBombs + this.stats.bombCapBonus + this.meta.startBombs + (this.hasRelic('r_bombpack') ? 2 : 0); }
   /** 동생의 궁극기(시간 정지) 진행 중: 적·적 탄·보스는 움직이지 않는다 (피격은 계속 받음) */
   get timeStopped(): boolean { return this.ult.phase === 'ACTIVE' && this.ult.kind === 'timestop'; }
   get ultReady(): boolean { return this.ult.gauge >= 100 && this.ult.phase === 'IDLE'; }
@@ -175,7 +182,9 @@ export class Sim {
     const id = this.pending[index];
     if (!id) return;
     this.build.levels[id] = (this.build.levels[id] ?? 0) + 1;
-    this.stats = statsOf(this.build, this.meta);
+    this.refreshStats();
+    if (id === 'r_bombpack') this.bombs = Math.min(this.maxBombs, this.bombs + 2);
+    if (id === 'r_shield') this.player.shield = 1;
     const p = this.player;
     if (id === 'vitality') { p.maxEnergy += 25; p.energy = Math.min(p.maxEnergy, p.energy + 25); this.emit({ t: 'heal', x: p.x, y: p.y }); }
     if (id === 'bombcap') this.bombs = Math.min(this.maxBombs, this.bombs + 1);
@@ -196,6 +205,9 @@ export class Sim {
 
     this.frame++;
     const p = this.player;
+    const gauge0 = this.ult.gauge;
+    if (this.hyper.t > 0) { if (--this.hyper.t === 0) { this.hyper.gauge = 0; this.refreshStats(); } else this.hyper.gauge = (100 * this.hyper.t) / HYPER.frames; }
+    if (this.hasRelic('r_laststand')) { const low = p.energy <= p.maxEnergy * 0.5; if (low !== this.lowHp) { this.lowHp = low; this.refreshStats(); } }
     p.targetX = inp.targetX; p.targetY = inp.targetY;
     const ultPhase0 = this.ult.phase, bombs0 = this.bombs;
     if (inp.skill) this.activateSkill(inp.skill);
@@ -227,6 +239,7 @@ export class Sim {
     this.updateEnemies();
     this.updateItems();
     this.updateGems();
+    if (this.ult.gauge > gauge0 && this.ult.gauge < 100 && this.hasRelic('r_battery')) this.ult.gauge = Math.min(100, gauge0 + (this.ult.gauge - gauge0) * 1.5);   // 궁극기 배터리
     this.checkLevelUp();
   }
 
@@ -412,7 +425,7 @@ export class Sim {
     p.energy = Math.min(cap, p.energy + dmg * LIFESTEAL_RATE);
   }
   private damageEnemy(e: Enemy, dmg: number): void { e.hp -= dmg; this.lifesteal(dmg); }
-  private damageBoss(dmg: number): void { this.boss!.hp -= dmg; this.lifesteal(dmg); }
+  private damageBoss(dmg: number): void { const b = this.boss!; if ((b.stun ?? 0) > 0) dmg *= BOSS_SP.stunDmg; b.hp -= dmg; this.lifesteal(dmg); }
   private damageMid(dmg: number): void { this.midBoss!.hp -= dmg; this.lifesteal(dmg); }
 
   private steer(b: Bullet, turnMax: number): void {
@@ -496,6 +509,11 @@ export class Sim {
           this.vacuum = 150;
           this.emit({ t: 'sfx', name: 'boom' }); this.emit({ t: 'flash', kind: 'bossDeath', v: 0.9 });
           this.boss = null; this.stagePhase = 'CLEAR'; this.phaseTimer = PHASE_FRAMES.CLEAR;
+          if (this.hasRelic('r_medic')) { this.player.energy = Math.min(this.player.maxEnergy, this.player.energy + this.player.maxEnergy * 0.3); this.emit({ t: 'heal', x: this.player.x, y: this.player.y }); }
+          if (this.bossTier < MAX_TIER || this.endless) {   // 보스 격파 보상: 유물 3택1 (레벨업과 같은 카드 선택 화면)
+            const offer = offerRelics(this.build, this.rng);
+            if (offer.length) { this.pending = offer; this.emit({ t: 'sfx', name: 'item' }); }
+          }
         }
         break;
       case 'CLEAR':
@@ -505,7 +523,7 @@ export class Sim {
         }
         break;
       case 'INTRO':
-        if (--this.phaseTimer <= 0) this.stagePhase = 'FIGHT';
+        if (--this.phaseTimer <= 0) { this.stagePhase = 'FIGHT'; if (this.hasRelic('r_shield')) { this.player.shield = 1; this.emit({ t: 'ring', x: this.player.x, y: this.player.y, color: '#22d3ee', max: 70 }); } }
         break;
       default: break;
     }
@@ -530,12 +548,13 @@ export class Sim {
 
   private spawnBoss(tier: number): void {
     const c = BOSS_CONFIGS[tier], loop = this.loopCount;
-    const hp = Math.round(c.hp * (1 + 0.5 * loop));   // 무한 모드 루프마다 +50%
+    const hp = Math.round(c.hp * BOSS_HP_MULT * (1 + 0.5 * loop));   // 무한 모드 루프마다 +50%
     this.boss = {
       tier, name: c.name.replace(/STAGE \d+/, 'STAGE ' + this.bossTier), x: W / 2, y: -120, targetY: 135, width: c.w, height: c.h,
       vx: 2.3 + tier * 0.25, hp, maxHp: hp, shootCooldown: 0, attackMode: 1,
       color: c.color, subColor: c.subColor, shotCdMax: Math.max(12, Math.round(c.shotCd * (1 - 0.04 * loop) * this.meta.mut.bossShot)),
       phase2: false, phase2Alert: 0, dying: false, deathTimer: 0,
+      spCd: Math.round(BOSS_SP.cd[0] * 0.6), spIdx: 0,
     };
   }
 
@@ -576,9 +595,14 @@ export class Sim {
       if (b.deathTimer % 16 === 1) this.emit({ t: 'sfx', name: 'boom' });
     } else if (this.timeStopped) {
       // 시간 정지 중: 이동·공격 정지
+    } else if (b.sp) {
+      this.updateBossSpecial(b);
+    } else if ((b.stun ?? 0) > 0) {
+      b.stun!--;                                   // 그로기: 제자리에서 멈춘다
     } else if (b.y < b.targetY) {
       b.y += 1.5;
     } else {
+      if (this.startBossSpecialIfReady(b)) { /* 이번 틱은 특수 공격 시작 */ } else {
       b.x += b.vx;
       if (b.x < b.width / 2 + 10 || b.x > W - b.width / 2 - 10) b.vx *= -1;
       b.shootCooldown++;
@@ -586,6 +610,7 @@ export class Sim {
         b.shootCooldown = 0;
         b.attackMode = b.attackMode === 1 ? 2 : 1;
         fireBossPattern(b, { player: p, frame: this.frame, emit: eb => this.enemyBullets.push(eb) });
+      }
       }
     }
 
@@ -612,7 +637,7 @@ export class Sim {
 
     // 체력이 0이 되어도 바로 사라지지 않고 '폭발 연출 → 클리어 → 다음 스테이지' 순서로 이어짐
     if (!b.dying && b.hp <= 0) {
-      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0;
+      b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0; b.sp = undefined; b.stun = 0;
       this.stagePhase = 'BOSS_DYING'; this.phaseTimer = PHASE_FRAMES.BOSS_DYING;
       const { rank, bonus } = rankFor(this.stageHits);
       this.stageRank = rank;
@@ -628,6 +653,59 @@ export class Sim {
       for (const e of this.enemies) e.hp = 0;                         // 잔여 적기 정리
       for (const ms of this.missiles) this.boom(ms.x, ms.y, '#ec4899', 6);
       this.missiles.length = 0;
+    }
+  }
+
+  /** 특수 공격 간격이 끝나면 시작한다 (레이저는 플레이어 x로 미끄러지며 예고, 돌진은 그 x의 레인을 예고) */
+  private startBossSpecialIfReady(b: Boss): boolean {
+    const list = BOSS_SPECIALS[b.tier];
+    if (!list) return false;
+    if ((b.spCd = (b.spCd ?? 0) - 1) > 0) return false;
+    const idx = b.spIdx ?? 0; b.spIdx = idx + 1;
+    const kind = list[idx % list.length];
+    const half = b.width / 2 + 10;
+    b.sp = { kind, state: 'WARN', t: 0, lockX: Math.max(half, Math.min(W - half, this.player.x)), beams: b.phase2 || b.phase3 ? [-BOSS_SP.tripleOff, 0, BOSS_SP.tripleOff] : [0] };
+    b.shootCooldown = 0;
+    this.emit({ t: 'sfx', name: 'laserCharge' });
+    return true;
+  }
+
+  private updateBossSpecial(b: Boss): void {
+    const sp = b.sp!, p = this.player;
+    const cdIdx = b.phase3 ? 2 : b.phase2 ? 1 : 0;
+    const finish = () => {
+      b.sp = undefined; b.spCd = Math.round(BOSS_SP.cd[cdIdx] * (1 - 0.05 * this.loopCount)); b.shootCooldown = 0;
+      b.stun = Math.round(BOSS_SP.stun * (b.phase3 ? 0.8 : 1));   // 약점 노출
+      this.enemyBullets.length = 0;
+      this.emit({ t: 'ring', x: b.x, y: b.y, color: '#fde047', max: 130 }); this.emit({ t: 'sfx', name: 'item' });
+    };
+    sp.t++;
+    if (sp.kind === 'laser') {
+      if (sp.state === 'WARN') {
+        b.x += Math.max(-6, Math.min(6, (sp.lockX - b.x) * 0.07));   // 조준 위치로 미끄러지며 예고선이 보스 앞에서 곧게 내려온다
+        if (sp.t >= BOSS_SP.laserWarn) { sp.state = 'ACT'; sp.t = 0; this.emit({ t: 'sfx', name: 'laserBeam' }); this.emit({ t: 'shake', v: 9 }); }
+      } else {
+        if (sp.beams.some(o => Math.abs(p.x - (b.x + o)) < BOSS_SP.laserHalf + p.radius * 0.5) && p.y > b.y) this.applyDamage(BOSS_SP.laserDmg);
+        if (sp.t >= BOSS_SP.laserAct) finish();
+      }
+      return;
+    }
+    // 돌진
+    if (sp.state === 'WARN') {
+      b.x += Math.max(-7, Math.min(7, (sp.lockX - b.x) * 0.09));
+      if (sp.t >= BOSS_SP.chargeWarn) { sp.state = 'ACT'; sp.t = 0; this.emit({ t: 'sfx', name: 'laserBeam' }); }
+    } else if (sp.state === 'ACT') {
+      b.y += Math.min(BOSS_SP.dashMax, 4 + sp.t * 0.9);
+      if (b.y >= H - b.height * 0.35) {   // 바닥 충돌: 충격파 + 탄 고리
+        b.y = H - b.height * 0.35; sp.state = 'RET'; sp.t = 0;
+        this.emit({ t: 'shake', v: 16 }); this.emit({ t: 'hitstop', frames: 4 }); this.emit({ t: 'sfx', name: 'boom' });
+        this.emit({ t: 'ring', x: b.x, y: b.y, color: b.subColor, max: 160 }); this.boom(b.x, b.y + b.height * 0.3, '#f59e0b', 22);
+        const n = 14;
+        for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; this.enemyBullets.push({ x: b.x, y: b.y, vx: Math.sin(a) * 3.2, vy: Math.cos(a) * 3.2, color: b.subColor, r: 5 }); }
+      }
+    } else {
+      b.y -= BOSS_SP.retSpeed;
+      if (b.y <= b.targetY) { b.y = b.targetY; finish(); }
     }
   }
 
@@ -769,6 +847,18 @@ export class Sim {
     }
   }
 
+  /** 하이퍼 발동: 화면의 적 탄을 모두 점수로 바꾸고, 일정 시간 점수 ×2·연사 +20% */
+  private activateHyper(): void {
+    const p = this.player;
+    this.hyper.gauge = 100; this.hyper.t = HYPER.frames; this.run.hypers++;
+    this.score += this.enemyBullets.length * HYPER.bulletScore;
+    for (const b of this.enemyBullets) if (this.frame % 2 === 0) this.emit({ t: 'explosion', x: b.x, y: b.y, color: '#f0abfc', count: 1 });
+    this.enemyBullets.length = 0;
+    this.refreshStats();
+    this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'flash', kind: 'bomb', v: 0.35 }); this.emit({ t: 'shake', v: 6 });
+    this.emit({ t: 'ring', x: p.x, y: p.y, color: '#f0abfc', max: 240 }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#ffffff', max: 150 });
+  }
+
   private updateEnemyBullets(): void {
     if (this.timeStopped) return;   // 시간 정지: 적 탄은 허공에 멈춰 있다
     const p = this.player, dogOn = this.comp.dog.active;
@@ -797,7 +887,9 @@ export class Sim {
       }
       // 그레이즈: 판정 바로 바깥을 스치면 보너스 (피격 직후 무적 중에는 제외)
       if (!eb.grazed && p.invincible === 0 && d < p.radius + eb.r + GRAZE_MARGIN) {
-        eb.grazed = true; this.grazeCount++; this.score += GRAZE_SCORE;
+        eb.grazed = true; this.grazeCount++; this.score += GRAZE_SCORE * (this.hyper.t > 0 ? HYPER.scoreMult : 1);
+        if (this.hyper.t <= 0 && (this.hyper.gauge += HYPER.perGraze) >= 100) this.activateHyper();
+        if (this.hasRelic('r_grazebomb') && ++this.relicGraze % 20 === 0 && this.bombs < this.maxBombs) { this.bombs++; this.emit({ t: 'sfx', name: 'item' }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#f9a8d4', max: 70 }); }
         this.ult.gauge = Math.min(100, this.ult.gauge + ULT.gaugePerGraze);
         this.emit({ t: 'graze', x: eb.x, y: eb.y });
       }
@@ -900,6 +992,10 @@ export class Sim {
         this.emit({ t: 'sfx', name: 'boom' }); this.boom(e.x, e.y, '#ef4444', 12);
         const pts = this.killScore(def.score);
         this.emit({ t: 'kill', x: e.x, y: e.y, pts, missile: e.lastHit === 'missile' });
+        if (this.hasRelic('r_chain')) {   // 연쇄 폭발: 주변 적에게 폭발 피해
+          this.emit({ t: 'ring', x: e.x, y: e.y, color: '#fb923c', max: 70 });
+          for (const o of this.enemies) if (o !== e && o.hp > 0 && Math.hypot(o.x - e.x, o.y - e.y) < 70) { o.hp -= 6; o.flash = 6; }
+        }
         this.lifesteal(MOB_HIT_VALUE);
         this.ult.gauge = Math.min(100, this.ult.gauge + def.xp * ULT.gaugePerXp);
         this.spawnGems(e.x, e.y, def.xp, Math.max(1, Math.round(def.xp / 4)));
@@ -920,7 +1016,7 @@ export class Sim {
   private killScore(base: number): number {
     this.combo++; this.comboTimer = COMBO_WINDOW;
     this.run.kills++; this.run.maxCombo = Math.max(this.run.maxCombo, this.combo);
-    const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score);
+    const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score * (this.hasRelic('r_bounty') ? 1.2 : 1) * (this.hyper.t > 0 ? HYPER.scoreMult : 1));
     this.score += pts;
     this.emit({ t: 'combo', combo: this.combo, mult: comboMultiplier(this.combo) });
     return pts;
@@ -1107,6 +1203,10 @@ export class Sim {
         this.enemyBullets.length = 0;
         this.emit({ t: 'flash', kind: 'respawn', v: 0.6 });
         this.emit({ t: 'sfx', name: 'heal' });
+      } else if (this.hasRelic('r_phoenix') && !this.phoenixUsed) {   // 불사조의 깃털: 한 번 부활
+        this.phoenixUsed = true; p.energy = Math.ceil(p.maxEnergy * 0.5); p.invincible = 180;
+        this.enemyBullets.length = 0;
+        this.emit({ t: 'flash', kind: 'respawn', v: 0.8 }); this.emit({ t: 'sfx', name: 'heal' }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#f59e0b', max: 160 });
       } else {
         this.state = 'GAMEOVER';
         this.emit({ t: 'gameover' }); this.emit({ t: 'vibrate', pattern: [120, 60, 220] });
@@ -1118,7 +1218,7 @@ export class Sim {
   runStats(daily = false): RunStats {
     const fusions = FUSION_IDS.filter(id => hasFusion(this.build, id)).length;
     return { score: this.score, bossTier: this.bossTier, cleared: this.state === 'GAMECLEAR' || this.endless, endless: this.endless,
-      kills: this.run.kills, maxCombo: this.run.maxCombo, graze: this.grazeCount, hits: this.run.hits, bombs: this.run.bombs, ults: this.run.ults,
+      hypers: this.run.hypers, kills: this.run.kills, maxCombo: this.run.maxCombo, graze: this.grazeCount, hits: this.run.hits, bombs: this.run.bombs, ults: this.run.ults,
       fusions, mutator: this.meta.mutator ?? null, daily };
   }
 

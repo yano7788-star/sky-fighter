@@ -7,8 +7,9 @@ import type { Rng } from './rng';
 export type ModuleId = 'spread' | 'pierce' | 'homing' | 'drone' | 'laser';
 export type PassiveId = 'rate' | 'power' | 'magnet' | 'vitality' | 'scholar' | 'bombcap' | 'luck' | 'aegis';
 export type FusionId = 'swarm' | 'railgun' | 'hunter' | 'aegisorbit' | 'prism' | 'overdrive';
-export type CardId = ModuleId | PassiveId | FusionId;
-export type CardKind = 'module' | 'passive' | 'fusion';
+export type RelicId = 'r_overclock' | 'r_knowledge' | 'r_magnet' | 'r_laststand' | 'r_grazebomb' | 'r_chain' | 'r_battery' | 'r_phoenix' | 'r_bounty' | 'r_shield' | 'r_bombpack' | 'r_medic';
+export type CardId = ModuleId | PassiveId | FusionId | RelicId;
+export type CardKind = 'module' | 'passive' | 'fusion' | 'relic';
 
 export interface CardDef {
   id: CardId;
@@ -22,7 +23,25 @@ export interface CardDef {
   icon: string;
 }
 
+// ---- 유물: 보스 격파 후 3택1, 런 내내 규칙을 바꾼다 (1회 획득, 레벨 없음) ----
+const relic = (id: RelicId, icon: string, name: string, desc: string, color: string): CardDef => ({ id, kind: 'relic', name, desc: () => desc, max: 1, weight: 0, color, icon });
+const RELIC_DEFS: Record<RelicId, CardDef> = {
+  r_overclock:  relic('r_overclock', '⚙', '오버클럭 코어', '연사 속도 +15%', '#fde047'),
+  r_knowledge:  relic('r_knowledge', '📘', '전술 교본', '경험치 획득 +30%', '#38bdf8'),
+  r_magnet:     relic('r_magnet', '🧲', '자기 폭풍', '경험치·아이템 흡수 범위 2배', '#c084fc'),
+  r_laststand:  relic('r_laststand', '🩸', '배수의 진', '에너지 50% 이하일 때 모든 피해 +40%', '#f87171'),
+  r_grazebomb:  relic('r_grazebomb', '✨', '스침의 미학', '탄을 20번 스칠 때마다 폭탄 +1', '#f9a8d4'),
+  r_chain:      relic('r_chain', '💥', '연쇄 폭발', '적 처치 시 주변 적에게 폭발 피해', '#fb923c'),
+  r_battery:    relic('r_battery', '🔋', '궁극기 배터리', '궁극기 게이지 충전량 +50%', '#67e8f9'),
+  r_phoenix:    relic('r_phoenix', '🔥', '불사조의 깃털', '마지막 목숨을 잃을 때 한 번 에너지 50%로 부활', '#f59e0b'),
+  r_bounty:     relic('r_bounty', '💰', '현상금', '처치 점수 +20%', '#facc15'),
+  r_shield:     relic('r_shield', '🛡', '개막 방벽', '스테이지가 시작될 때마다 방벽 1회', '#22d3ee'),
+  r_bombpack:   relic('r_bombpack', '🎒', '폭탄 보급 상자', '폭탄 최대 보유 +2, 폭탄 2개 지급', '#ef4444'),
+  r_medic:      relic('r_medic', '🩹', '응급 키트', '보스를 격파할 때마다 에너지 30% 회복', '#4ade80'),
+};
+
 export const CARDS: Record<CardId, CardDef> = {
+  ...RELIC_DEFS,
   // ---- 무기 모듈 (최대 4레벨) ----
   spread:  { id: 'spread',  kind: 'module', name: '산탄',      max: 4, weight: 10, color: '#fbbf24', icon: '⫷', desc: l => `옆으로 퍼지는 보조탄 +${l * 2}발` },
   pierce:  { id: 'pierce',  kind: 'module', name: '관통탄',    max: 4, weight: 10, color: '#f87171', icon: '➤', desc: l => `기본탄이 적 ${l}기 관통, 피해 +${l * 15}%` },
@@ -46,6 +65,15 @@ export const CARDS: Record<CardId, CardDef> = {
   prism:   { id: 'prism',   kind: 'fusion', name: '프리즘',       max: 1, weight: 0, color: '#e879f9', icon: '▥', desc: () => '레이저 + 산탄 융합: 레이저가 3줄기로 갈라짐' },
   overdrive: { id: 'overdrive', kind: 'fusion', name: '오버클럭',  max: 1, weight: 0, color: '#facc15', icon: '⚡', desc: () => '연사 + 화력 융합: 콤보 5 이상일 때 연사 +35%, 피해 +20%' },
 };
+
+export const RELIC_IDS: RelicId[] = ['r_overclock', 'r_knowledge', 'r_magnet', 'r_laststand', 'r_grazebomb', 'r_chain', 'r_battery', 'r_phoenix', 'r_bounty', 'r_shield', 'r_bombpack', 'r_medic'];
+export const hasRelic = (b: Build, id: RelicId): boolean => (b.levels[id] ?? 0) > 0;
+/** 보스 격파 보상: 아직 없는 유물 중 무작위 3개 */
+export function offerRelics(b: Build, rng: Rng, count = 3): RelicId[] {
+  const pool = RELIC_IDS.filter(id => !hasRelic(b, id)), out: RelicId[] = [];
+  while (out.length < count && pool.length) out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  return out;
+}
 
 /** 융합 조건: 두 모듈이 모두 이 레벨 이상 */
 export const FUSION_REQUIRE: Record<FusionId, { a: CardId; b: CardId; level: number }> = {
@@ -80,7 +108,7 @@ export function offerCards(b: Build, rng: Rng, count = 3): CardId[] {
   }
   const pool = (Object.keys(CARDS) as CardId[]).filter(id => {
     const c = CARDS[id];
-    return c.kind !== 'fusion' && lv(b, id) < c.max && !out.includes(id);
+    return c.kind !== 'fusion' && c.kind !== 'relic' && lv(b, id) < c.max && !out.includes(id);
   });
   while (out.length < count && pool.length) {
     // 이미 가진 모듈을 더 강화하도록 약간 가중(빌드가 한 방향으로 쌓이는 맛)
@@ -103,12 +131,13 @@ export interface BuildStats {
   swarm: boolean; railgun: boolean; hunter: boolean; aegisorbit: boolean; prism: boolean; overdrive: boolean;
   bombCapBonus: number; aegisSeconds: number; maxEnergyBonus: number;
 }
-export function statsOf(b: Build, meta: { xpMult?: number; rateMult?: number; dmgMult?: number; magnetMult?: number } = {}): BuildStats {
+export function statsOf(b: Build, meta: { xpMult?: number; rateMult?: number; dmgMult?: number; magnetMult?: number; lowHp?: boolean; rateBoost?: number } = {}): BuildStats {
+  const R = (id: RelicId, v: number) => (hasRelic(b, id) ? v : 1);
   return {
-    rateMult: (1 + 0.08 * lv(b, 'rate')) * (meta.rateMult ?? 1),
-    dmgMult: (1 + 0.12 * lv(b, 'power')) * (meta.dmgMult ?? 1),
-    magnetMult: (1 + 0.4 * lv(b, 'magnet')) * (meta.magnetMult ?? 1),
-    xpMult: (1 + 0.15 * lv(b, 'scholar')) * (meta.xpMult ?? 1),
+    rateMult: (1 + 0.08 * lv(b, 'rate')) * (meta.rateMult ?? 1) * R('r_overclock', 1.15) * (meta.rateBoost ?? 1),
+    dmgMult: (1 + 0.12 * lv(b, 'power')) * (meta.dmgMult ?? 1) * (meta.lowHp ? R('r_laststand', 1.4) : 1),
+    magnetMult: (1 + 0.4 * lv(b, 'magnet')) * (meta.magnetMult ?? 1) * R('r_magnet', 2),
+    xpMult: (1 + 0.15 * lv(b, 'scholar')) * (meta.xpMult ?? 1) * R('r_knowledge', 1.3),
     luckMult: 1 + 0.25 * lv(b, 'luck'),
     spread: lv(b, 'spread'), pierce: lv(b, 'pierce'), homing: lv(b, 'homing'), drones: lv(b, 'drone'), laser: lv(b, 'laser'),
     swarm: hasFusion(b, 'swarm'), railgun: hasFusion(b, 'railgun'), hunter: hasFusion(b, 'hunter'),

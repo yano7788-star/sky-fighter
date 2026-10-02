@@ -118,6 +118,20 @@ export const enemyHpScale = (tier: number) => 1 + 0.14 * (tier - 1);
 /** 적이 이 높이(y) 아래로 내려와 '화면 안'에 들어오기 전에는 맞지 않는다 (화면 밖에서 죽는 문제 방지) */
 export const ON_SCREEN_Y = 14;
 
+/** 하이퍼 모드: 탄을 스쳐 게이지를 채우면 자동 발동 — 탄 소거(+점수), 점수 ×2, 연사 +20% */
+export const HYPER = { perGraze: 4, frames: 360, scoreMult: 2, rate: 1.2, bulletScore: 10 };
+/** 유물·약점 노출 도입 후의 보스 체력 보정 */
+export const BOSS_HP_MULT = 1.5;
+
+/** 보스 특수 공격: 스테이지별 종류(순서대로 번갈아) — 1스테이지는 기본기만 */
+export const BOSS_SPECIALS: Record<number, ('laser' | 'charge')[]> = { 2: ['laser'], 3: ['charge'], 4: ['laser', 'charge'], 5: ['laser', 'charge'] };
+export const BOSS_SP = {
+  cd: [420, 330, 250],            // 1·2·3페이즈 특수 공격 간격(프레임)
+  laserWarn: 70, laserAct: 45, laserHalf: 34, laserDmg: 30, tripleOff: 120,   // 2페이즈부터 빔 3줄기(사이 틈으로 피한다)
+  stun: 80, stunDmg: 1.6,   // 특수 공격을 넘기면 보스가 잠깐 멈추고 피해 ×2 (피한 뒤 반격하는 리듬)
+  chargeWarn: 60, dashMax: 17, retSpeed: 6, chargeDmg: 40,
+};
+
 /** 스테이지 장애물 출현 간격(프레임). 2: 바람 / 3: 운석 / 4: 용암 기둥 / 5: 전부. 무한 모드 루프마다 12프레임씩 빨라진다 */
 export const HAZARDS: Record<number, { meteor?: number; lava?: number; wind?: number }> = {
   2: { wind: 780 },

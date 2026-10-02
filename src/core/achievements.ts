@@ -3,7 +3,7 @@ import type { FusionId } from './build';
 /** 한 판이 끝났을 때의 기록 (순수 데이터: 테스트·시뮬레이션에서도 만든다) */
 export interface RunStats {
   score: number; bossTier: number; cleared: boolean; endless: boolean;
-  kills: number; maxCombo: number; graze: number; hits: number; bombs: number; ults: number;
+  hypers: number; kills: number; maxCombo: number; graze: number; hits: number; bombs: number; ults: number;
   fusions: number; mutator: string | null; daily: boolean;
 }
 
@@ -21,6 +21,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'nobomb', icon: '💣', name: '폭탄은 사치', desc: '폭탄 없이 4스테이지에 도달', reward: 200, test: r => r.bombs === 0 && r.bossTier >= 4 },
   { id: 'fusion', icon: '⚗', name: '첫 융합', desc: '융합 카드를 획득', reward: 80, test: r => r.fusions >= 1 },
   { id: 'fusion2', icon: '⚛', name: '이중 융합', desc: '한 판에 융합 2종 보유', reward: 150, test: r => r.fusions >= 2 },
+  { id: 'hyper3', icon: '🌈', name: '하이퍼 러너', desc: '한 판에 하이퍼 모드 3번 발동', reward: 90, test: r => r.hypers >= 3 },
   { id: 'ult3', icon: '🌟', name: '필살기 연발', desc: '한 판에 궁극기 3번 사용', reward: 60, test: r => r.ults >= 3 },
   { id: 'score20k', icon: '💯', name: '2만 점', desc: '점수 20,000 달성', reward: 100, test: r => r.score >= 20000 },
   { id: 'score50k', icon: '👑', name: '5만 점', desc: '점수 50,000 달성', reward: 250, test: r => r.score >= 50000 },

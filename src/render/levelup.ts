@@ -46,19 +46,22 @@ export class LevelUpOverlay {
   private cardX(i: number): number { return (W - (CARD_W * 3 + GAP * 2)) / 2 + i * (CARD_W + GAP); }
 
   show(cards: CardId[], build: Build): void {
+    const relic = CARDS[cards[0]]?.kind === 'relic';
+    this.title.setText(relic ? 'RELIC GET!' : 'LEVEL UP!').setColor(relic ? '#f0abfc' : '#fde047');
+    this.hint.setText(relic ? '보스 격파 보상: 유물을 하나 고르세요 (이번 런 내내 적용)' : '강화할 카드를 선택하세요');
     this.cards = cards; this.visible = true; this.selected = Math.min(1, cards.length - 1);
     this.root.setVisible(true);
     cards.forEach((id, i) => {
       const c = CARDS[id], cur = lv(build, id), t = this.cardTexts[i];
-      const fusion = c.kind === 'fusion';
+      const fusion = c.kind === 'fusion' || c.kind === 'relic';
       t.icon.setText(c.icon).setColor(c.color).setVisible(true);
       t.name.setText(c.name).setVisible(true);
-      t.lvl.setText(fusion ? '진화' : cur === 0 ? 'NEW' : `Lv ${cur} → ${cur + 1}`).setColor(cur === 0 || fusion ? '#fde047' : '#94a3b8').setVisible(true);
+      t.lvl.setText(c.kind === 'relic' ? '유물' : fusion ? '진화' : cur === 0 ? 'NEW' : `Lv ${cur} → ${cur + 1}`).setColor(cur === 0 || fusion ? '#fde047' : '#94a3b8').setVisible(true);
       t.desc.setText(c.desc(cur + 1)).setVisible(true);
-      t.tag.setText(fusion ? '★ FUSION ★' : c.kind === 'module' ? '무기 모듈' : '패시브').setColor(fusion ? '#fde047' : '#64748b').setVisible(true);
+      t.tag.setText(c.kind === 'relic' ? '★ RELIC ★' : fusion ? '★ FUSION ★' : c.kind === 'module' ? '무기 모듈' : '패시브').setColor(fusion ? '#fde047' : '#64748b').setVisible(true);
     });
     for (let i = cards.length; i < 3; i++) Object.values(this.cardTexts[i]).forEach(o => o.setVisible(false));
-    const owned = (Object.keys(CARDS) as CardId[]).filter(id => lv(build, id) > 0).map(id => `${CARDS[id].name} ${CARDS[id].kind === 'fusion' ? '★' : `Lv${lv(build, id)}`}`);
+    const owned = (Object.keys(CARDS) as CardId[]).filter(id => lv(build, id) > 0).map(id => `${CARDS[id].name} ${CARDS[id].kind === 'fusion' || CARDS[id].kind === 'relic' ? '★' : `Lv${lv(build, id)}`}`);
     this.buildTxt.setText(owned.length ? `내 빌드: ${owned.join('  ·  ')}` : '');
   }
 
@@ -83,7 +86,7 @@ export class LevelUpOverlay {
     if (!this.visible) return;
     const g = this.g; g.clear();
     this.cards.forEach((id, i) => {
-      const c = CARDS[id], x = this.cardX(i), fusion = c.kind === 'fusion', sel = i === this.selected;
+      const c = CARDS[id], x = this.cardX(i), fusion = c.kind === 'fusion' || c.kind === 'relic', sel = i === this.selected;
       const col = hex(c.color), pulse = 0.5 + Math.sin(time * 0.008) * 0.5;
       g.fillStyle(0x0b1220, 0.96); g.fillRoundedRect(x, TOP, CARD_W, CARD_H, 12);
       g.fillStyle(col, 0.12); g.fillRoundedRect(x, TOP, CARD_W, 70, { tl: 12, tr: 12, bl: 0, br: 0 });

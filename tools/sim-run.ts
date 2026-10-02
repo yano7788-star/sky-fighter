@@ -49,6 +49,16 @@ function runOne(seed: number): RunResult {
       if (laserSide === 0) laserSide = Math.random() < 0.4 + SKILL * 0.6 ? (m.laserX < W / 2 ? 1 : -1) : 0.001;   // 낮은 실력: 못 보고 지나침
       if (laserSide !== 0.001) tx = Math.max(40, Math.min(W - 40, m.laserX + laserSide * 110));
     } else laserSide = 0;
+    // 보스 특수 공격: 레이저는 옆으로(3줄기면 틈으로), 돌진은 예고 레인 밖으로 비킨다
+    const sp = s.boss?.sp;
+    if (sp && s.boss) {
+      if (!seenHaz.has(sp)) seenHaz.set(sp, Math.random() < 0.4 + SKILL * 0.6);
+      if (seenHaz.get(sp) && distracted <= 0) {
+        const b = s.boss;
+        if (sp.kind === 'laser') tx = sp.beams.length > 1 ? b.x + (p.x < b.x ? -60 : 60) : b.x + (b.x < W / 2 ? 1 : -1) * 110;
+        else if (sp.state !== 'RET') tx = sp.lockX + (sp.lockX < W / 2 ? 1 : -1) * (b.width / 2 + 60);
+      }
+    }
     // 장애물(운석/용암): 예고를 보고 그 열에서 비킨다 (낮은 실력은 못 보고 지나칠 수 있음)
     for (const h of s.hazards) {
       if (!seenHaz.has(h)) seenHaz.set(h, Math.random() < 0.35 + SKILL * 0.6);

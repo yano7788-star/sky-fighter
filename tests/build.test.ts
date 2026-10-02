@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BOMB, BOSS_PATTERNS, ULT } from '../src/core/data';
-import { CARDS, fusionAvailable, newBuild, offerCards, statsOf, xpNeeded } from '../src/core/build';
+import { BOMB, BOSS_HP_MULT, BOSS_PATTERNS, ULT } from '../src/core/data';
+import { CARDS, fusionAvailable, newBuild, offerCards, offerRelics, statsOf, xpNeeded } from '../src/core/build';
 import { createRng } from '../src/core/rng';
 import { creditsFor, metaParams } from '../src/core/meta';
 import { dailyMutator, dailySeed, dayKey, offerMutators } from '../src/core/mutators';
@@ -387,7 +387,7 @@ describe('무한 모드', () => {
   it('루프 1의 보스는 체력 +50%, 이름은 STAGE 6로 표시, 적 탄은 더 빠르다', () => {
     const s = new Sim(1); s.bossTier = 6; s.endless = true;
     s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
-    expect(s.boss!.name).toContain('STAGE 6'); expect(s.boss!.maxHp).toBe(Math.round(700 * 1.5)); expect(s.boss!.tier).toBe(1);
+    expect(s.boss!.name).toContain('STAGE 6'); expect(s.boss!.maxHp).toBe(Math.round(700 * BOSS_HP_MULT * 1.5)); expect(s.boss!.tier).toBe(1);
     expect(s.enemyBulletSpeed).toBeCloseTo(1.06);
   });
   it('무한 모드에서는 5스테이지를 넘겨도 GAMECLEAR 되지 않고 계속 진행한다', () => {
@@ -568,5 +568,125 @@ describe('업적', () => {
   });
   it('업적 id는 중복되지 않는다', () => {
     expect(new Set(ACHIEVEMENTS.map(a => a.id)).size).toBe(ACHIEVEMENTS.length);
+  });
+});
+
+describe('보스 특수 공격(레이저/돌진)', () => {
+  const boss = (tier: number) => { const s = new Sim(1); s.bossTier = tier; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s)); s.boss!.y = s.boss!.targetY; return s; };
+  const spin = (s: Sim, n: number, f?: () => void) => { for (let i = 0; i < n; i++) { f?.(); s.step(idle(s)); } };
+  it('1스테이지 보스는 특수 공격이 없다', () => {
+    const s = boss(1); spin(s, 1500, () => { s.player.invincible = 99999; s.boss!.hp = s.boss!.maxHp; });
+    expect(s.boss!.sp).toBeUndefined();
+  });
+  it('2스테이지 보스: 레이저가 예고 → 발사 → 끝나고 일반 패턴으로 돌아간다', () => {
+    const s = boss(2); const seen = new Set<string>();
+    spin(s, 900, () => { s.player.invincible = 99999; s.boss!.hp = s.boss!.maxHp; if (s.boss!.sp) seen.add(s.boss!.sp.kind + ':' + s.boss!.sp.state); });
+    expect(seen.has('laser:WARN')).toBe(true); expect(seen.has('laser:ACT')).toBe(true);
+    expect(s.boss!.sp === undefined || s.boss!.sp.kind === 'laser').toBe(true);
+  });
+  it('레이저: 빔 안에 있으면 피해, 2페이즈의 틈에서는 안전', () => {
+    const s = boss(2); const b = s.boss!; b.x = 225; s.player.invincible = 0; s.player.x = 225; s.player.y = 600; const e0 = s.player.energy;
+    b.sp = { kind: 'laser', state: 'ACT', t: 1, lockX: 225, beams: [0] };
+    s.step(idle(s)); expect(s.player.energy).toBeLessThan(e0);
+    const s2 = boss(2); const b2 = s2.boss!; b2.phase2 = true; b2.x = 225; s2.player.invincible = 0; s2.player.x = 225 + 60; s2.player.y = 600; const e1 = s2.player.energy;
+    b2.sp = { kind: 'laser', state: 'ACT', t: 1, lockX: 225, beams: [-120, 0, 120] };
+    s2.step({ ...idle(s2), targetX: 285, targetY: 600 }); expect(s2.player.energy).toBe(e1);
+  });
+  it('3스테이지 보스: 돌진은 바닥에서 충격파(탄 고리)를 내고 제자리로 복귀한다', () => {
+    const s = boss(3); const b = s.boss!; s.player.x = 60; s.player.targetX = 60;
+    b.sp = { kind: 'charge', state: 'ACT', t: 0, lockX: b.x, beams: [0] };
+    let impact = false, bullets0 = s.enemyBullets.length;
+    spin(s, 120, () => { s.player.invincible = 99999; b.hp = b.maxHp; if (b.sp?.state === 'RET') impact = true; });
+    expect(impact).toBe(true); expect(s.enemyBullets.length).toBeGreaterThan(bullets0 - 1);
+    spin(s, 120, () => { s.player.invincible = 99999; b.hp = b.maxHp; });
+    expect(b.sp).toBeUndefined(); expect(b.y).toBe(b.targetY);
+  });
+  it('보스가 죽는 순간 특수 공격은 중단되고 시간 정지 중에는 진행하지 않는다', () => {
+    const s = boss(2); const b = s.boss!; b.sp = { kind: 'laser', state: 'WARN', t: 0, lockX: 100, beams: [0] };
+    (s as any).ult.phase = 'ACTIVE'; (s as any).ult.kind = 'timestop'; const x0 = b.x; s.step(idle(s)); expect(b.x).toBe(x0); expect(b.sp.t).toBe(0);
+    (s as any).ult.phase = 'IDLE'; b.hp = 0; s.step(idle(s)); expect(b.sp).toBeUndefined();
+  });
+});
+
+describe('보스 약점 노출(그로기)', () => {
+  const boss = () => { const s = new Sim(1); s.bossTier = 2; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s)); s.boss!.y = s.boss!.targetY; return s; };
+  it('특수 공격이 끝나면 보스가 멈추고 탄이 지워지며 피해가 늘어난다', () => {
+    const s = boss(); const b = s.boss!;
+    b.sp = { kind: 'laser', state: 'ACT', t: 44, lockX: 225, beams: [0] };
+    s.enemyBullets.push({ x: 10, y: 10, vx: 0, vy: 0, color: '#fff', r: 3 });
+    s.step(idle(s));
+    expect(b.sp).toBeUndefined(); expect(b.stun).toBeGreaterThan(70); expect(s.enemyBullets.length).toBe(0);
+    const x0 = b.x; s.step(idle(s)); expect(b.x).toBe(x0);
+    const hp0 = b.hp; s.bullets.push({ x: b.x, y: b.y, vx: 0, vy: 0, dmg: 2, pierce: 0 } as any); s.step(idle(s));
+    expect(hp0 - b.hp).toBeGreaterThanOrEqual(3);
+  });
+  it('그로기가 끝나면 다시 움직이고, 보스가 죽으면 그로기는 해제된다', () => {
+    const s = boss(); const b = s.boss!; b.stun = 3;
+    for (let i = 0; i < 6; i++) { s.player.invincible = 99999; s.step(idle(s)); }
+    expect(b.stun).toBe(0);
+    b.stun = 50; b.hp = 0; s.step(idle(s)); expect(b.stun).toBe(0);
+  });
+});
+
+describe('유물(렐릭)', () => {
+  const clearBoss = (s: Sim) => { s.bossTier = 1; s.stagePhase = 'BOSS_DYING'; s.phaseTimer = 1; s.boss = null; s.step(idle(s)); };
+  it('보스 격파 후 유물 3택1이 나오고, 고른 유물은 다시 나오지 않는다', () => {
+    const s = new Sim(5); s.player.invincible = 99999; clearBoss(s);
+    expect(s.pending).not.toBeNull(); expect(s.pending!.length).toBe(3);
+    expect(s.pending!.every(id => CARDS[id].kind === 'relic')).toBe(true);
+    const pick = s.pending![0]; s.chooseCard(0);
+    expect(s.hasRelic(pick as any)).toBe(true);
+    expect(offerRelics(s.build, () => 0.5).includes(pick as any)).toBe(false);
+  });
+  it('최종 보스(비무한) 격파에서는 유물이 나오지 않고, 레벨업 카드에도 유물이 섞이지 않는다', () => {
+    const s = new Sim(5); s.bossTier = 5; s.stagePhase = 'BOSS_DYING'; s.phaseTimer = 1; s.boss = null; s.step(idle(s));
+    expect(s.pending).toBeNull();
+    for (let i = 0; i < 50; i++) expect(offerCards(newBuild(), createRng(i)).some(id => CARDS[id].kind === 'relic')).toBe(false);
+  });
+  it('스탯 유물: 오버클럭/전술 교본/자기 폭풍', () => {
+    const b = newBuild(); b.levels.r_overclock = 1; b.levels.r_knowledge = 1; b.levels.r_magnet = 1;
+    const st = statsOf(b); expect(st.rateMult).toBeCloseTo(1.15); expect(st.xpMult).toBeCloseTo(1.3); expect(st.magnetMult).toBeCloseTo(2);
+  });
+  it('배수의 진: 에너지 50% 이하에서만 피해 +40%', () => {
+    const s = new Sim(1); s.build.levels.r_laststand = 1; s.player.invincible = 0;
+    s.step(idle(s)); const base = s.stats.dmgMult;
+    s.player.energy = 40; s.step(idle(s)); expect(s.stats.dmgMult).toBeCloseTo(base * 1.4);
+    s.player.energy = 100; s.step(idle(s)); expect(s.stats.dmgMult).toBeCloseTo(base);
+  });
+  it('불사조: 마지막 목숨을 잃어도 한 번만 부활한다', () => {
+    const s = new Sim(1); s.build.levels.r_phoenix = 1; s.lives = 0; s.player.invincible = 0; s.player.energy = 10;
+    s.applyDamage(50); expect(s.state).toBe('PLAYING'); expect(s.player.energy).toBe(50);
+    s.player.invincible = 0; s.player.energy = 10; s.applyDamage(50); expect(s.state).toBe('GAMEOVER');
+  });
+  it('폭탄 상자: 최대 폭탄 +2·즉시 2개 / 응급 키트: 보스 격파 시 에너지 회복', () => {
+    const s = new Sim(1); const m0 = s.maxBombs, b0 = s.bombs;
+    s.pending = ['r_bombpack']; s.chooseCard(0); expect(s.maxBombs).toBe(m0 + 2); expect(s.bombs).toBe(Math.min(m0 + 2, b0 + 2));
+    const t = new Sim(1); t.build.levels.r_medic = 1; t.player.energy = 40; t.player.invincible = 99999;
+    t.bossTier = 1; t.stagePhase = 'BOSS_DYING'; t.phaseTimer = 1; t.boss = null; t.step(idle(t)); expect(t.player.energy).toBe(70);
+  });
+  it('스침의 미학: 20번 스치면 폭탄 +1 / 연쇄 폭발: 주변 적 피해', () => {
+    const s = new Sim(1); s.build.levels.r_grazebomb = 1; s.bombs = 0;
+    for (let i = 0; i < 20; i++) { s.enemyBullets.push({ x: s.player.x + s.player.radius + 8, y: s.player.y, vx: 0, vy: 0, color: '#fff', r: 3 }); s.player.invincible = 0; s.step(idle(s)); }
+    expect(s.bombs).toBe(1);
+  });
+});
+
+describe('하이퍼 모드', () => {
+  const graze = (s: Sim, n: number) => { for (let i = 0; i < n; i++) { s.enemyBullets.push({ x: s.player.x + s.player.radius + 8, y: s.player.y, vx: 0, vy: 0, color: '#fff', r: 3 }); s.player.invincible = 0; s.step(idle(s)); } };
+  it('그레이즈로 게이지가 차고 가득 차면 자동 발동: 탄 소거·연사 증가', () => {
+    const s = new Sim(1); const rate0 = s.stats.rateMult;
+    graze(s, 24); expect(s.hyper.t).toBe(0); expect(s.hyper.gauge).toBe(96);
+    s.enemyBullets.push({ x: 5, y: 5, vx: 0, vy: 0, color: '#fff', r: 3 });
+    graze(s, 1);
+    expect(s.hyper.t).toBeGreaterThan(300); expect(s.run.hypers).toBe(1);
+    expect(s.enemyBullets.length).toBe(0); expect(s.stats.rateMult).toBeCloseTo(rate0 * 1.2);
+  });
+  it('발동 중에는 점수 2배, 끝나면 게이지 0·연사 원복', () => {
+    const s = new Sim(1); s.player.invincible = 99999; const rate0 = s.stats.rateMult;
+    s.hyper.t = 3; s.hyper.gauge = 100; (s as any).refreshStats();
+    const sc0 = s.score; (s as any).killScore(10); const withHyper = s.score - sc0;
+    for (let i = 0; i < 4; i++) s.step(idle(s));
+    expect(s.hyper.t).toBe(0); expect(s.hyper.gauge).toBe(0); expect(s.stats.rateMult).toBeCloseTo(rate0);
+    const sc1 = s.score; (s as any).killScore(10); expect(withHyper).toBeGreaterThan((s.score - sc1) * 1.5);
   });
 });

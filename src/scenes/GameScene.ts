@@ -8,7 +8,7 @@ import { Sim } from '../core/sim';
 import type { SimEvent, SkillKey } from '../core/types';
 import { ParallaxOverlay, ScrollingBackground } from '../render/background';
 import { Fx } from '../render/fx';
-import { Hud, RESULT_BTN, UI, companionZoneActive, inRect, inZone, isUiZone } from '../render/hud';
+import { Hud, PAUSE_BTN, RESULT_BTN, UI, companionZoneActive, inRect, inZone, isUiZone } from '../render/hud';
 import { LevelUpOverlay } from '../render/levelup';
 import { UltFx } from '../render/ultfx';
 import { R, S, bulletTexture } from '../render/textures';
@@ -54,6 +54,7 @@ export class GameScene extends Phaser.Scene {
   private bestBefore = 0;       // 런 시작 시점의 최고 점수 (신기록 판정 기준)
 
   private paused = false;
+  private quitArmed = false;     // 일시정지 메뉴의 '메인 화면으로'를 한 번 눌러 확인 대기 중
   private acc = 0;
   private hitStop = 0;
   private shake = 0;
@@ -189,7 +190,7 @@ export class GameScene extends Phaser.Scene {
     if (e.repeat) { if (!this.paused && !this.resultKind && MOVE_KEYS.includes(k)) this.keys.add(k); return; }
     if (this.resultKind === 'GAMECLEAR' && k === 'escape') { if (this.resultTimer <= 0) this.scene.start('TitleScene'); return; }
     if (k === 'p' || k === 'escape') { this.setPaused(!this.paused); return; }
-    if (this.paused) { if (k === 'enter' || k === ' ') this.setPaused(false); return; }
+    if (this.paused) { if (k === 'enter' || k === ' ') this.setPaused(false); else if (k === 'q' || k === 't') this.pressQuit(); return; }
     if (k === 'm') { audio.toggleMute(); return; }
     if (this.sim.pending) {   // 레벨업 카드 선택
       if (k === '1' || k === '2' || k === '3') this.pickCard(Number(k) - 1);
@@ -208,7 +209,10 @@ export class GameScene extends Phaser.Scene {
 
   private pressAt(id: number, x: number, y: number): void {
     audio.unlock();
-    if (this.paused) { this.setPaused(false); return; }
+    if (this.paused) {
+      if (inRect(PAUSE_BTN.quit, x, y)) { this.pressQuit(); return; }
+      this.setPaused(false); return;
+    }
     if (this.resultKind) { this.resultTap(x, y); return; }
     if (this.sim.pending) { const i = this.levelup.hit(x, y); if (i >= 0) { this.levelup.select(i); this.pickCard(i); } return; }
     if (inZone(UI.sound, x, y)) { audio.toggleMute(); return; }
@@ -236,7 +240,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildSummary(): string {
     const b = this.sim.build, ids = (Object.keys(CARDS) as CardId[]).filter(id => lv(b, id) > 0);
-    const body = ids.length ? ids.map(id => `${CARDS[id].name} ${CARDS[id].kind === 'fusion' ? '★' : 'Lv' + lv(b, id)}`).join('  ·  ') : '아직 획득한 카드가 없습니다';
+    const body = ids.length ? ids.map(id => `${CARDS[id].name} ${CARDS[id].kind === 'fusion' || CARDS[id].kind === 'relic' ? '★' : 'Lv' + lv(b, id)}`).join('  ·  ') : '아직 획득한 카드가 없습니다';
     return `LV ${this.sim.level}  ·  기본 대포 Lv${this.sim.weaponLevel}\n${body}`;
   }
 
@@ -261,9 +265,17 @@ export class GameScene extends Phaser.Scene {
     audio.sfx('item');
   }
 
+  /** 게임 중 메인 화면으로: 실수 방지로 두 번 눌러야 하고, 지금까지의 점수·크레딧·업적은 정산해서 저장한다 */
+  private pressQuit(): void {
+    if (!this.quitArmed) { this.quitArmed = true; this.hud.setPauseConfirm(true); return; }
+    if (this.sim.state === 'PLAYING' && !this.resultKind) this.finishRun('GAMEOVER');
+    audio.resume();
+    this.scene.start('TitleScene');
+  }
+
   private setPaused(v: boolean): void {
     if (v === this.paused || (v && (this.resultKind || !this.sim || this.sim.pending))) return;
-    this.paused = v; this.acc = 0;
+    this.paused = v; this.acc = 0; this.quitArmed = false; this.hud.setPauseConfirm(false);
     this.activeId = null; this.firing = false; this.keys.clear();
     if (v) this.hud.setBuildText(this.buildSummary());
     this.hud.setPaused(v);
@@ -280,6 +292,7 @@ export class GameScene extends Phaser.Scene {
     this.padY = dz(pad.axes[1]?.getValue() ?? 0) + (btn(13) ? 1 : 0) - (btn(12) ? 1 : 0);
     this.padFire = btn(0) || btn(5) || btn(7);
     if (edge('start', btn(9))) { audio.unlock(); if (this.paused) this.setPaused(false); else if (this.resultKind) this.resultTap(); else this.setPaused(true); }
+    if (edge('b', btn(1)) && this.paused) { this.pressQuit(); return; }
     if (edge('a', btn(0))) { if (this.paused) this.setPaused(false); else if (this.resultKind) this.resultTap(); }
     if (this.paused) return;
     if (this.sim.pending) {   // 카드 선택: 좌우로 이동, A로 선택
@@ -541,6 +554,11 @@ export class GameScene extends Phaser.Scene {
   private renderPlayerAuras(): void {
     const g = this.auraG, p = this.sim.player, f = this.sim.frame;
     g.clear();
+    if (this.sim.hyper.t > 0) {   // 하이퍼 중: 보랏빛 오라가 일렁인다
+      const k = 0.5 + 0.5 * Math.sin(f * 0.3);
+      g.lineStyle(3, 0xf0abfc, 0.55 + 0.35 * k); g.strokeCircle(p.x, p.y, 30 + k * 5);
+      g.fillStyle(0xc084fc, 0.1 + 0.08 * k); g.fillCircle(p.x, p.y, 30);
+    }
     if (p.shield > 0) {
       g.lineStyle(2.5, 0x60a5fa, 0.9); g.strokeCircle(p.x, p.y, 38 + Math.sin(f * 0.15) * 2);   // 방벽은 피격 전까지 유지
       g.fillStyle(0x3b82f6, 0.14); g.fillCircle(p.x, p.y, 38);
@@ -638,6 +656,49 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** 보스 특수 공격 연출: 레이저(빔 1~3줄기) / 돌진(예고 레인 + 잔상) */
+  private renderBossSpecial(b: NonNullable<typeof this.sim.boss>, g: Phaser.GameObjects.Graphics): void {
+    const sp = b.sp!, frame = this.sim.frame;
+    if (sp.kind === 'laser') {
+      const ny = b.y + b.height * 0.55;
+      for (const off of sp.beams) {
+        const nx = b.x + off;
+        if (sp.state === 'WARN') {
+          const k = sp.t / 70, a = 0.25 + 0.4 * Math.abs(Math.sin(sp.t * 0.35));
+          g.lineStyle(2, 0xff4d4d, a); g.beginPath(); g.moveTo(nx, ny); g.lineTo(nx, H); g.strokePath();
+          for (const o of [-34, 34]) { g.lineStyle(1, 0xff7a7a, a * 0.5); g.beginPath(); g.moveTo(nx + o, ny + 20); g.lineTo(nx + o, H); g.strokePath(); }
+          const r = 5 + k * 18 + Math.sin(frame * 0.5) * 2;
+          g.fillStyle(0xff3b3b, 0.35); g.fillCircle(nx, ny, r * 1.8); g.fillStyle(0xffd0d0, 0.9); g.fillCircle(nx, ny, r * 0.6);
+          if (frame % 3 === 0) this.fx.chargeSpark(nx, ny, '#ff8a8a');
+        } else {
+          const t = sp.t, w = 66 * Math.min(1, t / 6) * Math.min(1, (45 - t) / 8 + 0.2), flick = 0.85 + Math.random() * 0.15;
+          for (let i = 0; i < 5; i++) { const k = i / 4; g.fillStyle(0xff5a3c, 0.05 + 0.05 * (1 - k) * flick); g.fillRect(nx - w * (2.0 - k * 1.1), ny, w * (4 - k * 2.2), H - ny); }
+          g.fillStyle(0xff3b3b, 0.5); g.fillRect(nx - w / 2, ny, w, H - ny);
+          g.fillStyle(0xfff1f1, 0.95); g.fillRect(nx - w * 0.2, ny, w * 0.4, H - ny);
+          g.fillStyle(0xffe4e4, 0.9); g.fillCircle(nx, ny, w * 0.38);
+          g.fillStyle(0xff7a3c, 0.5 * flick); g.fillEllipse(nx, H - 6, w * 3, 34);
+          if (frame % 3 === 0) this.fx.sparkBurst(nx + (Math.random() - 0.5) * w * 1.6, H - 10, '#ffd2a0', 2);
+        }
+      }
+      if (sp.state === 'ACT') { g.fillStyle(0xff2d2d, 0.05); g.fillRect(0, 0, W, H); }
+      return;
+    }
+    // 돌진
+    const hw = b.width / 2;
+    if (sp.state === 'WARN') {
+      const a = 0.12 + 0.22 * Math.abs(Math.sin(sp.t * 0.3));
+      g.fillStyle(0xff3b3b, a); g.fillRect(b.x - hw, b.y, hw * 2, H - b.y);
+      g.lineStyle(2, 0xff7a7a, a * 2.2); g.strokeRect(b.x - hw, b.y, hw * 2, H - b.y);
+      for (let i = 0; i < 5; i++) {   // 아래로 흐르는 화살표
+        const yy = b.y + 60 + ((frame * 8 + i * 130) % (H - b.y - 60));
+        g.fillStyle(0xffb4b4, a * 2); g.fillTriangle(b.x - 16, yy, b.x + 16, yy, b.x, yy + 22);
+      }
+    } else if (sp.state === 'ACT') {
+      for (let i = 1; i <= 4; i++) { g.fillStyle(0xffffff, 0.18 - i * 0.03); g.fillRect(b.x - hw * 0.9, b.y - i * 38 - b.height * 0.4, hw * 1.8, 34); }
+      g.fillStyle(0xff5a3c, 0.25); g.fillRect(b.x - hw, 0, hw * 2, b.y);
+    }
+  }
+
   private renderBoss(): void {
     this.renderMidBoss();
     const b = this.sim.boss, g = this.bossG, frame = this.sim.frame;
@@ -673,12 +734,25 @@ export class GameScene extends Phaser.Scene {
       g.lineStyle(1.5, 0xf43f5e, 0.45); g.strokeCircle(cx, cy, b.width / 2 + pulse * 0.6);
     }
 
+    if ((b.stun ?? 0) > 0 && !b.dying) {   // 약점 노출: 노란 링이 깜빡이고 보스가 노랗게 달아오른다
+      const k = Math.abs(Math.sin(frame * 0.3));
+      g.lineStyle(3, 0xfde047, 0.5 + 0.5 * k); g.strokeCircle(cx, cy, b.width / 2 + 10 + k * 8);
+      g.lineStyle(2, 0xffffff, 0.4 * k); g.strokeCircle(cx, cy, b.width / 2 + 24);
+      g.fillStyle(0xfde047, 0.12 + 0.1 * k); g.fillCircle(cx, cy, b.width / 2);
+    }
+    if (b.sp && !b.dying) this.renderBossSpecial(b, g);
+    else if (!b.dying && b.y >= b.targetY && b.shootCooldown > b.shotCdMax - 12) {   // 일반 탄막 직전: 보스 둘레에 수축하는 링으로 예고
+      const k = (b.shootCooldown - (b.shotCdMax - 12)) / 12;
+      g.lineStyle(2, main, 0.25 + 0.5 * k); g.strokeCircle(cx, cy, b.width / 2 + 34 * (1 - k));
+    }
+
     const clean = this.textures.get(`boss${b.tier}`).getSourceImage() as HTMLImageElement;
     const key = b.phase2 ? `boss${b.tier}_p2` : `boss${b.tier}_n`;
     const scale = Math.min(b.width / clean.width, b.height / clean.height);
     const outlined = this.textures.get(key).getSourceImage() as HTMLImageElement;
     this.bossImg.setTexture(key).setVisible(true).setPosition(cx, cy).setRotation(Math.PI).setAlpha(alpha)
       .setDisplaySize(outlined.width * scale, outlined.height * scale);
+    if ((b.stun ?? 0) > 0 && !b.dying) this.bossImg.setTint(Math.floor(frame / 4) % 2 === 0 ? 0xfff3a0 : 0xffffff); else this.bossImg.clearTint();
   }
 }
 
