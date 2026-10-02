@@ -1,12 +1,14 @@
 import Phaser from 'phaser';
 import { H, W } from '../core/config';
 import { TAGLINE, VERSION } from '../branding';
+import { dailyMutator, dayKey, mutatorOf } from '../core/mutators';
 import { FONT, textStyle } from '../render/hud';
 import { R, S } from '../render/textures';
 import { audio } from '../systems/audio';
 import { loadBest, loadMeta } from '../systems/storage';
 
 const START = { x: W / 2, y: H * 0.8, w: 300, h: 60 };
+const DAILY = { x: W / 2, y: H * 0.8 - 52, w: 300, h: 34 };
 const HELP = { x: W / 2 + 125, y: H * 0.8 + 62, w: 120, h: 34 };
 const HANGAR = { x: W / 2 - 125, y: H * 0.8 + 62, w: 120, h: 34 };
 const PILOT = { x: W / 2, y: H * 0.8 + 62, w: 110, h: 34 };
@@ -76,6 +78,8 @@ export class TitleScene extends Phaser.Scene {
     root.add(this.add.text(HELP.x, HELP.y, '? HOW TO PLAY', textStyle(13, '#94a3b8')).setOrigin(0.5));
     root.add(this.add.text(HANGAR.x, HANGAR.y, '⚙ HANGAR', textStyle(13, '#fde047')).setOrigin(0.5));
     root.add(this.add.text(PILOT.x, PILOT.y, '✈ PILOT', textStyle(13, '#7dd3fc')).setOrigin(0.5));
+    const dm = mutatorOf(dailyMutator(dayKey()));
+    root.add(this.add.text(DAILY.x, DAILY.y, `📅 일일 도전 · ${dm ? dm.name : ''}`, textStyle(14, '#fbbf24')).setOrigin(0.5).setShadow(0, 0, '#000', 6, true, true));
 
     const best = loadBest();
     root.add(this.add.text(W / 2, H * 0.935, (best.score > 0 ? `BEST ${best.score}  ·  STAGE ${best.stage}` : 'NO RECORD YET') + `   ·   CREDITS ${loadMeta().credits}`, textStyle(13, '#94a3b8')).setOrigin(0.5));
@@ -93,6 +97,7 @@ export class TitleScene extends Phaser.Scene {
       else if (e.key.toLowerCase() === 'h' || e.key === '?') this.toggleHelp(!this.helpOpen);
       else if (e.key.toLowerCase() === 'g') this.scene.start('HangarScene');
       else if (e.key.toLowerCase() === 'o') this.scene.start('PilotScene');
+      else if (e.key.toLowerCase() === 'd') { this.started = true; this.scene.start('GameScene', { daily: true }); }
       else if (e.key.toLowerCase() === 'm') audio.toggleMute();
     });
   }
@@ -123,6 +128,7 @@ export class TitleScene extends Phaser.Scene {
     if (this.helpOpen) { this.toggleHelp(false); return; }
     if (Math.hypot(x - SOUND.x, y - SOUND.y) < SOUND.r + 8) { audio.toggleMute(); return; }
     if (Math.abs(x - HELP.x) < HELP.w / 2 && Math.abs(y - HELP.y) < HELP.h / 2 + 6) { this.toggleHelp(true); return; }
+    if (Math.abs(x - DAILY.x) < DAILY.w / 2 && Math.abs(y - DAILY.y) < DAILY.h / 2 + 4) { this.started = true; audio.unlock(); this.scene.start('GameScene', { daily: true }); return; }
     if (Math.abs(x - PILOT.x) < PILOT.w / 2 && Math.abs(y - PILOT.y) < PILOT.h / 2 + 6) { this.scene.start('PilotScene'); return; }
     if (Math.abs(x - HANGAR.x) < HANGAR.w / 2 && Math.abs(y - HANGAR.y) < HANGAR.h / 2 + 6) { this.scene.start('HangarScene'); return; }
     this.start();   // 화면 어디를 눌러도 시작 (모바일 편의)

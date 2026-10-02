@@ -3,7 +3,7 @@ import { BOMB, ULT } from '../src/core/data';
 import { CARDS, fusionAvailable, newBuild, offerCards, statsOf, xpNeeded } from '../src/core/build';
 import { createRng } from '../src/core/rng';
 import { creditsFor, metaParams } from '../src/core/meta';
-import { offerMutators } from '../src/core/mutators';
+import { dailyMutator, dailySeed, dayKey, offerMutators } from '../src/core/mutators';
 import { Sim } from '../src/core/sim';
 import type { Enemy, EnemyType, SimInput } from '../src/core/types';
 
@@ -473,4 +473,19 @@ describe('융합 확장 (아이기스 오빗 / 프리즘 / 오버클럭)', () =>
     const e0 = s.player.energy; s.step(idle(s));
     expect(s.enemyBullets).toHaveLength(0); expect(s.player.energy).toBe(e0);
   });
+});
+
+describe('일일 도전', () => {
+  it('같은 날짜는 같은 시드·같은 모디파이어, 날짜가 바뀌면 달라질 수 있다', () => {
+    expect(dailySeed('2026-10-02')).toBe(dailySeed('2026-10-02'));
+    expect(dailySeed('2026-10-02')).not.toBe(dailySeed('2026-10-03'));
+    expect(dailyMutator('2026-10-02')).toBe(dailyMutator('2026-10-02'));
+    const seen = new Set<string>(); for (let d = 1; d <= 28; d++) seen.add(dailyMutator(`2026-10-${String(d).padStart(2, '0')}`));
+    expect(seen.size).toBeGreaterThan(2);
+  });
+  it('같은 시드와 같은 입력이면 항상 같은 결과 (모두가 같은 조건)', () => {
+    const run = () => { const s = new Sim(dailySeed('2026-10-02'), metaParams({}, 'ace', dailyMutator('2026-10-02'))); for (let i = 0; i < 1200; i++) { if (s.pending) s.chooseCard(0); s.player.invincible = 999; s.step({ targetX: 225 + Math.sin(i / 25) * 140, targetY: 640, fire: true, bomb: false }); } return [s.score, s.enemies.length, s.level].join(','); };
+    expect(run()).toBe(run());
+  });
+  it('dayKey 형식은 YYYY-MM-DD', () => { expect(dayKey(new Date(2026, 9, 2))).toBe('2026-10-02'); });
 });

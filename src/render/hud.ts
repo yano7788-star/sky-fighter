@@ -32,10 +32,11 @@ const bannerAlpha = (t: number, total: number, fadeIn = 18, fadeOut = 24) => Mat
 export const RESULT_BTN = { cont: { x: W / 2, y: H / 2 + 172, w: 300, h: 46 }, title: { x: W / 2, y: H / 2 + 228, w: 300, h: 40 } };
 export const inRect = (z: { x: number; y: number; w: number; h: number }, x: number, y: number) => Math.abs(x - z.x) < z.w / 2 && Math.abs(y - z.y) < z.h / 2;
 
-export interface ResultInfo { kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
+export interface ResultInfo { dailyBest?: number; kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
 
 /** 게임 화면 HUD: 에너지 바·점수·폭탄·보스 바·배너·일시정지/결과 오버레이 */
 export class Hud {
+  daily = false;   // 일일 도전 중이면 모디파이어 배지 앞에 표시
   private displayEnergy = 100;
   private displayHp = 0;
   private hitFlash = 0;
@@ -172,7 +173,7 @@ export class Hud {
     t.l2.setText(`최종 점수: ${r.score}`).setColor('#fff');
     t.l3.setText(over ? `최종 도달: STAGE ${r.stage}  ·  LV ${r.level}` : `LV ${r.level}`).setColor('#fff');
     t.credits.setText(`+${r.credits} CREDITS  (격납고에서 강화)`).setColor('#7dd3fc');
-    t.record.setText(r.newRecord ? '★ NEW RECORD! ★' : `BEST ${r.best.score} (STAGE ${r.best.stage})`).setColor(r.newRecord ? '#facc15' : '#94a3b8');
+    t.record.setText(r.dailyBest !== undefined ? `📅 오늘의 최고 ${r.dailyBest}${r.newRecord ? '  ★ NEW RECORD!' : ''}` : r.newRecord ? '★ NEW RECORD! ★' : `BEST ${r.best.score} (STAGE ${r.best.stage})`).setColor(r.newRecord ? '#facc15' : '#94a3b8');
     t.prompt.setText('화면을 탭하여 다시 출격').setColor(canTap ? '#38bdf8' : '#94a3b8').setVisible(over);
     // 미션 클리어: [무한 모드 계속] [타이틀로] 두 버튼
     const g = this.resultG; g.clear(); g.setVisible(!over);
@@ -245,7 +246,7 @@ export class Hud {
     g.fillStyle(0x22d3ee, 1); g.fillRect(0, 0, W * xr, 5);
     this.setText('level', `LV ${sim.level}`);
     const md = mutatorOf(sim.meta.mutator);
-    this.setText('mut', md ? `${md.icon} ${md.name}` : '').setColor(md?.color ?? '#fbbf24');
+    this.setText('mut', (this.daily ? '📅 ' : '') + (md ? `${md.icon} ${md.name}` : '')).setColor(md?.color ?? '#fbbf24');
 
     // 4-3. 스킬 버튼 (필살기 게이지 링 / 동료)
     this.renderSkillButtons(sim);

@@ -45,3 +45,13 @@ export function offerMutators(rng: Rng, n = 3): MutatorId[] {
   while (out.length < n && pool.length) out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// 일일 도전: 날짜가 같으면 시드와 모디파이어가 같다 (모두가 같은 조건으로 도전)
+// ---------------------------------------------------------------------------
+export const dayKey = (d: Date = new Date()): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const dailySeed = (key: string): number => (parseInt(key.replace(/-/g, ''), 10) * 2654435761) >>> 0;
+export function dailyMutator(key: string): MutatorId {
+  const rng = (() => { let a = dailySeed(key) + 17; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
+  return MUTATORS[Math.floor(rng() * MUTATORS.length)].id;
+}

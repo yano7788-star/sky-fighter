@@ -3,6 +3,7 @@ import { CARDS, lv, type CardId } from '../core/build';
 import { H, PLAYER, STEP_MS, W } from '../core/config';
 import { BOMB, COMPANION_FRAMES, SHIELD_R } from '../core/data';
 import { creditsFor, metaParams, pilotOf } from '../core/meta';
+import { dailyMutator, dailySeed, dayKey } from '../core/mutators';
 import { Sim } from '../core/sim';
 import type { SimEvent, SkillKey } from '../core/types';
 import { ParallaxOverlay, ScrollingBackground } from '../render/background';
@@ -12,7 +13,7 @@ import { LevelUpOverlay } from '../render/levelup';
 import { UltFx } from '../render/ultfx';
 import { R, S, bulletTexture } from '../render/textures';
 import { audio, type BgmName } from '../systems/audio';
-import { loadBest, loadMeta, saveBest, saveMeta, type BestRecord } from '../systems/storage';
+import { loadBest, loadDaily, loadMeta, saveBest, saveDaily, saveMeta, type BestRecord } from '../systems/storage';
 
 const MOVE_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' '];
 const PREVENT_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '];
@@ -73,11 +74,15 @@ export class GameScene extends Phaser.Scene {
   private padPrev: Record<string, boolean> = {};
 
   private mutatorId: string | null = null;
+  private daily: { key: string; seed: number } | null = null;   // 일일 도전: 날짜 고정 시드 + 고정 모디파이어
 
   constructor() { super('GameScene'); }
 
   /** 출격 전에 고른 런 모디파이어를 받는다 (MutatorScene에서 전달) */
-  init(data: { mutator?: string | null }): void { this.mutatorId = data?.mutator ?? null; }
+  init(data: { mutator?: string | null; daily?: boolean }): void {
+    if (data?.daily) { const key = dayKey(); this.daily = { key, seed: dailySeed(key) }; this.mutatorId = dailyMutator(key); }
+    else { this.daily = null; this.mutatorId = data?.mutator ?? null; }
+  }
 
   create(): void {
     // Phaser는 같은 씬 인스턴스를 재사용하므로, 이전 실행에서 파괴된 오브젝트 참조를 반드시 버린다
@@ -97,6 +102,7 @@ export class GameScene extends Phaser.Scene {
     this.overlay = new ParallaxOverlay(this, this.layers.bg);
     this.fx = new Fx(this, this.layers.fx);
     this.hud = new Hud(this, this.ui);
+    this.hud.daily = !!this.daily;
     this.levelup = new LevelUpOverlay(this, this.ui);
     this.ultfx = new UltFx(this, this.ui);
 
@@ -131,7 +137,7 @@ export class GameScene extends Phaser.Scene {
   /** 격납고 강화 + 선택한 파일럿 패시브를 반영해 새 런을 시작하고, 파일럿의 기체 스킨을 적용한다 */
   private newSim(): void {
     const m = loadMeta();
-    this.sim = new Sim((Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected, this.mutatorId));
+    this.sim = new Sim(this.daily ? this.daily.seed : (Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected, this.mutatorId));
     if (this.playerImg) this.applySkin(pilotOf(m.pilots.selected).skin);
   }
 
@@ -233,7 +239,7 @@ export class GameScene extends Phaser.Scene {
   /** 결과 화면 입력: 게임오버=재출격, 미션 클리어=[무한 모드 계속]/[타이틀로] (좌표가 없으면 키보드·패드 → 무한 모드 계속) */
   private resultTap(x?: number, y?: number): void {
     if (this.resultTimer > 0) return;
-    if (this.resultKind === 'GAMEOVER') { this.scene.start('MutatorScene'); return; }   // 재출격: 모디파이어를 다시 고른다
+    if (this.resultKind === 'GAMEOVER') { if (this.daily) this.scene.start('GameScene', { daily: true }); else this.scene.start('MutatorScene'); return; }   // 재출격: 일일 도전은 같은 조건으로, 일반 출격은 모디파이어를 다시 고른다
     let choice: 'continue' | 'title' = 'continue';
     if (x !== undefined && y !== undefined) {
       if (inRect(RESULT_BTN.title, x, y)) choice = 'title';
@@ -397,9 +403,15 @@ export class GameScene extends Phaser.Scene {
   private finishRun(kind: 'GAMEOVER' | 'GAMECLEAR'): void {
     const s = this.sim;
     this.newRecord = s.score > this.bestBefore;
+    let dailyBonus = 1;
+    if (this.daily) {   // 일일 도전 기록 저장, 첫 도전에는 크레딧 +25%
+      const d = loadDaily(this.daily.key);
+      if (d.runs === 0) dailyBonus = 1.25;
+      this.newRecord = s.score > d.best; d.best = Math.max(d.best, s.score); d.runs++; saveDaily(d);
+    }
     this.best = { score: Math.max(this.best.score, s.score), stage: Math.max(this.best.stage, s.bossTier) };
     saveBest(this.best);
-    const total = Math.floor(creditsFor(s.score, s.bossTier, s.endless || kind === 'GAMECLEAR') * s.meta.mut.credit);
+    const total = Math.floor(creditsFor(s.score, s.bossTier, s.endless || kind === 'GAMECLEAR') * s.meta.mut.credit * dailyBonus);
     const meta = loadMeta(); meta.credits += Math.max(0, total - this.creditsPaid); saveMeta(meta);   // 무한 모드로 이어 간 경우 이미 지급한 크레딧은 제외
     this.creditsPaid = Math.max(this.creditsPaid, total); this.runCredits = total;
     this.resultKind = kind; this.resultTimer = 90;
@@ -407,7 +419,7 @@ export class GameScene extends Phaser.Scene {
     this.hud.showResult(this.resultInfo(), false);
   }
   private resultInfo() {
-    return { kind: this.resultKind!, score: this.sim.score, stage: this.sim.bossTier, level: this.sim.level, credits: this.runCredits, best: this.best, newRecord: this.newRecord };
+    return { dailyBest: this.daily ? loadDaily(this.daily.key).best : undefined, kind: this.resultKind!, score: this.sim.score, stage: this.sim.bossTier, level: this.sim.level, credits: this.runCredits, best: this.best, newRecord: this.newRecord };
   }
   /** 플레이 도중 탭을 닫아도 신기록이 사라지지 않게 저장 (메모리의 best는 건드리지 않아 NEW RECORD 판정 유지) */
   persistBestInRun(): void {
