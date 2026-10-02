@@ -1,9 +1,10 @@
 import { store } from './storage';
 
-export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam';
+export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak';
 export type BgmName = 'normal' | 'solar' | 'boss';
 
 const BASE = import.meta.env.BASE_URL;
+const THROTTLE_MS: Partial<Record<SfxName, number>> = { bossHit: 60, laserHit: 90, bossHeavy: 80, bossBreak: 200 };   // 연사 무기의 피격음은 간격을 둬서 뭉개지지 않게
 const BGM_TRACKS: Record<BgmName, { src: string; vol: number; loopEnd: number }> = {
   normal: { src: `${BASE}assets/audio/under_heavy_fire.mp3`, vol: 0.25, loopEnd: 175.3 },   // loopEnd: 끝부분 무음 구간 건너뛰기
   solar:  { src: `${BASE}assets/audio/target_solar_core.mp3`, vol: 0.26, loopEnd: 0 },    // 후반(4·5스테이지) 일반 전투곡
@@ -24,6 +25,8 @@ class AudioSystem {
   private unlocked = false;
   private lastPlayed: Partial<Record<SfxName, number>> = {};
   private suspended = false;
+  private duckUntil = 0;     // BGM 덕킹: 이 시각까지 음악 볼륨을 낮춘다
+  private duckAmt = 1;
 
   /** 반드시 사용자 제스처(터치/클릭/키 입력) 안에서 호출 — 자동재생 제한 해제 */
   unlock(): void {
@@ -52,7 +55,7 @@ class AudioSystem {
     const ctx = this.ctx;
     if (!ctx || this.muted || this.suspended || ctx.state !== 'running') return;
     const now = performance.now();
-    if (now - (this.lastPlayed[name] ?? 0) < 35) return;    // 같은 소리 폭주 방지
+    if (now - (this.lastPlayed[name] ?? 0) < (THROTTLE_MS[name] ?? 35)) return;    // 같은 소리 폭주 방지 (연사 무기는 간격을 더 넓게)
     this.lastPlayed[name] = now;
     const t = ctx.currentTime;
     const osc = ctx.createOscillator(), gain = ctx.createGain();
@@ -100,9 +103,48 @@ class AudioSystem {
         ng.gain.setValueAtTime(0.32, t); ng.gain.exponentialRampToValueAtTime(0.01, t + 0.14); ns.start(t);
         break;
       }
+      case 'bossHit': {   // 보스 피격(연사탄): 3겹(찰진 금속 + 몸통 + 서브 베이스), 매번 피치를 살짝 비튼다
+        const pr = 0.95 + Math.random() * 0.1;
+        osc.type = 'square'; f.setValueAtTime(1700 * pr, t); exp(820 * pr, 0.035); g.setValueAtTime(0.07, t); g.exponentialRampToValueAtTime(0.005, t + 0.04); osc.start(t); osc.stop(t + 0.04);
+        this.layer(ctx, 'triangle', 320 * pr, 150 * pr, 0.07, 0.16, t); this.layer(ctx, 'sine', 95 * pr, 52, 0.1, 0.3, t);
+        break;
+      }
+      case 'bossHeavy': {   // 보스 강타(폭탄·궁극기 등): 둔중한 쿵 + 노이즈
+        const pr = 0.95 + Math.random() * 0.1;
+        this.layer(ctx, 'sine', 110 * pr, 36, 0.28, 0.6, t); this.layer(ctx, 'sawtooth', 420 * pr, 90, 0.16, 0.22, t); this.noise(ctx, 0.16, 0.3, 2200, t);
+        break;
+      }
+      case 'laserHit': {   // 레이저가 닿는 지글거림
+        const pr = 0.95 + Math.random() * 0.1;
+        osc.type = 'sawtooth'; f.setValueAtTime(1100 * pr, t); exp(520 * pr, 0.07); g.setValueAtTime(0.07, t); g.exponentialRampToValueAtTime(0.004, t + 0.08); osc.start(t); osc.stop(t + 0.08);
+        this.layer(ctx, 'sine', 140 * pr, 70, 0.08, 0.2, t); this.noise(ctx, 0.05, 0.1, 3500, t);
+        break;
+      }
+      case 'bossBreak': {   // 외피 파손: 금속 찢어지는 소리 + 깊은 울림
+        this.layer(ctx, 'sine', 90, 30, 0.55, 0.7, t); this.layer(ctx, 'sawtooth', 700, 120, 0.3, 0.25, t); this.noise(ctx, 0.35, 0.4, 1500, t);
+        this.duck(260, 0.45);
+        break;
+      }
       case 'heal':    osc.type = 'sine';     f.setValueAtTime(300, t); exp(800, 0.25);  g.setValueAtTime(0.2, t);  g.exponentialRampToValueAtTime(0.01, t + 0.25); osc.start(t); osc.stop(t + 0.25); break;
     }
   }
+
+  /** 효과음 한 겹(오실레이터) */
+  private layer(ctx: AudioContext, type: OscillatorType, f0: number, f1: number, dur: number, vol: number, t: number): void {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.004, t + dur);
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur + 0.01);
+  }
+  private noise(ctx: AudioContext, dur: number, vol: number, cutoff: number, t: number): void {
+    const len = Math.floor(ctx.sampleRate * dur), buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const ns = ctx.createBufferSource(), ng = ctx.createGain(), lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = cutoff; ns.buffer = buf; ns.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+    ng.gain.setValueAtTime(vol, t); ng.gain.exponentialRampToValueAtTime(0.004, t + dur); ns.start(t);
+  }
+  /** BGM 덕킹: 강한 타격 순간 음악을 잠깐 낮춰 효과음을 부각 */
+  duck(ms: number, amt = 0.5): void { this.duckUntil = performance.now() + ms; this.duckAmt = amt; }
 
   // ---------------------------------------------------------------- BGM
   private get(name: BgmName): Track {
@@ -149,7 +191,7 @@ class AudioSystem {
       const cfg = BGM_TRACKS[name];
       const t = name === want ? this.get(name) : this.tracks[name];
       if (!t || t.failed) continue;
-      const target = name === want && !this.muted ? cfg.vol : 0;
+      const target = name === want && !this.muted ? cfg.vol * (performance.now() < this.duckUntil ? this.duckAmt : 1) : 0;
       const dv = target - t.vol;
       this.setVol(t, Math.max(0, Math.min(1, t.vol + dv * 0.06 + Math.sign(dv) * 0.002)));
       if (target > 0 && t.el.paused) this.play(t);

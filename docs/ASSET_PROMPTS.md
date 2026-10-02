@@ -179,3 +179,19 @@ A horizontal sprite sheet of a stylized sci-fi explosion animation in exactly 10
 ## 6. 전달 방법
 1. 파일을 `assets-src/incoming/` 에 위 파일명으로 저장 (원본 PNG 그대로, 리사이즈·압축하지 마세요)
 2. "에셋 넣었어"라고 알려 주시면 → 크로마키 제거 / WebP 변환 / 워터마크 정리 / 코드 연결 / 확인까지 제가 처리합니다.
+
+---
+
+## 7. 신규 적(비행기가 아닌 적) 이미지 — 지금은 코드로 그린 임시 텍스처 (있으면 교체)
+공통: 위에서 내려다본 시점, 중앙 배치 + 10% 여백, **순수 초록(#00FF00) 단색 배경**, 그림자·그라데이션 없음, 피사체에 초록색 쓰지 않기, 우하단 모서리 비우기, 글자·워터마크 없음. 스타일은 기존 `enemy_*`와 같은 "디테일한 SF 세미리얼". 파일은 `assets-src/incoming/` 에 아래 이름으로.
+
+| 파일 | 적 | 프롬프트 핵심 |
+|---|---|---|
+| `enemy_drone.png` | 벌떼 드론(인해전술 잡병, 매우 작게 보임) | `A tiny hostile swarm drone: a glowing red single-eye sphere body with two short swept wings, menacing but simple so it reads clearly when 30 appear at once` |
+| `enemy_mine.png` | 부유 기뢰(터지면 탄 고리) | `A spiked floating naval-style space mine: dark metal sphere with 8 radial spikes, a pulsing red core light and yellow warning stripes, hazard look` |
+| `enemy_turret.png` | 지상 포대(배경과 함께 스크롤) | `Top-down view of a ground anti-air turret emplacement: octagonal steel base bolted to the ground, a triple-barrel cannon on a round rotating hub with yellow warning lights, military sci-fi` |
+| `enemy_rock.png` | 운석 괴수(처치하면 쪼개짐) | `A living meteor creature: a jagged cracked asteroid body with glowing molten-orange fissures and two small glowing eyes in the cracks, heavy and rocky` |
+
+**추가 후보(다음 업데이트용, 아직 코드 없음)** — 필요하면 이 순서로: ① `enemy_jelly.png` 공중 해파리형 생명체(전기 촉수) ② `enemy_crab.png` 지상 게형 메카(측면 이동) ③ `enemy_gunship_side.png` 측면 진입용 대형 헬기형 ④ `enemy_swarm_bug.png` 곤충형 벌떼(드론 대체 스킨).
+
+`enemy_drone/mine/turret/rock`을 받으면: "에셋 넣었어"라고 알려 주세요 → 크로마키 제거·WebP 변환·로딩 연결(`BootScene`)·크기 조정(`GameScene.ENEMY_W`)까지 처리합니다.

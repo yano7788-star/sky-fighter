@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { BOMB, BOSS_HP_MULT, BOSS_PATTERNS, ULT } from '../src/core/data';
+import { BOMB, BOSS_HP_MULT, BOSS_PATTERNS, FIGHT_FRAMES, ULT } from '../src/core/data';
 import { CARDS, fusionAvailable, newBuild, offerCards, offerRelics, statsOf, xpNeeded } from '../src/core/build';
 import { createRng } from '../src/core/rng';
 import { creditsFor, metaParams } from '../src/core/meta';
 import { dailyMutator, dailySeed, dayKey, offerMutators } from '../src/core/mutators';
 import type { EnemyBullet } from '../src/core/types';
 import { ACHIEVEMENTS, newlyUnlocked } from '../src/core/achievements';
+import { W } from '../src/core/config';
 import { Sim } from '../src/core/sim';
 import type { Enemy, EnemyType, SimInput } from '../src/core/types';
 
@@ -688,5 +689,99 @@ describe('하이퍼 모드', () => {
     for (let i = 0; i < 4; i++) s.step(idle(s));
     expect(s.hyper.t).toBe(0); expect(s.hyper.gauge).toBe(0); expect(s.stats.rateMult).toBeCloseTo(rate0);
     const sc1 = s.score; (s as any).killScore(10); expect(withHyper).toBeGreaterThan((s.score - sc1) * 1.5);
+  });
+});
+
+describe('인해전술 / 비행기가 아닌 적', () => {
+  const fight = (tier: number) => { const s = new Sim(9); s.startAtTier(tier); s.stagePhase = 'FIGHT'; s.stageFrames = 0; s.player.invincible = 99999; return s; };
+  it('스테이지 진행도에 도달하면 예고(hordeWarn) 후 벌떼가 한꺼번에 내려온다', () => {
+    const s = fight(2); const dur = FIGHT_FRAMES[2];
+    s.stageFrames = Math.floor(dur * 0.3);
+    s.step(idle(s)); expect(s.hordeWarn).toBeGreaterThan(90);
+    const before = s.enemies.filter(e => e.type === 'drone').length;
+    for (let i = 0; i < 101; i++) { s.player.invincible = 99999; s.stageFrames = Math.floor(dur * 0.3) + 5; s.step(idle(s)); }
+    const drones = s.enemies.filter(e => e.type === 'drone').length;
+    expect(s.hordeWarn).toBe(0); expect(drones - before).toBeGreaterThanOrEqual(25);
+  });
+  it('같은 지점에서 벌떼는 한 번만 나온다', () => {
+    const s = fight(2); const dur = FIGHT_FRAMES[2]; s.stageFrames = Math.floor(dur * 0.3);
+    for (let i = 0; i < 400; i++) { s.player.invincible = 99999; s.stageFrames = Math.floor(dur * 0.3) + 6; s.step(idle(s)); s.enemies.length = 0; }
+    s.step(idle(s)); expect(s.hordeWarn).toBe(0);
+  });
+  it('벌떼 드론은 경험치·아이템을 주지 않고 접촉 피해가 작다', () => {
+    const s = fight(2); s.player.invincible = 0; s.enemies.length = 0;
+    const g0 = s.gems.length, it0 = s.items.length;
+    s.enemies.push({ type: 'drone', x: s.player.x, y: s.player.y - 200, hp: 1, maxHp: 1, speed: 2, baseX: 0, age: 0, fireCd: 0, hold: 0 });
+    s.bullets.push({ x: s.player.x, y: s.player.y - 200, vx: 0, vy: 0, dmg: 5, pierce: 0 } as any);
+    s.step(idle(s)); expect(s.enemies.length).toBe(0); expect(s.gems.length).toBe(g0); expect(s.items.length).toBe(it0);
+    s.enemies.push({ type: 'drone', x: s.player.x, y: s.player.y, hp: 1, maxHp: 1, speed: 2, baseX: 0, age: 0, fireCd: 0, hold: 0 });
+    const e0 = s.player.energy; s.step(idle(s)); expect(e0 - s.player.energy).toBe(18);
+  });
+  it('기뢰는 터지면 탄 고리, 운석 괴수는 드론 둘로 쪼개진다', () => {
+    const s = fight(4); s.enemies.length = 0; s.enemyBullets.length = 0;
+    s.enemies.push({ type: 'mine', x: 100, y: 200, hp: 0, maxHp: 4, speed: 1, baseX: 100, age: 0, fireCd: 0, hold: 0 });
+    s.step(idle(s)); expect(s.enemyBullets.length).toBeGreaterThanOrEqual(8);
+    s.enemyBullets.length = 0;
+    s.enemies.push({ type: 'rock', x: 300, y: 200, hp: 0, maxHp: 9, speed: 1, baseX: 300, age: 0, fireCd: 0, hold: 0 });
+    s.step(idle(s)); expect(s.enemies.filter(e => e.type === 'drone').length).toBe(2);
+  });
+  it('1스테이지 보스의 대군 소환: 약점 노출 없이 벌떼를 쏟아낸다', () => {
+    const s = new Sim(1); s.bossTier = 1; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s)); s.boss!.y = s.boss!.targetY;
+    const b = s.boss!; b.sp = { kind: 'swarm', state: 'WARN', t: 59, lockX: 225, beams: [0] };
+    const n0 = s.enemies.filter(e => e.type === 'drone').length;
+    s.step(idle(s));
+    expect(b.sp).toBeUndefined(); expect(b.stun ?? 0).toBe(0); expect(s.enemies.filter(e => e.type === 'drone').length - n0).toBeGreaterThanOrEqual(20);
+  });
+});
+
+describe('보스 타격감 이벤트', () => {
+  const boss = () => { const s = new Sim(1); s.bossTier = 2; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step(idle(s)); s.boss!.y = s.boss!.targetY; s.drainEvents(); return s; };
+  it('보스가 맞을 때마다 무기별 bossHit 이벤트가 나온다', () => {
+    const s = boss(); const b = s.boss!;
+    s.bullets.push({ x: b.x, y: b.y, vx: 0, vy: 0, dmg: 2, pierce: 0 } as any); s.step(idle(s));
+    s.missiles.push({ x: b.x, y: b.y, vx: 0, vy: 0, speed: 9, dmg: 3 } as any); s.step(idle(s));
+    const evs = s.drainEvents().filter(e => e.t === 'bossHit') as any[];
+    expect(evs.map(e => e.src)).toEqual(expect.arrayContaining(['bullet', 'missile']));
+    expect(evs.every(e => e.target === 'boss' && e.dmg > 0)).toBe(true);
+  });
+  it('체력이 70/40/10% 아래로 내려갈 때 bossBreak가 단계별로 한 번씩 나온다', () => {
+    const s = boss(); const b = s.boss!;
+    const stages: number[] = [];
+    for (const f of [0.65, 0.6, 0.35, 0.05]) { b.hp = b.maxHp * f; s.bullets.push({ x: b.x, y: b.y, vx: 0, vy: 0, dmg: 1, pierce: 0 } as any); s.step(idle(s)); for (const e of s.drainEvents()) if (e.t === 'bossBreak') stages.push(e.stage); }
+    expect(stages).toEqual([1, 2, 3]);
+  });
+  it('페이즈 전환과 격추 때 슬로모션 이벤트가 나온다', () => {
+    const s = boss(); const b = s.boss!; b.hp = b.maxHp * 0.45; s.step(idle(s));
+    expect(s.drainEvents().some(e => e.t === 'slowmo')).toBe(true);
+    b.hp = 0; s.step(idle(s)); expect(s.drainEvents().some(e => e.t === 'slowmo')).toBe(true);
+  });
+  it('레이저가 적/보스에 닿으면 laserHit 이벤트와 착탄 기록이 남는다', () => {
+    const s = boss(); const b = s.boss!; s.build.levels.laser = 2; s.stats = statsOf(s.build); s.player.x = b.x; s.player.y = 650;
+    for (let i = 0; i < 6; i++) { s.player.invincible = 99999; s.step({ ...idle(s, true) }); }
+    expect(s.drainEvents().some(e => e.t === 'laserHit')).toBe(true); expect(s.laser.hits.length).toBeGreaterThan(0);
+  });
+});
+
+describe('옆에서 오는 적', () => {
+  const fight = (tier: number) => { const s = new Sim(4); s.startAtTier(tier); s.stagePhase = 'FIGHT'; s.stageFrames = -1e9; s.player.invincible = 99999; return s; };
+  it('2스테이지부터 일부 비행기가 옆에서 날아 들어와 반대편으로 사라진다', () => {
+    const s = fight(3); let side = 0;
+    for (let i = 0; i < 3000; i++) { s.step(idle(s)); for (const e of s.enemies) if (e.side && e.age === 1) side++; }
+    expect(side).toBeGreaterThan(3);
+    expect(fight(1).enemies.length).toBe(0);
+    const t = fight(1); for (let i = 0; i < 3000; i++) { t.step(idle(t)); expect(t.enemies.some(e => e.side)).toBe(false); }
+  });
+  it('화면 밖에 있는 측면 적은 맞지 않고, 지나가면 제거된다', () => {
+    const s = fight(3); s.enemies.length = 0;
+    s.enemies.push({ type: 'scout', x: -30, y: 120, hp: 2, maxHp: 2, speed: 0, baseX: 120, age: 5, fireCd: 99, hold: 0, vx: 3, side: true });
+    s.bullets.push({ x: -30, y: 120, vx: 0, vy: 0, dmg: 5, pierce: 0 } as any); s.step(idle(s));
+    expect(s.enemies[0].hp).toBe(2);
+    s.enemies[0].x = W + 70; s.enemies[0].age = 100; s.step(idle(s)); expect(s.enemies.length).toBe(0);
+  });
+  it('횡대(flank) 벌떼는 양쪽 가장자리 밖에서 가로로 움직인다', () => {
+    const s = fight(4); s.enemies.length = 0; (s as any).spawnHorde('flank');
+    const d = s.enemies.filter(e => e.type === 'drone'); expect(d.length).toBe(36);
+    expect(d.some(e => (e.vx ?? 0) > 0 && e.x < 0)).toBe(true); expect(d.some(e => (e.vx ?? 0) < 0 && e.x > W)).toBe(true);
+    const x0 = d[0].x; s.step(idle(s)); expect(s.enemies.find(e => e === d[0])!.x).not.toBe(x0);
   });
 });

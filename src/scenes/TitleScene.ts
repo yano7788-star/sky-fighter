@@ -86,7 +86,7 @@ export class TitleScene extends Phaser.Scene {
 
     const best = loadBest();
     root.add(this.add.text(W / 2, H * 0.965, (best.score > 0 ? `BEST ${best.score}  ·  STAGE ${best.stage}` : 'NO RECORD YET') + `   ·   CREDITS ${loadMeta().credits}`, textStyle(13, '#94a3b8')).setOrigin(0.5));
-    root.add(this.add.text(W - 10, H - 8, VERSION, textStyle(10, '#475569', false)).setOrigin(1, 1));
+    root.add(this.add.text(10, 8, VERSION, textStyle(10, '#64748b', false)).setOrigin(0, 0).setAlpha(0.8));   // 거슬리지 않게 좌상단에 작게
     this.muteText = this.add.text(SOUND.x, SOUND.y, '', { fontFamily: FONT, fontSize: '20px', resolution: R }).setOrigin(0.5);
     root.add(this.muteText);
 

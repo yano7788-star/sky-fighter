@@ -88,14 +88,18 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
   zigzag:   { hp: 3, score: 20, hitR: 22, bodyR: 15, xp: 5 },   // 좌우로 흔들리며 내려오고 조준탄을 쏨
   kamikaze: { hp: 2, score: 15, hitR: 20, bodyR: 14, xp: 4 },   // 플레이어 쪽으로 가속하며 돌진
   sniper:   { hp: 5, score: 40, hitR: 26, bodyR: 18, xp: 10 },   // 상단에 멈춰서 조준 사격 후 퇴장
+  drone:    { hp: 1, score: 5,  hitR: 14, bodyR: 10, xp: 1 },    // 벌떼 드론: 인해전술용 잡병 (아이템 안 떨굼)
+  mine:     { hp: 4, score: 25, hitR: 20, bodyR: 15, xp: 6 },    // 부유 기뢰: 느리게 떠다니다 터지면 탄 고리
+  turret:   { hp: 6, score: 30, hitR: 22, bodyR: 18, xp: 8 },    // 지상 포대: 배경과 함께 스크롤, 3갈래 조준 사격
+  rock:     { hp: 9, score: 35, hitR: 26, bodyR: 20, xp: 9 },    // 운석 괴수: 단단하고 처치하면 드론 둘로 쪼개짐
 };
 /** 스테이지(1~5)별 등장 가중치 */
 export const ENEMY_WEIGHTS: Record<number, Partial<Record<EnemyType, number>>> = {
   1: { scout: 100 },
-  2: { scout: 55, zigzag: 30, kamikaze: 15 },
-  3: { scout: 35, zigzag: 25, kamikaze: 20, sniper: 20 },
-  4: { scout: 25, zigzag: 25, kamikaze: 25, sniper: 25 },
-  5: { scout: 20, zigzag: 25, kamikaze: 30, sniper: 25 },
+  2: { scout: 45, zigzag: 25, kamikaze: 10, turret: 20 },
+  3: { scout: 28, zigzag: 20, kamikaze: 15, sniper: 12, mine: 15, turret: 10 },
+  4: { scout: 18, zigzag: 18, kamikaze: 20, sniper: 14, mine: 15, rock: 15 },
+  5: { scout: 14, zigzag: 18, kamikaze: 22, sniper: 14, mine: 12, rock: 10, turret: 10 },
 };
 
 // ---------------------------------------------------------------------------
@@ -118,13 +122,26 @@ export const enemyHpScale = (tier: number) => 1 + 0.14 * (tier - 1);
 /** 적이 이 높이(y) 아래로 내려와 '화면 안'에 들어오기 전에는 맞지 않는다 (화면 밖에서 죽는 문제 방지) */
 export const ON_SCREEN_Y = 14;
 
+/** 인해전술(벌떼): 스테이지 전투 진행도 at 지점에 예고 후 화면을 가득 채워 한 번에 내려온다 */
+export type HordeKind = 'wall' | 'diag' | 'pincer' | 'flank';   // flank = 양옆에서 가로로 휩쓸고 지나가는 횡대
+export const HORDES: Record<number, { at: number; kind: HordeKind }[]> = {
+  1: [{ at: 0.55, kind: 'wall' }],
+  2: [{ at: 0.3, kind: 'diag' }, { at: 0.8, kind: 'wall' }],
+  3: [{ at: 0.3, kind: 'pincer' }, { at: 0.8, kind: 'diag' }],
+  4: [{ at: 0.3, kind: 'flank' }, { at: 0.8, kind: 'pincer' }],
+  5: [{ at: 0.25, kind: 'diag' }, { at: 0.55, kind: 'flank' }, { at: 0.85, kind: 'wall' }],
+};
+export const HORDE = { warn: 100, speed: 2.5, contactDmg: 18 };
+/** 옆에서 날아오는 적: 2스테이지부터, 비행기류가 이 확률로 측면에서 등장 */
+export const SIDE_ENTRY_CHANCE = 0.22;
+
 /** 하이퍼 모드: 탄을 스쳐 게이지를 채우면 자동 발동 — 탄 소거(+점수), 점수 ×2, 연사 +20% */
 export const HYPER = { perGraze: 4, frames: 360, scoreMult: 2, rate: 1.2, bulletScore: 10 };
 /** 유물·약점 노출 도입 후의 보스 체력 보정 */
 export const BOSS_HP_MULT = 1.5;
 
 /** 보스 특수 공격: 스테이지별 종류(순서대로 번갈아) — 1스테이지는 기본기만 */
-export const BOSS_SPECIALS: Record<number, ('laser' | 'charge')[]> = { 2: ['laser'], 3: ['charge'], 4: ['laser', 'charge'], 5: ['laser', 'charge'] };
+export const BOSS_SPECIALS: Record<number, ('laser' | 'charge' | 'swarm')[]> = { 1: ['swarm'], 2: ['laser'], 3: ['charge'], 4: ['laser', 'charge'], 5: ['laser', 'charge', 'swarm'] };
 export const BOSS_SP = {
   cd: [420, 330, 250],            // 1·2·3페이즈 특수 공격 간격(프레임)
   laserWarn: 70, laserAct: 45, laserHalf: 34, laserDmg: 30, tripleOff: 120,   // 2페이즈부터 빔 3줄기(사이 틈으로 피한다)

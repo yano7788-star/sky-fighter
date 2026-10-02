@@ -69,6 +69,34 @@ export function buildStaticTextures(scene: Phaser.Scene): void {
     c.fillStyle = '#22d3ee'; c.strokeStyle = '#ecfeff'; c.lineWidth = 1;
     c.beginPath(); c.moveTo(6, 1); c.lineTo(11, 7); c.lineTo(6, 13); c.lineTo(1, 7); c.closePath(); c.fill(); c.stroke();
   });
+  // 비행기가 아닌 적들 (생성 텍스처)
+  makeTexture(scene, 'enemy_drone', 26, 26, c => {   // 벌떼 드론: 붉은 눈의 작은 구체 + 날개
+    c.fillStyle = '#7f1d1d'; c.strokeStyle = '#fca5a5'; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(2, 8); c.lineTo(10, 13); c.lineTo(2, 18); c.closePath(); c.fill(); c.stroke();
+    c.beginPath(); c.moveTo(24, 8); c.lineTo(16, 13); c.lineTo(24, 18); c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#991b1b'; c.beginPath(); c.arc(13, 13, 7, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.fillStyle = '#fef08a'; c.beginPath(); c.arc(13, 13, 2.6, 0, Math.PI * 2); c.fill();
+  });
+  makeTexture(scene, 'enemy_mine', 44, 44, c => {   // 부유 기뢰: 가시 달린 구체
+    c.strokeStyle = '#a16207'; c.lineWidth = 3;
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; c.beginPath(); c.moveTo(22 + Math.cos(a) * 11, 22 + Math.sin(a) * 11); c.lineTo(22 + Math.cos(a) * 20, 22 + Math.sin(a) * 20); c.stroke(); }
+    c.fillStyle = '#422006'; c.strokeStyle = '#facc15'; c.lineWidth = 2; c.beginPath(); c.arc(22, 22, 12, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.fillStyle = '#ef4444'; c.beginPath(); c.arc(22, 22, 4, 0, Math.PI * 2); c.fill();
+  });
+  makeTexture(scene, 'enemy_turret', 52, 52, c => {   // 지상 포대: 팔각 기단 + 세 갈래 포신
+    c.fillStyle = '#334155'; c.strokeStyle = '#94a3b8'; c.lineWidth = 2;
+    c.beginPath(); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + Math.PI / 8; c.lineTo(26 + Math.cos(a) * 23, 26 + Math.sin(a) * 23); } c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#475569'; for (const dx of [-8, 0, 8]) c.fillRect(24 + dx, 26, 4, 22);
+    c.fillStyle = '#1e293b'; c.strokeStyle = '#facc15'; c.beginPath(); c.arc(26, 24, 11, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.fillStyle = '#facc15'; c.beginPath(); c.arc(26, 24, 3.5, 0, Math.PI * 2); c.fill();
+  });
+  makeTexture(scene, 'enemy_rock', 58, 58, c => {   // 운석 괴수: 울퉁불퉁한 바위 + 갈라진 틈의 용암빛
+    c.fillStyle = '#44403c'; c.strokeStyle = '#a8a29e'; c.lineWidth = 2;
+    c.beginPath(); const pts = [[8, 22], [18, 6], [36, 4], [52, 16], [54, 38], [42, 54], [20, 52], [6, 40]];
+    pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.fill(); c.stroke();
+    c.strokeStyle = '#fb923c'; c.lineWidth = 2; c.beginPath(); c.moveTo(20, 14); c.lineTo(30, 28); c.lineTo(26, 40); c.moveTo(30, 28); c.lineTo(44, 30); c.stroke();
+    c.fillStyle = '#fde68a'; c.beginPath(); c.arc(24, 26, 3, 0, Math.PI * 2); c.arc(36, 24, 3, 0, Math.PI * 2); c.fill();
+  });
   makeTexture(scene, 'drone', 22, 22, c => {
     c.fillStyle = '#065f46'; c.strokeStyle = '#34d399'; c.lineWidth = 2; c.beginPath(); c.arc(11, 11, 8, 0, Math.PI * 2); c.fill(); c.stroke();
     c.fillStyle = '#a7f3d0'; c.beginPath(); c.arc(11, 11, 3, 0, Math.PI * 2); c.fill();

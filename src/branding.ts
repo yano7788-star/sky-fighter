@@ -3,4 +3,4 @@
 export const TITLE_LINES = ['SKY', 'BREAKER'] as const;   // 타이틀 화면에 줄 단위로 표시
 export const SUBTITLE = 'NEON STRIKE';
 export const TAGLINE = '하늘을 가르고, 우주의 끝에서 심판자를 쓰러뜨려라';
-export const VERSION = 'v2.0';
+export const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';   // 빌드 때 package.json 버전 + 커밋 + 날짜로 주입

@@ -73,6 +73,15 @@ export class Fx {
     }
   }
 
+  /** 입사 반대(반사) 방향으로 튀는 불꽃: ang 기준 ±spread 라디안 */
+  sparkDir(x: number, y: number, color: string, count: number, ang: number, spread = 0.9): void {
+    const c = hex(color);
+    for (let i = 0; i < count && this.sparks.length < 160; i++) {
+      const a = ang + (Math.random() - 0.5) * 2 * spread, sp = 6 + Math.random() * 9, life = 10 + Math.random() * 9;
+      this.sparks.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life, max: life, len: 6 + Math.random() * 10, color: c });
+    }
+  }
+
   /** 중심으로 빨려 드는 불꽃 (에너지 충전 연출) */
   chargeSpark(x: number, y: number, color: string): void {
     const c = hex(color), a = Math.random() * Math.PI * 2, d = 36 + Math.random() * 14;

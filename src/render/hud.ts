@@ -94,6 +94,7 @@ export class Hud {
     text('mute', W - 25, 36, 18, '#38bdf8', 1, 1, false);
     text('lives', W - 20, 65, 18, '#f43f5e', 1, 1, false);
     text('bossName', 0, 0, 11, '#ffffff', 0.5, 1);
+    text('horde', W / 2, H * 0.3, 22, '#fbbf24', 0.5, 0.5).setShadow(0, 0, '#000', 6, true, true);
     text('phase2', W / 2, H * 0.38, 20, '#ef4444', 0.5, 0.5).setShadow(0, 0, '#000', 6, true, true);
 
     // 일시정지 버튼 아이콘
@@ -235,6 +236,7 @@ export class Hud {
     this.setText('score', `SCORE ${sim.score}`);
     this.setText('best', `BEST ${Math.max(bestScore, sim.score)}`);
     this.setText('stage', `STAGE ${sim.bossTier}`);
+    this.t.horde.setVisible(sim.hordeWarn > 0 && Math.floor(sim.frame / 8) % 2 === 0); if (sim.hordeWarn > 0) this.setText('horde', '⚠ 대군 접근! ⚠');
     const buffs: string[] = [];
     if (sim.hasHomingMissile) buffs.push(`MISSILE ${Math.ceil(sim.missileTimer / 60)}s`);
     if (p.shield > 0) buffs.push('SHIELD');
