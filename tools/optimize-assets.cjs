@@ -144,10 +144,12 @@ async function photo(srcPath, outName, maxW, quality) {
   await plainSprite(path.join(LEG, 'mob_midboss.png'), 'midboss', 320);
   await plainSprite(path.join(LEG, 'skill_palm.png'), 'skill_palm', 360);
   await photo(path.join(LEG, 'skill_card.jpg'), 'skill_card', 540, 85);
-  for (const n of ['bg1', 'bg2', 'bg3', 'bg4', 'bg5']) await bg(n, 1080, 200);
-  await sprite('player', 256);
+  // assets-src/incoming/ 에 새 이미지가 있는 항목은 tools/process-incoming.cjs 가 처리하므로 여기서는 건너뛴다
+  const incoming = n => fs.existsSync(path.join(ROOT, 'assets-src', 'incoming', n + '.png'));
+  for (const n of ['bg1', 'bg2', 'bg3', 'bg4', 'bg5']) if (!incoming(n)) await bg(n, 1080, 200);
+  if (!incoming('player')) await sprite('player', 256);
   await sprite('bomb', 256);
-  for (let i = 1; i <= 5; i++) await sprite('boss' + i, 320);
+  for (let i = 1; i <= 5; i++) if (!incoming('boss' + i)) await sprite('boss' + i, 320);
   if (process.argv.includes('--stats')) {
     for (const n of ['bg1', 'bg2', 'bg3', 'bg4', 'bg5', 'player', 'bomb', 'boss1', 'boss2', 'boss3', 'boss4', 'boss5']) await stats(n);
   }

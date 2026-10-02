@@ -13,15 +13,30 @@ export class Fx {
   private rings: Ring[] = [];
   private pool: Phaser.GameObjects.Image[] = [];
   private gfx: Phaser.GameObjects.Graphics;
+  private boomPool: Phaser.GameObjects.Sprite[] = [];
 
   constructor(private scene: Phaser.Scene, private parent: Phaser.GameObjects.Container) {
     this.gfx = scene.add.graphics();
     parent.add(this.gfx);
   }
 
-  clear(): void { this.particles.length = 0; this.rings.length = 0; }
+  clear(): void { this.particles.length = 0; this.rings.length = 0; this.boomPool.forEach(b => { b.stop(); b.setVisible(false); }); }
+
+  /** 스프라이트 폭발: 파티클이 많은 폭발(count>=10)에만 곁들인다. 크기는 count에 비례 */
+  private boomSprite(x: number, y: number, count: number): void {
+    let sp = this.boomPool.find(b => !b.visible);
+    if (!sp) {
+      if (this.boomPool.length >= 16) return;
+      sp = this.scene.add.sprite(0, 0, 'explosion'); this.parent.add(sp); this.boomPool.push(sp);
+      sp.on(Phaser.Animations.Events.ANIMATION_COMPLETE, () => sp!.setVisible(false));
+    }
+    const size = Math.max(44, Math.min(170, 22 + count * 3.1));
+    sp.setVisible(true).setPosition(x, y).setDisplaySize(size, size).setRotation(Math.random() * Math.PI * 2).setAlpha(0.95);
+    sp.play('explosion');
+  }
 
   explosion(x: number, y: number, color: string, count: number): void {
+    if (count >= 10) this.boomSprite(x, y, count);
     const c = hex(color);
     for (let i = 0; i < count && this.particles.length < MAX_PARTICLES; i++) {
       const ang = Math.random() * Math.PI * 2, spd = Math.random() * 5 + 2;

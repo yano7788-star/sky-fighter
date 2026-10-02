@@ -3,7 +3,12 @@ import { H, W } from '../core/config';
 import { textStyle } from '../render/hud';
 import { R, buildStaticTextures } from '../render/textures';
 
-const IMAGES = ['ally_cat', 'ally_dog', 'enemy_warship', 'midboss', 'skill_card', 'skill_palm', 'player', 'bomb', 'boss1', 'boss2', 'boss3', 'boss4', 'boss5', 'bg1', 'bg2', 'bg3', 'bg4', 'bg5'];
+const IMAGES = [
+  'ally_cat', 'ally_dog', 'enemy_warship', 'enemy_scout', 'enemy_zigzag', 'enemy_kamikaze', 'midboss_2', 'midboss_3',
+  'skill_card', 'skill_palm', 'player', 'player_skin2', 'player_skin3', 'pilot1', 'pilot2', 'bomb',
+  'boss1', 'boss2', 'boss3', 'boss4', 'boss5', 'bg1', 'bg2', 'bg3', 'bg4', 'bg5', 'title_bg', 'logo',
+  'gem', 'drone', 'item_P', 'item_M', 'item_E', 'item_B', 'item_G', 'item_L',
+];
 
 /** 이미지 로딩 + 공용 텍스처 생성. 로딩 진행 바를 보여준다. */
 export class BootScene extends Phaser.Scene {
@@ -19,11 +24,13 @@ export class BootScene extends Phaser.Scene {
     this.load.on('progress', (p: number) => { bar.width = bw * p; label.setText(`LOADING ${Math.round(p * 100)}%`); });
 
     this.load.setPath('assets/img/');
-    for (const name of IMAGES) this.load.image(name, `${name}.webp`);
+    for (const name of IMAGES) this.load.image(name, `${name}.webp?v=${__BUILD__}`);
+    this.load.spritesheet('explosion', `explosion.webp?v=${__BUILD__}`, { frameWidth: 128, frameHeight: 128 });   // 13프레임 폭발 스프라이트
   }
 
   create(): void {
     buildStaticTextures(this);
+    if (!this.anims.exists('explosion')) this.anims.create({ key: 'explosion', frames: this.anims.generateFrameNumbers('explosion', { start: 0, end: 12 }), frameRate: 28, repeat: 0 });
     this.scene.start('TitleScene');
   }
 }

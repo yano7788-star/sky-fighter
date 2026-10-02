@@ -1,8 +1,6 @@
 import Phaser from 'phaser';
 import { H, W } from '../core/config';
-import { createRng } from '../core/rng';
-import { SUBTITLE, TAGLINE, TITLE_LINES, VERSION } from '../branding';
-import { ScrollingBackground } from '../render/background';
+import { TAGLINE, VERSION } from '../branding';
 import { FONT, textStyle } from '../render/hud';
 import { R, S } from '../render/textures';
 import { audio } from '../systems/audio';
@@ -30,25 +28,23 @@ export class TitleScene extends Phaser.Scene {
   private started = false;
   private btn!: Phaser.GameObjects.Graphics;
   private jet!: Phaser.GameObjects.Image;
-  private flames: Phaser.GameObjects.Image[] = [];
   private shots: { img: Phaser.GameObjects.Image; y: number }[] = [];
-  private bg!: ScrollingBackground;
+  private art!: Phaser.GameObjects.Image;
   private helpGroup: Phaser.GameObjects.GameObject[] = [];
   private helpOpen = false;
   private muteText!: Phaser.GameObjects.Text;
-  private nextBg = 0;
 
   constructor() { super('TitleScene'); }
 
   create(): void {
     this.started = false; this.helpOpen = false;
-    this.flames = []; this.shots = []; this.helpGroup = [];
+    this.shots = []; this.helpGroup = [];
     const root = this.add.container(0, 0).setScale(R);
 
-    // 배경: 스테이지 배경들을 천천히 순환 + 별
-    this.bg = new ScrollingBackground(this, root, createRng(7));
-    this.bg.reset();
-    this.nextBg = -1;
+    // 배경: 타이틀 키아트 (화면을 꽉 채우도록 cover)
+    this.art = this.add.image(W / 2, H / 2, 'title_bg');
+    this.art.setScale(Math.max(W / this.art.width, H / this.art.height) * 1.04);
+    root.add(this.art);
 
     // 위·아래를 어둡게 눌러 로고/버튼 가독성 확보
     const shade = this.add.graphics();
@@ -64,26 +60,14 @@ export class TitleScene extends Phaser.Scene {
       root.add(img); this.shots.push({ img, y: -50 });
     }
     this.jet = this.add.image(W / 2, H * 0.58, 'player');
-    const ar = this.jet.height / this.jet.width;
-    this.jet.setDisplaySize(130, 130 * ar);
-    for (const dx of [-14, 14]) {
-      const f = this.add.image(W / 2 + dx, H * 0.58 + 42, 'dot').setTint(0xfb923c).setBlendMode(Phaser.BlendModes.ADD);
-      this.flames.push(f); root.add(f);
-    }
+    this.jet.setDisplaySize(120, (120 * this.jet.height) / this.jet.width);
     root.add(this.jet);
 
-    // 로고
-    TITLE_LINES.forEach((line, i) => {
-      const size = i === 0 ? 62 : 52;
-      const t = this.add.text(W / 2, H * 0.14 + i * 62, line, {
-        ...textStyle(size, '#f8fafc'), stroke: '#0ea5e9', strokeThickness: 5,
-      }).setOrigin(0.5).setShadow(0, 0, '#22d3ee', 18, true, true);
-      root.add(t);
-    });
-    const sub = this.add.text(W / 2, H * 0.14 + TITLE_LINES.length * 62 + 4, SUBTITLE.split('').join(' '), textStyle(20, '#22d3ee')).setOrigin(0.5);
-    sub.setShadow(0, 0, '#0891b2', 10, true, true);
-    root.add(sub);
-    root.add(this.add.text(W / 2, H * 0.14 + TITLE_LINES.length * 62 + 36, TAGLINE, { ...textStyle(12, '#94a3b8', false), wordWrap: { width: W - 60 }, align: 'center' }).setOrigin(0.5));
+    // 로고 (이미지)
+    const logo = this.add.image(W / 2, H * 0.17, 'logo');
+    logo.setDisplaySize(W * 0.84, (W * 0.84 * logo.height) / logo.width);
+    root.add(logo);
+    root.add(this.add.text(W / 2, H * 0.17 + logo.displayHeight / 2 + 18, TAGLINE, { ...textStyle(12, '#cbd5e1', false), wordWrap: { width: W - 60 }, align: 'center' }).setOrigin(0.5).setShadow(0, 0, '#000', 6, true, true));
 
     // 버튼
     this.btn = this.add.graphics(); root.add(this.btn);
@@ -148,14 +132,11 @@ export class TitleScene extends Phaser.Scene {
   }
 
   update(time: number): void {
-    this.bg.tick(); this.bg.render();
-    if (this.nextBg < 0) this.nextBg = time + 5000;
-    if (time > this.nextBg) { this.nextBg = time + 6000; this.bg.setTier((this.bgTier = (this.bgTier % 5) + 1)); }
+    this.art.setScale(Math.max(W / this.art.width, H / this.art.height) * (1.04 + Math.sin(time * 0.0004) * 0.012));   // 아주 느리게 숨 쉬는 배경
 
     // 전투기 부유 + 엔진 불꽃
     const bob = Math.sin(time * 0.002) * 6;
     this.jet.setY(H * 0.58 + bob);
-    this.flames.forEach((f, i) => f.setPosition(W / 2 + (i ? 14 : -14), H * 0.58 + bob + 44).setScale(S * (1.1 + Math.random() * 0.5), S * (1.8 + Math.random() * 1.2)).setAlpha(0.7 + Math.random() * 0.3));
     // 위로 올라가는 탄
     if (Math.floor(time / 130) !== Math.floor((time - 16) / 130)) {
       const free = this.shots.find(s => !s.img.visible);
@@ -181,5 +162,4 @@ export class TitleScene extends Phaser.Scene {
     if (pad && (pad.buttons[0]?.pressed || pad.buttons[9]?.pressed) && !this.started && !this.helpOpen) this.start();
   }
 
-  private bgTier = 1;
 }

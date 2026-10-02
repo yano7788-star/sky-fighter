@@ -92,8 +92,7 @@ export class GameScene extends Phaser.Scene {
 
     // 플레이어 / 총구 섬광 / 보스
     this.playerImg = this.add.image(0, 0, 'player');
-    const aspect = this.playerImg.height / this.playerImg.width;
-    this.playerImg.setDisplaySize(100, 100 * aspect);
+    this.playerImg.setDisplaySize(66, (66 * this.playerImg.height) / this.playerImg.width);   // 새 기체(세로로 긴 제트)
     this.layers.player.add(this.playerImg);
     for (let i = 0; i < 2; i++) {
       const m = this.add.image(0, 0, 'dot').setScale(S * 10 / 8).setTint(0xfef9c3).setVisible(false);
@@ -376,11 +375,12 @@ export class GameScene extends Phaser.Scene {
     this.world.setPosition(sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0, sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0);
     this.bg.render();
 
-    this.sync('items', this.layers.items, s.items, it => `item_${it.type}`, (img, it) => img.setPosition(it.x, it.y));
-    this.sync('gems', this.layers.gems, s.gems, () => 'gem', (img, g) => img.setPosition(g.x, g.y + Math.sin((s.frame + g.x) * 0.1) * 1.5).setScale(S));
+    this.sync('items', this.layers.items, s.items, it => `item_${it.type}`, (img, it) => img.setPosition(it.x, it.y).setDisplaySize(32, 32));
+    this.sync('gems', this.layers.gems, s.gems, () => 'gem', (img, g) => img.setPosition(g.x, g.y + Math.sin((s.frame + g.x) * 0.1) * 1.5).setDisplaySize(17, 17));
     this.sync('enemies', this.layers.enemies, s.enemies, e => (e.type === 'sniper' ? 'enemy_warship' : `enemy_${e.type}`), (img, e) => {
-      img.setPosition(e.x, e.y);
-      if (e.type === 'sniper') img.setDisplaySize(64, (64 * 89) / 164); else img.setScale(S);   // 저격형은 전용 스프라이트(워쉽)
+      // 전용 스프라이트: 정찰기/지그재그/돌진형은 위를 향하는 그림이라 180° 돌려 아래를 보게 하고, 저격형(워쉽)은 그대로
+      const w = e.type === 'sniper' ? 64 : e.type === 'scout' ? 46 : e.type === 'zigzag' ? 50 : 40;
+      img.setPosition(e.x, e.y).setDisplaySize(w, (w * img.frame.height) / img.frame.width).setRotation(e.type === 'sniper' ? 0 : Math.PI);
     });
     this.sync('pbullets', this.layers.pbullets, s.bullets, () => 'pbullet', (img, b) => img.setPosition(b.x, b.y));
     this.sync('missiles', this.layers.missiles, s.missiles, () => 'missile', (img, m) => img.setPosition(m.x, m.y).setRotation(Math.atan2(m.vy, m.vx) + Math.PI / 2));
@@ -389,7 +389,7 @@ export class GameScene extends Phaser.Scene {
     const p = s.player;
     this.playerImg.setPosition(p.x, p.y).setAlpha(p.invincible > 0 && Math.floor(s.frame / 4) % 2 === 0 ? 0.4 : 1);
     this.muzzleImgs.forEach((m, i) => m.setVisible(this.muzzle > 0).setPosition(p.x + (i ? 18 : -18), p.y - 30));
-    this.sync('drones', this.layers.player, s.dronePositions(), () => 'drone', (img, d) => img.setPosition(d.x, d.y).setScale(S));
+    this.sync('drones', this.layers.player, s.dronePositions(), () => 'drone', (img, d) => img.setPosition(d.x, d.y).setDisplaySize(26, 26));
     this.renderPlayerAuras();
     this.renderWeaponFx();
     this.renderCompanions();
@@ -469,9 +469,10 @@ export class GameScene extends Phaser.Scene {
     const frame = this.sim.frame;
     const jit = m.dying && !this.paused;
     const cx = m.x + (jit ? (Math.random() - 0.5) * 6 : 0), cy = m.y + (jit ? (Math.random() - 0.5) * 5 : 0);
-    const mw = m.width * 1.3;   // 중간보스: 비명 지르는 얼굴 (입에서 레이저)
-    this.midImg.setTexture('midboss').setVisible(true).setPosition(cx, cy + Math.sin(frame * 0.1) * 2).setRotation(0)
-      .setDisplaySize(mw, (mw * 191) / 208)
+    const mkey = `midboss_${m.tier}`, mfr = this.textures.get(mkey).getSourceImage() as HTMLImageElement;
+    const mw = m.width * 1.25;   // 중간보스: 스테이지별 전용 기체 (위를 향하는 그림이라 180° 회전)
+    this.midImg.setTexture(mkey).setVisible(true).setPosition(cx, cy + Math.sin(frame * 0.1) * 2).setRotation(Math.PI)
+      .setDisplaySize(mw, (mw * mfr.height) / mfr.width)
       .setAlpha(m.dying && Math.floor(frame / 3) % 2 === 0 ? 0.6 : 1).setTint(m.state === 'CHARGE' && Math.floor(frame / 4) % 2 === 0 ? 0xffb4b4 : 0xffffff);
     if (m.dying) return;
 
