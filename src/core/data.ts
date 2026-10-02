@@ -1,12 +1,12 @@
 import type { Boss, BossConfig, EnemyBullet, EnemyType, MidBossConfig, Rank } from './types';
 
-// 보스 1~5 설정 (HP: 650/1200/2000/3100/4900 — 플레이어가 성장하는 로그라이트 구조에 맞춰 상향)
+// 보스 1~5 설정 (HP: 650/1200/1800/3700/6600 — 플레이어가 성장하는 로그라이트 구조에 맞춰 상향)
 export const BOSS_CONFIGS: Record<number, BossConfig> = {
   1: { name: 'STAGE 1: TANK BUSTER',     hp: 650,  color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
   2: { name: 'STAGE 2: CYBER STEALTH',   hp: 1200, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
-  3: { name: 'STAGE 3: AEGIS FLAGSHIP',  hp: 2000, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
-  4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 3100, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
-  5: { name: 'STAGE 5: VOID ARCHANGEL',  hp: 4900, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 },
+  3: { name: 'STAGE 3: AEGIS FLAGSHIP',  hp: 1800, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
+  4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 3700, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
+  5: { name: 'STAGE 5: VOID ARCHANGEL',  hp: 6600, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 },
 };
 
 // ---------------------------------------------------------------------------

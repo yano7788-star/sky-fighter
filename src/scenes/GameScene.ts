@@ -7,7 +7,7 @@ import { Sim } from '../core/sim';
 import type { SimEvent, SkillKey } from '../core/types';
 import { ScrollingBackground } from '../render/background';
 import { Fx } from '../render/fx';
-import { Hud, UI, inZone, isUiZone } from '../render/hud';
+import { Hud, UI, companionZoneActive, inZone, isUiZone } from '../render/hud';
 import { LevelUpOverlay } from '../render/levelup';
 import { UltFx } from '../render/ultfx';
 import { R, S, bulletTexture } from '../render/textures';
@@ -185,14 +185,14 @@ export class GameScene extends Phaser.Scene {
     if (inZone(UI.pause, x, y)) { this.setPaused(true); return; }
     if (inZone(UI.bomb, x, y)) { this.bombQueued = true; return; }
     if (inZone(UI.ult, x, y)) { this.skillQueued = 'ult'; return; }
-    if (inZone(UI.cat, x, y)) { this.skillQueued = 'cat'; return; }
-    if (inZone(UI.dog, x, y)) { this.skillQueued = 'dog'; return; }
+    if (inZone(UI.cat, x, y) && companionZoneActive(this.sim, 'cat')) { this.skillQueued = 'cat'; return; }
+    if (inZone(UI.dog, x, y) && companionZoneActive(this.sim, 'dog')) { this.skillQueued = 'dog'; return; }
     if (this.activeId !== null) return;         // 이미 다른 손가락이 조작 중이면 무시 (보조 손가락은 버튼 전용)
     this.activeId = id; this.firing = true; this.fireGrace = 10;
     this.targetX = x; this.targetY = y - 50;
   }
   private moveAt(id: number, x: number, y: number): void {
-    if (this.paused || this.resultKind || id !== this.activeId || isUiZone(x, y)) return;
+    if (this.paused || this.resultKind || id !== this.activeId || isUiZone(x, y, this.sim)) return;
     this.targetX = x; this.targetY = y - 50;
   }
   private releaseAt(id: number): void { if (id === this.activeId) { this.activeId = null; this.firing = false; } }
@@ -217,7 +217,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setPaused(v: boolean): void {
-    if (v === this.paused || (v && (this.resultKind || !this.sim))) return;
+    if (v === this.paused || (v && (this.resultKind || !this.sim || this.sim.pending))) return;
     this.paused = v; this.acc = 0;
     this.activeId = null; this.firing = false; this.keys.clear();
     if (v) this.hud.setBuildText(this.buildSummary());
@@ -236,6 +236,7 @@ export class GameScene extends Phaser.Scene {
     this.padFire = btn(0) || btn(5) || btn(7);
     if (edge('start', btn(9))) { audio.unlock(); if (this.paused) this.setPaused(false); else if (this.resultKind) this.resultTap(); else this.setPaused(true); }
     if (edge('a', btn(0))) { if (this.paused) this.setPaused(false); else if (this.resultKind) this.resultTap(); }
+    if (this.paused) return;
     if (this.sim.pending) {   // 카드 선택: 좌우로 이동, A로 선택
       if (edge('left', btn(14) || (pad.axes[0]?.getValue() ?? 0) < -0.6)) this.levelup.moveSelection(-1);
       if (edge('right', btn(15) || (pad.axes[0]?.getValue() ?? 0) > 0.6)) this.levelup.moveSelection(1);
@@ -453,11 +454,8 @@ export class GameScene extends Phaser.Scene {
     const g = this.auraG, p = this.sim.player, f = this.sim.frame;
     g.clear();
     if (p.shield > 0) {
-      const blink = p.shield < 120 && Math.floor(f / 5) % 2 === 0;   // 끝나기 2초 전부터 깜빡임
-      if (!blink) {
-        g.lineStyle(2.5, 0x60a5fa, 0.9); g.strokeCircle(p.x, p.y, 38 + Math.sin(f * 0.15) * 2);
-        g.fillStyle(0x3b82f6, 0.14); g.fillCircle(p.x, p.y, 38);
-      }
+      g.lineStyle(2.5, 0x60a5fa, 0.9); g.strokeCircle(p.x, p.y, 38 + Math.sin(f * 0.15) * 2);   // 방벽은 피격 전까지 유지
+      g.fillStyle(0x3b82f6, 0.14); g.fillCircle(p.x, p.y, 38);
     }
     if (p.magnet > 0 && (p.magnet > 120 || Math.floor(f / 5) % 2 === 0)) {
       g.lineStyle(1.5, 0xc084fc, 0.35); g.strokeCircle(p.x, p.y, 150);

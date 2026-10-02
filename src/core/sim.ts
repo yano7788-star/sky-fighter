@@ -95,7 +95,7 @@ export class Sim {
   }
 
   get multiplier(): number { return comboMultiplier(this.combo); }
-  get maxBombs(): number { return PLAYER.maxBombs + this.stats.bombCapBonus; }
+  get maxBombs(): number { return PLAYER.maxBombs + this.stats.bombCapBonus + this.meta.startBombs; }
   get ultReady(): boolean { return this.ult.gauge >= 100 && this.ult.phase === 'IDLE'; }
   get xpNext(): number { return xpNeeded(this.level); }
 
@@ -144,7 +144,14 @@ export class Sim {
     const need = xpNeeded(this.level);
     if (this.xp >= need) {
       this.xp -= need; this.level++;
-      this.pending = offerCards(this.build, this.rng);
+      const offer = offerCards(this.build, this.rng);
+      if (offer.length === 0) {   // 모든 카드를 최대로 키운 경우: 정지시키지 않고 보상으로 대체
+        this.score += 500; this.player.energy = Math.min(this.player.maxEnergy, this.player.energy + 25);
+        this.emit({ t: 'heal', x: this.player.x, y: this.player.y });
+        this.checkLevelUp();
+        return;
+      }
+      this.pending = offer;
       this.emit({ t: 'levelup', level: this.level });
     }
   }
@@ -339,9 +346,9 @@ export class Sim {
       if (e.y < p.y && e.y > -10 && Math.abs(e.x - p.x) < w / 2 + ENEMY_DEFS[e.type].hitR * 0.6) this.damageEnemy(e, dmg);
     }
     const b = this.boss;
-    if (b && !b.dying && b.y < p.y && Math.abs(b.x - p.x) < w / 2 + b.width / 2) { this.damageBoss(dmg); this.emit({ t: 'hitspark', x: p.x, y: b.y + b.height / 2 }); }
+    if (b && !b.dying && b.y > 20 && b.y < p.y && Math.abs(b.x - p.x) < w / 2 + b.width / 2) { this.damageBoss(dmg); this.emit({ t: 'hitspark', x: p.x, y: b.y + b.height / 2 }); }
     const m = this.midBoss;
-    if (m && !m.dying && m.y < p.y && Math.abs(m.x - p.x) < w / 2 + m.width / 2) { this.damageMid(dmg); this.emit({ t: 'hitspark', x: p.x, y: m.y + m.height / 2 }); }
+    if (m && !m.dying && m.y > 20 && m.y < p.y && Math.abs(m.x - p.x) < w / 2 + m.width / 2) { this.damageMid(dmg); this.emit({ t: 'hitspark', x: p.x, y: m.y + m.height / 2 }); }
   }
 
   // ---- 피해 처리 공통 (흡혈 포함) ----
@@ -508,7 +515,7 @@ export class Sim {
     }
 
     if (!b.dying) {
-      for (let j = this.bullets.length - 1; j >= 0; j--) {
+      for (let j = this.bullets.length - 1; j >= 0 && b.y > 20; j--) {   // 화면 밖에서 진입 중인 보스는 피격되지 않음
         const bl = this.bullets[j];
         if (bl.hits?.includes(b)) continue;
         if (Math.hypot(bl.x - b.x, bl.y - b.y) < b.width / 2) {
@@ -863,6 +870,7 @@ export class Sim {
   // ---------------------------------------------------------------------
   fireBomb(): void {
     if (this.bombs <= 0 || this.state !== 'PLAYING') return;
+    if (this.pending || this.ult.phase === 'CUTIN' || this.ult.phase === 'FALL') return;   // 카드 선택·궁극기 연출 중 낭비 방지
     if (this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'CLEAR') return;   // 연출 중 폭탄 낭비 방지
     if (this.frame - this.lastBombFrame < 20) return;
     this.lastBombFrame = this.frame;

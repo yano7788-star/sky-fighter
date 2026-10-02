@@ -66,6 +66,7 @@ export class LevelUpOverlay {
 
   /** 좌표 아래의 카드 번호 (없으면 -1) */
   hit(x: number, y: number): number {
+    if (!this.visible) return -1;   // 오버레이가 보이기 전(히트스톱 중)의 보이지 않는 탭 방지
     for (let i = 0; i < this.cards.length; i++) {
       const cx = this.cardX(i);
       if (x >= cx && x <= cx + CARD_W && y >= TOP && y <= TOP + CARD_H) return i;

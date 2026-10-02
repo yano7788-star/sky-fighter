@@ -19,8 +19,11 @@ export const UI = {
   dog:   { x: 154, y: H - 50, hit: 28 },    // 동료: 강아지(방어막)
 };
 export const inZone = (z: { x: number; y: number; hit: number }, x: number, y: number) => Math.hypot(x - z.x, y - z.y) < z.hit;
-export const isUiZone = (x: number, y: number) =>
-  inZone(UI.sound, x, y) || inZone(UI.pause, x, y) || inZone(UI.bomb, x, y) || inZone(UI.ult, x, y) || inZone(UI.cat, x, y) || inZone(UI.dog, x, y);
+/** 동료 버튼은 보유/사용 중일 때만 존재한다 (없을 땐 이동·발사 입력을 막지 않는다) */
+export const companionZoneActive = (sim: Sim, key: 'cat' | 'dog') => sim.comp[key].ready || sim.comp[key].active;
+export const isUiZone = (x: number, y: number, sim?: Sim) =>
+  inZone(UI.sound, x, y) || inZone(UI.pause, x, y) || inZone(UI.bomb, x, y) || inZone(UI.ult, x, y) ||
+  (inZone(UI.cat, x, y) && (!sim || companionZoneActive(sim, 'cat'))) || (inZone(UI.dog, x, y) && (!sim || companionZoneActive(sim, 'dog')));
 
 const bannerAlpha = (t: number, total: number, fadeIn = 18, fadeOut = 24) => Math.max(0, Math.min(1, t / fadeIn, (total - t) / fadeOut));
 

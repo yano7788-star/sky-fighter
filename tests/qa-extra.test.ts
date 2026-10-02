@@ -9,7 +9,7 @@ const idle = (s: Sim, fire = false, extra: Partial<SimInput> = {}): SimInput => 
 const mkEnemy = (x: number, y: number, hp = 1): Enemy => ({ type: 'scout', x, y, hp, maxHp: hp, speed: 0, baseX: x, age: 0, fireCd: 999, hold: 0 });
 
 describe('QA: 레벨업 카드 엣지', () => {
-  it.fails('모든 카드가 최대면 offerCards가 빈 배열을 돌려주고, Sim.pending=[] 로 영구 정지하지 않아야 한다', () => {
+  it('모든 카드가 최대면 offerCards가 빈 배열을 돌려주고, Sim.pending=[] 로 영구 정지하지 않아야 한다', () => {
     const s = new Sim(1);
     for (const id of Object.keys(CARDS) as CardId[]) s.build.levels[id] = CARDS[id].max;
     expect(offerCards(s.build, createRng(1))).toHaveLength(0);
@@ -53,14 +53,14 @@ describe('QA: 정지(pending/ult) 중 타이머 동결', () => {
     expect(s.comboTimer).toBe(50 - 1 + 1 - 0 > 0 ? s.comboTimer : 0);
     expect(s.comp.dog.timer).toBeGreaterThanOrEqual(48);
   });
-  it.fails('ult와 bomb 입력이 같은 틱이면 폭탄이 낭비된다 (참고)', () => {
+  it('ult와 bomb 입력이 같은 틱이면 폭탄이 낭비된다 (참고)', () => {
     const s = new Sim(1);
     s.ult.gauge = 100; s.frame = 100; s.bombs = 1;
     s.step(idle(s, false, { skill: 'ult', bomb: true }));
     expect(s.ult.phase).toBe('CUTIN');
     expect(s.bombs).toBe(1);   // 낭비 없어야 이상적
   });
-  it.fails('pending/ult 중 fireBomb()를 직접 부르면(씬 hitStop 경로) 폭탄이 소모된다', () => {
+  it('pending/ult 중 fireBomb()를 직접 부르면(씬 hitStop 경로) 폭탄이 소모된다', () => {
     const s = new Sim(1);
     s.pending = ['rate', 'power', 'luck']; s.frame = 100; s.bombs = 1;
     s.fireBomb();
@@ -100,7 +100,7 @@ describe('QA: 레이저/보스/궁극기', () => {
     const b = s.boss!; b.y = 135; b.hp = 10; s.ult.gauge = 100;
     s.step(idle(s, false, { skill: 'ult' }));
     for (let i = 0; i < ULT.frames.CUTIN + ULT.frames.FALL + 3; i++) s.step(idle(s));
-    expect(s.stagePhase === 'BOSS_DYING' || s.stagePhase === 'CLEAR').toBe(true);
+    expect(['BOSS_DYING', 'CLEAR'].includes(s.stagePhase as string)).toBe(true);
   });
 });
 
@@ -135,5 +135,14 @@ describe('QA: 흡혈/동료/관통', () => {
     s.bullets.push({ x: 200, y: 300, vx: 0, vy: 0, dmg: 1, pierce: 0 }, { x: 200, y: 300, vx: 0, vy: 0, dmg: 1, pierce: 0 });
     s.step(idle(s));
     expect(s.bullets.length).toBe(1);   // 낭비 없으면 1발 남아야 함
+  });
+});
+
+describe('QA: 메타 시작 폭탄 vs 상한', () => {
+  it('격납고 탄약 보급 Lv2(시작 폭탄 3) 상태에서 B 아이템을 먹어도 폭탄이 줄지 않아야 한다', () => {
+    const s = new Sim(1, { energyBonus: 0, startBombs: 2, xpMult: 1, luckMult: 1, ultStart: 0 });
+    expect(s.bombs).toBe(3);
+    (s as any).collect('B');
+    expect(s.bombs).toBeGreaterThanOrEqual(3);
   });
 });
