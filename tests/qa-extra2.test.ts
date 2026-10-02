@@ -53,6 +53,7 @@ describe('QA2', () => {
     for (let i = 0; i < 20; i++) s.step(idle(s));
     expect(s.state).toBe('GAMECLEAR'); s.startEndless();
     expect(s.bossTier).toBe(6); expect(s.stageTier).toBe(1); expect(s.state).toBe('PLAYING');
+    expect(s.pending).not.toBeNull(); s.chooseCard(0);   // 항로 선택
     for (let i = 0; i < 1200; i++) s.step(idle(s));
     expect(s.stagePhase).toBe('FIGHT');
   });

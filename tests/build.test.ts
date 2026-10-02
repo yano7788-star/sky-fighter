@@ -8,6 +8,7 @@ import type { EnemyBullet } from '../src/core/types';
 import { ACHIEVEMENTS, newlyUnlocked } from '../src/core/achievements';
 import { W } from '../src/core/config';
 import { MISSIONS, MISSION_ALL_BONUS, applyRun, dailyMissions, newMissionSave } from '../src/core/missions';
+import { ROUTES, type RouteId } from '../src/core/routes';
 import { Sim } from '../src/core/sim';
 import type { Enemy, EnemyType, SimInput } from '../src/core/types';
 
@@ -818,5 +819,32 @@ describe('일일 미션', () => {
     const s = applyRun(newMissionSave('2026-10-03'), '2026-10-03', { ...base, kills: 50, graze: 50 }, null).save;
     const next = applyRun(s, '2026-10-04', base, null).save;
     expect(next.date).toBe('2026-10-04'); expect((next.progress.kills ?? 0) + (next.progress.graze ?? 0)).toBeLessThan(50); expect(next.done.length).toBeLessThan(3);
+  });
+});
+
+describe('항로 선택', () => {
+  const next = () => { const s = new Sim(11); s.player.invincible = 99999; s.bossTier = 1; s.stagePhase = 'CLEAR'; s.phaseTimer = 1; s.step(idle(s)); return s; };
+  it('스테이지가 끝나면 안전 1 + 위험 1 항로가 제안되고, 고르기 전까지 멈춘다', () => {
+    const s = next();
+    expect(s.pending).not.toBeNull(); expect(s.pending!.length).toBe(2);
+    const defs = s.pending!.map(id => ROUTES[id as RouteId]); expect(defs.filter(d => d.risky).length).toBe(1);
+    const f = s.frame; s.step(idle(s)); expect(s.frame).toBe(f);
+    s.chooseCard(0); expect(s.pending).toBeNull(); expect(s.route).toBe(s.pending ?? defs[0].id);
+  });
+  it('위험 항로: 점수·경험치 ↑, 적 탄 속도 ↑ / 고요한 항로: 회복·대군 없음', () => {
+    const base = new Sim(1); const sc0 = (base as any).killScore(10);
+    const r = new Sim(1); r.route = 'r_risk'; const sc1 = (r as any).killScore(10);
+    expect(sc1).toBeGreaterThan(sc0); expect(r.enemyBulletSpeed).toBeCloseTo(base.enemyBulletSpeed * 1.25);
+    const c = new Sim(1); c.player.energy = 50; c.pending = ['r_calm']; c.chooseCard(0);
+    expect(c.player.energy).toBeCloseTo(60); expect(c.route).toBe('r_calm');
+    c.startAtTier(2); c.stagePhase = 'FIGHT'; c.stageFrames = Math.floor(FIGHT_FRAMES[2] * 0.3); c.player.invincible = 99999; c.step(idle(c)); expect(c.hordeWarn).toBe(0);
+  });
+  it('매복 항로는 대군을 한 번 더 부른다', () => {
+    const s = new Sim(1); s.route = 'r_ambush'; s.startAtTier(2); s.stagePhase = 'FIGHT'; s.player.invincible = 99999;
+    s.stageFrames = Math.floor(FIGHT_FRAMES[2] * 0.45); s.step(idle(s)); expect(s.hordeWarn).toBeGreaterThan(0);
+  });
+  it('항로는 빌드에 저장되지 않고, 레벨업 카드로 섞여 나오지 않는다', () => {
+    const s = new Sim(1); s.pending = ['r_risk']; s.chooseCard(0); expect(s.build.levels.r_risk).toBeUndefined();
+    for (let i = 0; i < 50; i++) expect(offerCards(newBuild(), createRng(i)).some(id => CARDS[id].kind === 'route')).toBe(false);
   });
 });

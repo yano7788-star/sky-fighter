@@ -84,6 +84,7 @@ export class Hud {
     text('combo', 50, 84, 13, '#facc15', 0, 1).setShadow(0, 0, '#000', 4, true, true);
     text('level', W / 2, 50, 12, '#7dd3fc', 0.5, 1);
     text('mut', W / 2, 63, 10.5, '#fbbf24', 0.5, 1);
+    text('route', W / 2, 76, 10.5, '#7dd3fc', 0.5, 1);
     this.btn = {
       ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(34, 40)),
       cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(38, 36)),
@@ -271,6 +272,7 @@ export class Hud {
     g.fillStyle(0x22d3ee, 1); g.fillRect(0, 0, W * xr, 5);
     this.setText('level', `LV ${sim.level}`);
     const md = mutatorOf(sim.meta.mutator);
+    const rd = sim.routeDef; this.setText('route', rd ? `${rd.icon} ${rd.name}` : '').setColor(rd?.color ?? '#7dd3fc');
     this.setText('mut', (this.daily ? '📅 ' : '') + (md ? `${md.icon} ${md.name}` : '')).setColor(md?.color ?? '#fbbf24');
 
     // 4-3. 스킬 버튼 (필살기 게이지 링 / 동료)

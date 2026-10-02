@@ -1,4 +1,5 @@
 import { FUSION_IDS, type RunStats } from './achievements';
+import { ROUTES, offerRoutes, type RouteId } from './routes';
 import { CARDS, hasFusion, hasRelic, offerRelics, type FusionId, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config';
 import {
@@ -79,6 +80,8 @@ export class Sim {
   enemies: Enemy[] = [];
   items: Item[] = [];
   hazards: Hazard[] = [];
+  route: RouteId | null = null;        // 이번 스테이지의 항로 (스테이지 사이에 고른다)
+  get routeDef() { return this.route ? ROUTES[this.route] : null; }
   hordeWarn = 0;                       // 인해전술 예고 남은 프레임 (HUD 경고 표시)
   private hordeKind: HordeKind = 'wall';
   private hordeDone: boolean[] = [];
@@ -121,7 +124,7 @@ export class Sim {
   get stageTier(): number { return tierIdx(this.bossTier); }
   get loopCount(): number { return loopOf(this.bossTier); }
   /** 적 탄 속도 배율: 루프가 돌수록 빨라진다 */
-  get enemyBulletSpeed(): number { return Math.min(1.45, 1 + 0.06 * this.loopCount) * this.meta.mut.bulletSpeed; }
+  get enemyBulletSpeed(): number { return Math.min(1.45, 1 + 0.06 * this.loopCount) * this.meta.mut.bulletSpeed * (this.routeDef?.bullet ?? 1); }
 
   private newPlayer(): PlayerState {
     return {
@@ -160,7 +163,7 @@ export class Sim {
   // 레벨업 / 카드
   // ---------------------------------------------------------------------
   private addXp(v: number): void {
-    this.xp += v * this.stats.xpMult;
+    this.xp += v * this.stats.xpMult * (this.routeDef?.xp ?? 1);
     this.checkLevelUp();
   }
   private checkLevelUp(): void {
@@ -184,6 +187,13 @@ export class Sim {
     if (!this.pending) return;
     const id = this.pending[index];
     if (!id) return;
+    if (CARDS[id].kind === 'route') {   // 항로 선택: 빌드에 저장하지 않고 이번 스테이지에만 적용
+      const rd = ROUTES[id as RouteId], p0 = this.player;
+      this.route = rd.id; this.pending = null;
+      if (rd.heal > 0) { p0.energy = Math.min(p0.maxEnergy, p0.energy + p0.maxEnergy * rd.heal); this.emit({ t: 'heal', x: p0.x, y: p0.y }); }
+      this.emit({ t: 'ring', x: p0.x, y: p0.y, color: rd.color, max: 110 }); this.emit({ t: 'sfx', name: rd.risky ? 'enrage' : 'item' });
+      return;
+    }
     this.build.levels[id] = (this.build.levels[id] ?? 0) + 1;
     this.refreshStats();
     if (id === 'r_bombpack') this.bombs = Math.min(this.maxBombs, this.bombs + 2);
@@ -563,6 +573,8 @@ export class Sim {
     this.stageFrames = 0; this.hordeDone = []; this.hordeWarn = 0;
     this.stagePhase = 'INTRO'; this.phaseTimer = PHASE_FRAMES.INTRO;
     this.midDone = false; this.stageHits = 0; this.stageRank = null;
+    this.route = null;
+    this.pending = offerRoutes(this.rng);   // 다음 스테이지로 가는 항로 선택 (안전 1 + 위험 1)
     for (const c of [this.comp.cat, this.comp.dog]) { c.used = false; c.pity = 0; }   // 동료는 스테이지마다 다시 사용 가능
   }
 
@@ -976,8 +988,11 @@ export class Sim {
     if (this.timeStopped) return;
     if (this.stagePhase !== 'FIGHT' || this.boss || this.midBoss) { this.hordeWarn = 0; return; }
     if (this.hordeWarn > 0) { if (--this.hordeWarn === 0) this.spawnHorde(this.hordeKind); return; }
-    const list = HORDES[this.stageTier];
-    if (!list) return;
+    const rd = this.routeDef;
+    if (rd?.hordes === 'none') return;   // 고요한 항로: 대군 없음
+    const list = [...(HORDES[this.stageTier] ?? [])];
+    if (rd?.hordes === 'extra') list.push({ at: 0.45, kind: this.stageTier % 2 ? 'flank' : 'pincer' });   // 매복 항로: 대군 한 번 더
+    if (!list.length) return;
     const dur = FIGHT_FRAMES[this.stageTier];
     list.forEach((h, i) => {
       if (!this.hordeDone[i] && this.stageFrames >= dur * h.at && this.stageFrames < dur * h.at + 400) {
@@ -1046,7 +1061,7 @@ export class Sim {
     const p = this.player, dogOn = this.comp.dog.active;
     const spawnOk = this.stagePhase === 'FIGHT' || this.stagePhase === 'BOSS' ||
       (this.stagePhase === 'INTRO' && this.phaseTimer < PHASE_FRAMES.INTRO - 50);
-    const interval = Math.max(10, Math.round((SPAWN_INTERVAL[this.stageTier] - 2 * this.loopCount) * this.meta.mut.spawn));
+    const interval = Math.max(10, Math.round((SPAWN_INTERVAL[this.stageTier] - 2 * this.loopCount) * this.meta.mut.spawn / (this.routeDef?.spawn ?? 1)));
     if (spawnOk && !this.timeStopped && this.frame % (this.boss || this.midBoss ? interval * 2 : interval) === 0) this.spawnEnemy();
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -1115,7 +1130,7 @@ export class Sim {
   private killScore(base: number): number {
     this.combo++; this.comboTimer = COMBO_WINDOW;
     this.run.kills++; this.run.maxCombo = Math.max(this.run.maxCombo, this.combo);
-    const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score * (this.hasRelic('r_bounty') ? 1.2 : 1) * (this.hyper.t > 0 ? HYPER.scoreMult : 1));
+    const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score * (this.hasRelic('r_bounty') ? 1.2 : 1) * (this.hyper.t > 0 ? HYPER.scoreMult : 1) * (this.routeDef?.score ?? 1));
     this.score += pts;
     this.emit({ t: 'combo', combo: this.combo, mult: comboMultiplier(this.combo) });
     return pts;
@@ -1158,7 +1173,7 @@ export class Sim {
   // ---------------------------------------------------------------------
   private dropItem(x: number, y: number): void {
     if (this.maybeDropCompanion(x, y)) return;
-    const luck = this.stats.luckMult * this.meta.luckMult;
+    const luck = this.stats.luckMult * this.meta.luckMult * (this.routeDef?.drop ?? 1);
     const r = this.rng() / luck;
     let type: ItemType | null = null;
     for (const [cum, t] of DROP_BASE) if (r < cum) { type = t; break; }
