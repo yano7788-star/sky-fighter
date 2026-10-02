@@ -1,5 +1,5 @@
 import { CARDS, hasFusion, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
-import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W } from './config';
+import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config';
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
   FIGHT_FRAMES, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
@@ -62,6 +62,7 @@ export class Sim {
   stageRank: Rank | null = null;
 
   bossTier = 1;
+  endless = false;               // 무한 모드: 5스테이지 클리어 후 계속 도전 (루프마다 난이도 상승)
   boss: Boss | null = null;
   midBoss: MidBoss | null = null;
   midDone = false;               // 이번 스테이지의 중간보스를 이미 등장시켰는가
@@ -101,6 +102,11 @@ export class Sim {
   get timeStopped(): boolean { return this.ult.phase === 'ACTIVE' && this.ult.kind === 'timestop'; }
   get ultReady(): boolean { return this.ult.gauge >= 100 && this.ult.phase === 'IDLE'; }
   get xpNext(): number { return xpNeeded(this.level); }
+  /** 표 조회용 스테이지(1~5): 무한 모드에서 6스테이지는 1번 구성으로 돌아간다 */
+  get stageTier(): number { return tierIdx(this.bossTier); }
+  get loopCount(): number { return loopOf(this.bossTier); }
+  /** 적 탄 속도 배율: 루프가 돌수록 빨라진다 */
+  get enemyBulletSpeed(): number { return Math.min(1.45, 1 + 0.06 * this.loopCount); }
 
   private newPlayer(): PlayerState {
     return {
@@ -458,16 +464,16 @@ export class Sim {
     switch (this.stagePhase) {
       case 'FIGHT': {
         this.stageFrames++;
-        const mc = MID_CONFIGS[this.bossTier], dur = FIGHT_FRAMES[this.bossTier];
+        const mc = MID_CONFIGS[this.stageTier], dur = FIGHT_FRAMES[this.stageTier];
         if (mc && !this.midDone && !this.midBoss && !this.boss && this.stageFrames >= dur * MID_BOSS_AT) {
-          this.spawnMidBoss(this.bossTier);
+          this.spawnMidBoss(this.stageTier);
         } else if (!this.boss && !this.midBoss && this.stageFrames >= dur) {
           this.stagePhase = 'WARNING'; this.phaseTimer = PHASE_FRAMES.WARNING;
         }
         break;
       }
       case 'WARNING':
-        if (--this.phaseTimer <= 0) { this.spawnBoss(this.bossTier); this.stagePhase = 'BOSS'; }
+        if (--this.phaseTimer <= 0) { this.spawnBoss(this.stageTier); this.stagePhase = 'BOSS'; }
         break;
       case 'BOSS_DYING':
         if (--this.phaseTimer <= 0) {
@@ -483,7 +489,7 @@ export class Sim {
         break;
       case 'CLEAR':
         if (--this.phaseTimer <= 0) {
-          if (this.bossTier >= MAX_TIER) { this.state = 'GAMECLEAR'; this.emit({ t: 'gameclear' }); }
+          if (this.bossTier >= MAX_TIER && !this.endless) { this.state = 'GAMECLEAR'; this.emit({ t: 'gameclear' }); }
           else this.beginNextStage();
         }
         break;
@@ -492,6 +498,15 @@ export class Sim {
         break;
       default: break;
     }
+  }
+
+  /** GAMECLEAR 이후 '무한 모드 계속'을 고른 경우: 다음 스테이지(6~)로 이어서 진행 */
+  startEndless(): void {
+    if (this.state !== 'GAMECLEAR') return;
+    this.state = 'PLAYING'; this.endless = true;
+    this.enemyBullets.length = 0;
+    this.player.invincible = Math.max(this.player.invincible, 150);
+    this.beginNextStage();
   }
 
   private beginNextStage(): void {
@@ -503,11 +518,12 @@ export class Sim {
   }
 
   private spawnBoss(tier: number): void {
-    const c = BOSS_CONFIGS[tier];
+    const c = BOSS_CONFIGS[tier], loop = this.loopCount;
+    const hp = Math.round(c.hp * (1 + 0.5 * loop));   // 무한 모드 루프마다 +50%
     this.boss = {
-      tier, name: c.name, x: W / 2, y: -120, targetY: 135, width: c.w, height: c.h,
-      vx: 2.3 + tier * 0.25, hp: c.hp, maxHp: c.hp, shootCooldown: 0, attackMode: 1,
-      color: c.color, subColor: c.subColor, shotCdMax: c.shotCd,
+      tier, name: c.name.replace(/STAGE \d+/, 'STAGE ' + this.bossTier), x: W / 2, y: -120, targetY: 135, width: c.w, height: c.h,
+      vx: 2.3 + tier * 0.25, hp, maxHp: hp, shootCooldown: 0, attackMode: 1,
+      color: c.color, subColor: c.subColor, shotCdMax: Math.max(14, Math.round(c.shotCd * (1 - 0.04 * loop))),
       phase2: false, phase2Alert: 0, dying: false, deathTimer: 0,
     };
   }
@@ -582,7 +598,7 @@ export class Sim {
       this.clearBonus = 200 * b.tier + bonus; this.score += this.clearBonus;
       this.ult.gauge = Math.min(100, this.ult.gauge + ULT.gaugeBoss);
       // 「자매의 손바닥」: 3번째 보스를 목숨 2개 이상 유지한 채 처치하면 게이지가 가득 찬다
-      if (b.tier === 3 && this.lives >= 2 && this.ult.gauge < 100) { this.ult.gauge = 100; this.emit({ t: 'sfx', name: 'heal' }); }
+      if (b.tier === 3 && this.loopCount === 0 && this.lives >= 2 && this.ult.gauge < 100) { this.ult.gauge = 100; this.emit({ t: 'sfx', name: 'heal' }); }
       this.emit({ t: 'sfx', name: 'boom' }); this.boom(b.x, b.y, b.subColor, 30);
       this.emit({ t: 'shake', v: 14 }); this.emit({ t: 'hitstop', frames: 8 }); this.emit({ t: 'vibrate', pattern: [100, 50, 220] });
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ffffff', max: 160 });
@@ -599,10 +615,11 @@ export class Sim {
   // ---------------------------------------------------------------------
   private spawnMidBoss(tier: number): void {
     const c = MID_CONFIGS[tier];
+    const hp = Math.round(c.hp * (1 + 0.5 * this.loopCount));
     this.midDone = true;
     this.midBoss = {
       tier, x: W / 2, y: -80, targetY: 120, width: c.w, height: c.h, vx: 1.8 + tier * 0.2,
-      hp: c.hp, maxHp: c.hp, shootCd: 0, state: 'MOVE', stateTimer: 0, lockX: W / 2, laserX: W / 2, dying: false, deathTimer: 0,
+      hp, maxHp: hp, shootCd: 0, state: 'MOVE', stateTimer: 0, lockX: W / 2, laserX: W / 2, dying: false, deathTimer: 0,
     };
     this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'shake', v: 6 });
   }
@@ -681,7 +698,8 @@ export class Sim {
     for (let i = this.enemyBullets.length - 1; i >= 0; i--) {
       if (i >= this.enemyBullets.length) continue;   // applyDamage(리스폰)가 탄을 전부 지운 경우
       const eb = this.enemyBullets[i];
-      eb.x += eb.vx; eb.y += eb.vy;
+      const sp = this.enemyBulletSpeed;
+      eb.x += eb.vx * sp; eb.y += eb.vy * sp;
       const d = Math.hypot(p.x - eb.x, p.y - eb.y);
       // 강아지 방어막: 반경 안으로 들어온 탄은 사라진다
       if (dogOn && d < SHIELD_R + eb.r) {
@@ -705,7 +723,7 @@ export class Sim {
   }
 
   private pickEnemyType(): EnemyType {
-    const w = ENEMY_WEIGHTS[Math.min(MAX_TIER, this.bossTier)];
+    const w = ENEMY_WEIGHTS[this.stageTier];
     let total = 0;
     for (const k of Object.keys(w) as EnemyType[]) total += w[k] ?? 0;
     let r = this.rng() * total;
@@ -720,7 +738,7 @@ export class Sim {
     const speed = type === 'scout' ? 3.2 + this.rng() * 1.5
       : type === 'zigzag' ? 2.4 + this.rng() * 0.6
       : type === 'kamikaze' ? 4.2 + this.rng() * 1.0 : 2.6;
-    const hp = Math.ceil(def.hp * enemyHpScale(Math.min(MAX_TIER, this.bossTier)));
+    const hp = Math.ceil(def.hp * enemyHpScale(this.bossTier));
     this.enemies.push({ type, x, y: -30, hp, maxHp: hp, speed, baseX: x, age: 0, fireCd: 50 + this.rng() * 60, hold: 0 });
   }
 
@@ -763,7 +781,7 @@ export class Sim {
     const p = this.player, dogOn = this.comp.dog.active;
     const spawnOk = this.stagePhase === 'FIGHT' || this.stagePhase === 'BOSS' ||
       (this.stagePhase === 'INTRO' && this.phaseTimer < PHASE_FRAMES.INTRO - 50);
-    const interval = SPAWN_INTERVAL[Math.min(MAX_TIER, this.bossTier)];
+    const interval = Math.max(10, SPAWN_INTERVAL[this.stageTier] - 2 * this.loopCount);
     if (spawnOk && !this.timeStopped && this.frame % (this.boss || this.midBoss ? interval * 2 : interval) === 0) this.spawnEnemy();
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {

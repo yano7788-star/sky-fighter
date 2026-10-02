@@ -21,3 +21,7 @@ export const PLAYER = {
 export const FIRST_BOSS_SCORE = 250;     // 첫 보스 등장 점수
 export const NEXT_BOSS_SCORE_STEP = 450; // 이후 스테이지: 클리어 시점 점수 + 450
 export const MAX_TIER = 5;
+
+/** 무한 모드: 6스테이지부터는 1~5스테이지 구성을 다시 돌며(루프) 난이도가 올라간다 */
+export const tierIdx = (tier: number): number => ((tier - 1) % MAX_TIER) + 1;
+export const loopOf = (tier: number): number => Math.floor((tier - 1) / MAX_TIER);

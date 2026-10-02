@@ -7,7 +7,7 @@ import { Sim } from '../core/sim';
 import type { SimEvent, SkillKey } from '../core/types';
 import { ParallaxOverlay, ScrollingBackground } from '../render/background';
 import { Fx } from '../render/fx';
-import { Hud, UI, companionZoneActive, inZone, isUiZone } from '../render/hud';
+import { Hud, RESULT_BTN, UI, companionZoneActive, inRect, inZone, isUiZone } from '../render/hud';
 import { LevelUpOverlay } from '../render/levelup';
 import { UltFx } from '../render/ultfx';
 import { R, S, bulletTexture } from '../render/textures';
@@ -46,6 +46,8 @@ export class GameScene extends Phaser.Scene {
   private compPos = { cat: { x: 0, y: 0 }, dog: { x: 0, y: 0 } };
   private skillQueued: SkillKey | null = null;
   private runCredits = 0;
+  private creditsPaid = 0;      // 이번 런에서 이미 지급한 크레딧 (미션 클리어 후 무한 모드 이어하기 대응)
+  private bestBefore = 0;       // 런 시작 시점의 최고 점수 (신기록 판정 기준)
 
   private paused = false;
   private acc = 0;
@@ -139,7 +141,7 @@ export class GameScene extends Phaser.Scene {
     this.resultKind = null; this.newRecord = false;
     this.targetX = W / 2; this.targetY = PLAYER.spawnY;
     this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
-    this.runCredits = 0; this.shownPending = null; this.levelup.hide();
+    this.runCredits = 0; this.creditsPaid = 0; this.bestBefore = loadBest().score; this.shownPending = null; this.levelup.hide();
     this.bg.reset(); this.overlay.setStage(1); this.fx.clear(); this.hud.resetState(this.sim);
     this.hud.showResult(null); this.hud.setPaused(false);
     audio.rewind(); audio.resume();
@@ -170,6 +172,7 @@ export class GameScene extends Phaser.Scene {
     const k = e.key.toLowerCase();
     audio.unlock();
     if (e.repeat) { if (!this.paused && !this.resultKind && MOVE_KEYS.includes(k)) this.keys.add(k); return; }
+    if (this.resultKind === 'GAMECLEAR' && k === 'escape') { if (this.resultTimer <= 0) this.scene.start('TitleScene'); return; }
     if (k === 'p' || k === 'escape') { this.setPaused(!this.paused); return; }
     if (this.paused) { if (k === 'enter' || k === ' ') this.setPaused(false); return; }
     if (k === 'm') { audio.toggleMute(); return; }
@@ -191,7 +194,7 @@ export class GameScene extends Phaser.Scene {
   private pressAt(id: number, x: number, y: number): void {
     audio.unlock();
     if (this.paused) { this.setPaused(false); return; }
-    if (this.resultKind) { this.resultTap(); return; }
+    if (this.resultKind) { this.resultTap(x, y); return; }
     if (this.sim.pending) { const i = this.levelup.hit(x, y); if (i >= 0) { this.levelup.select(i); this.pickCard(i); } return; }
     if (inZone(UI.sound, x, y)) { audio.toggleMute(); return; }
     if (inZone(UI.pause, x, y)) { this.setPaused(true); return; }
@@ -222,10 +225,25 @@ export class GameScene extends Phaser.Scene {
     return `LV ${this.sim.level}  ·  기본 대포 Lv${this.sim.weaponLevel}\n${body}`;
   }
 
-  private resultTap(): void {
+  /** 결과 화면 입력: 게임오버=재출격, 미션 클리어=[무한 모드 계속]/[타이틀로] (좌표가 없으면 키보드·패드 → 무한 모드 계속) */
+  private resultTap(x?: number, y?: number): void {
     if (this.resultTimer > 0) return;
-    if (this.resultKind === 'GAMEOVER') this.resetRun();
-    else this.scene.start('TitleScene');
+    if (this.resultKind === 'GAMEOVER') { this.resetRun(); return; }
+    let choice: 'continue' | 'title' = 'continue';
+    if (x !== undefined && y !== undefined) {
+      if (inRect(RESULT_BTN.title, x, y)) choice = 'title';
+      else if (inRect(RESULT_BTN.cont, x, y)) choice = 'continue';
+      else return;   // 버튼 밖 탭은 무시 (실수로 나가지 않도록)
+    }
+    if (choice === 'title') this.scene.start('TitleScene'); else this.startEndless();
+  }
+
+  private startEndless(): void {
+    this.sim.startEndless();
+    this.resultKind = null; this.resultTimer = 0;
+    this.hud.showResult(null);
+    this.activeId = null; this.firing = false;
+    audio.sfx('item');
   }
 
   private setPaused(v: boolean): void {
@@ -279,7 +297,7 @@ export class GameScene extends Phaser.Scene {
     const s = this.sim;
     if (this.paused || this.resultKind || s.state !== 'PLAYING') return null;
     if (s.boss || s.stagePhase === 'WARNING') return 'boss';
-    return s.bossTier >= 4 ? 'solar' : 'normal';   // 후반 스테이지는 새 곡(Target Solar Core)
+    return s.stageTier >= 4 ? 'solar' : 'normal';   // 후반 스테이지는 새 곡(Target Solar Core)
   }
 
   private tick(): void {
@@ -310,8 +328,8 @@ export class GameScene extends Phaser.Scene {
     for (const e of s.drainEvents()) this.handleEvent(e);
     if (s.midBoss && s.midBoss.state === 'FIRE') this.shake = Math.max(this.shake, 3);   // 레이저 발사 중 진동
     if (s.frame % 2 === 0) for (const m of s.missiles) this.fx.trail(m.x, m.y, '#ec4899');
-    if (s.stagePhase === 'INTRO') this.bg.setTier(s.bossTier);
-    if (this.overlay.stage() !== s.bossTier) this.overlay.setStage(s.bossTier);
+    if (s.stagePhase === 'INTRO') this.bg.setTier(s.stageTier);
+    if (this.overlay.stage() !== s.stageTier) this.overlay.setStage(s.stageTier);
   }
 
   private pollKeyboardMove(): void {
@@ -373,11 +391,12 @@ export class GameScene extends Phaser.Scene {
   // ------------------------------------------------------------------ 결과 / 기록
   private finishRun(kind: 'GAMEOVER' | 'GAMECLEAR'): void {
     const s = this.sim;
-    this.newRecord = s.score > this.best.score;
+    this.newRecord = s.score > this.bestBefore;
     this.best = { score: Math.max(this.best.score, s.score), stage: Math.max(this.best.stage, s.bossTier) };
     saveBest(this.best);
-    this.runCredits = creditsFor(s.score, s.bossTier, kind === 'GAMECLEAR');
-    const meta = loadMeta(); meta.credits += this.runCredits; saveMeta(meta);
+    const total = creditsFor(s.score, s.bossTier, s.endless || kind === 'GAMECLEAR');
+    const meta = loadMeta(); meta.credits += Math.max(0, total - this.creditsPaid); saveMeta(meta);   // 무한 모드로 이어 간 경우 이미 지급한 크레딧은 제외
+    this.creditsPaid = Math.max(this.creditsPaid, total); this.runCredits = total;
     this.resultKind = kind; this.resultTimer = 90;
     this.activeId = null; this.firing = false;
     this.hud.showResult(this.resultInfo(), false);

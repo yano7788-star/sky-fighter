@@ -366,3 +366,40 @@ describe('파일럿 전용 궁극기', () => {
     expect(b.bullets[0].dmg).toBeCloseTo(a.bullets[0].dmg * 1.5);
   });
 });
+
+describe('무한 모드', () => {
+  function clearAll(s: Sim) {
+    for (let i = 0; i < 60 * 60 * 25 && s.state === 'PLAYING'; i++) {
+      s.player.invincible = 999; if (s.pending) s.chooseCard(0);
+      s.step({ targetX: s.boss ? s.boss.x : s.midBoss ? s.midBoss.x : 225, targetY: 650, fire: true, bomb: false });
+    }
+  }
+  it('5스테이지 클리어 후 GAMECLEAR → startEndless로 6스테이지(1번 구성, 루프 1)가 이어진다', () => {
+    const s = new Sim(7); clearAll(s);
+    expect(s.state).toBe('GAMECLEAR'); expect(s.endless).toBe(false);
+    s.startEndless();
+    expect(s.state).toBe('PLAYING'); expect(s.endless).toBe(true);
+    expect(s.bossTier).toBe(6); expect(s.stageTier).toBe(1); expect(s.loopCount).toBe(1); expect(s.stagePhase).toBe('INTRO');
+  });
+  it('루프 1의 보스는 체력 +50%, 이름은 STAGE 6로 표시, 적 탄은 더 빠르다', () => {
+    const s = new Sim(1); s.bossTier = 6; s.endless = true;
+    s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999; s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
+    expect(s.boss!.name).toContain('STAGE 6'); expect(s.boss!.maxHp).toBe(Math.round(700 * 1.5)); expect(s.boss!.tier).toBe(1);
+    expect(s.enemyBulletSpeed).toBeCloseTo(1.06);
+  });
+  it('무한 모드에서는 5스테이지를 넘겨도 GAMECLEAR 되지 않고 계속 진행한다', () => {
+    const s = new Sim(1); s.bossTier = 5; s.endless = true; s.stagePhase = 'CLEAR'; s.phaseTimer = 1;
+    s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
+    expect(s.state).toBe('PLAYING'); expect(s.bossTier).toBe(6);
+  });
+  it('startEndless는 GAMECLEAR가 아닐 때는 아무 일도 하지 않는다', () => {
+    const s = new Sim(1); s.startEndless();
+    expect(s.endless).toBe(false); expect(s.bossTier).toBe(1);
+  });
+  it('3번째 보스 궁극기 보너스는 첫 루프에서만', () => {
+    const s = new Sim(1); s.bossTier = 8; s.endless = true; s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.player.invincible = 99999;
+    s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
+    s.boss!.hp = 0; s.step({ targetX: 225, targetY: 650, fire: false, bomb: false });
+    expect(s.ult.gauge).toBeLessThan(100);
+  });
+});

@@ -27,6 +27,10 @@ export const isUiZone = (x: number, y: number, sim?: Sim) =>
 
 const bannerAlpha = (t: number, total: number, fadeIn = 18, fadeOut = 24) => Math.max(0, Math.min(1, t / fadeIn, (total - t) / fadeOut));
 
+/** 미션 클리어 화면의 버튼 판정 영역 (무한 모드 계속 / 타이틀로) */
+export const RESULT_BTN = { cont: { x: W / 2, y: H / 2 + 172, w: 300, h: 46 }, title: { x: W / 2, y: H / 2 + 228, w: 300, h: 40 } };
+export const inRect = (z: { x: number; y: number; w: number; h: number }, x: number, y: number) => Math.abs(x - z.x) < z.w / 2 && Math.abs(y - z.y) < z.h / 2;
+
 export interface ResultInfo { kind: 'GAMEOVER' | 'GAMECLEAR'; score: number; stage: number; level: number; credits: number; best: { score: number; stage: number }; newRecord: boolean; }
 
 /** 게임 화면 HUD: 에너지 바·점수·폭탄·보스 바·배너·일시정지/결과 오버레이 */
@@ -46,6 +50,7 @@ export class Hud {
   private pauseGroup: Phaser.GameObjects.GameObject[] = [];
   private resultGroup: Phaser.GameObjects.GameObject[] = [];
   private resultTexts: Record<string, Phaser.GameObjects.Text> = {};
+  private resultG!: Phaser.GameObjects.Graphics;
   private buildText!: Phaser.GameObjects.Text;
   private btn: { ult: Phaser.GameObjects.Image; cat: Phaser.GameObjects.Image; dog: Phaser.GameObjects.Image } | null = null;
 
@@ -125,6 +130,8 @@ export class Hud {
     this.resultTexts.dim = this.resultGroup[0] as Phaser.GameObjects.Text;
     mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
     mk('record', H / 2 + 110, 16); mk('credits', H / 2 + 138, 15); mk('prompt', H / 2 + 176, 16);
+    this.resultG = add(s.add.graphics()); this.resultGroup.push(this.resultG);
+    mk('btnC', RESULT_BTN.cont.y, 19); mk('btnT', RESULT_BTN.title.y, 15);
     this.resultGroup.forEach(o => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(false));
   }
 
@@ -164,7 +171,16 @@ export class Hud {
     t.l3.setText(over ? `최종 도달: STAGE ${r.stage}  ·  LV ${r.level}` : `LV ${r.level}`).setColor('#fff');
     t.credits.setText(`+${r.credits} CREDITS  (격납고에서 강화)`).setColor('#7dd3fc');
     t.record.setText(r.newRecord ? '★ NEW RECORD! ★' : `BEST ${r.best.score} (STAGE ${r.best.stage})`).setColor(r.newRecord ? '#facc15' : '#94a3b8');
-    t.prompt.setText(over ? '화면을 탭하여 다시 출격' : '화면을 탭하여 타이틀로').setColor(canTap ? '#38bdf8' : '#94a3b8');
+    t.prompt.setText('화면을 탭하여 다시 출격').setColor(canTap ? '#38bdf8' : '#94a3b8').setVisible(over);
+    // 미션 클리어: [무한 모드 계속] [타이틀로] 두 버튼
+    const g = this.resultG; g.clear(); g.setVisible(!over);
+    t.btnC.setVisible(!over).setText('∞ 무한 모드 계속').setColor(canTap ? '#0b1220' : '#475569');
+    t.btnT.setVisible(!over).setText('타이틀로').setColor(canTap ? '#cbd5e1' : '#64748b');
+    if (!over) {
+      const c = RESULT_BTN.cont, tt = RESULT_BTN.title;
+      g.fillStyle(canTap ? 0xfde047 : 0x334155, 1); g.fillRoundedRect(c.x - c.w / 2, c.y - c.h / 2, c.w, c.h, 12);
+      g.lineStyle(2, canTap ? 0x64748b : 0x334155, 1); g.strokeRoundedRect(tt.x - tt.w / 2, tt.y - tt.h / 2, tt.w, tt.h, 10);
+    }
   }
 
   private setText(key: string, v: string): Phaser.GameObjects.Text {
@@ -281,14 +297,14 @@ export class Hud {
       const total = PHASE_FRAMES.WARNING, t = total - sim.phaseTimer, a = bannerAlpha(t, total, 12, 20);
       this.warnRect.setFillStyle(0xef4444, (0.06 + 0.05 * Math.sin(sim.frame * 0.25)) * a);
       main.setAlpha(a).setFontSize(30).setColor('#ef4444').setText('⚠ WARNING ⚠').setVisible(Math.floor(sim.frame / 10) % 2 === 0);
-      sub.setAlpha(a).setColor('#fca5a5').setText(BOSS_CONFIGS[sim.bossTier].name);
+      sub.setAlpha(a).setColor('#fca5a5').setText(BOSS_CONFIGS[sim.stageTier].name.replace(/STAGE \d+/, 'STAGE ' + sim.bossTier));
     } else if (ph === 'CLEAR') {
       const total = PHASE_FRAMES.CLEAR, a = bannerAlpha(total - sim.phaseTimer, total, 15, 25);
       main.setAlpha(a).setFontSize(34).setColor('#10b981').setText(`STAGE ${sim.bossTier} CLEAR!`);
       sub.setAlpha(a).setColor('#facc15').setText(`BOSS BONUS +${sim.clearBonus}${sim.stageRank ? `  ·  RANK ${sim.stageRank}` : ''}`).setPosition(W / 2, H * 0.36 + 36);
     } else {
       const total = PHASE_FRAMES.INTRO - 15, t = PHASE_FRAMES.INTRO - sim.phaseTimer - 15;   // 배경이 바뀌기 시작한 뒤에 등장
-      const cfg = BOSS_CONFIGS[sim.bossTier], a = bannerAlpha(t, total, 20, 30);
+      const cfg = BOSS_CONFIGS[sim.stageTier], a = bannerAlpha(t, total, 20, 30);
       main.setAlpha(a).setFontSize(40).setColor(cfg.subColor).setText(`STAGE ${sim.bossTier}`);
       sub.setAlpha(a).setColor('#e2e8f0').setText(cfg.name.replace(/^STAGE \d+:\s*/, '')).setPosition(W / 2, H * 0.36 + 34);
     }
