@@ -1,3 +1,4 @@
+import { metaParams } from '../src/core/meta';
 import { describe, expect, it } from 'vitest';
 import { CARDS, offerCards, type CardId } from '../src/core/build';
 import { createRng } from '../src/core/rng';
@@ -140,7 +141,7 @@ describe('QA: 흡혈/동료/관통', () => {
 
 describe('QA: 메타 시작 폭탄 vs 상한', () => {
   it('격납고 탄약 보급 Lv2(시작 폭탄 3) 상태에서 B 아이템을 먹어도 폭탄이 줄지 않아야 한다', () => {
-    const s = new Sim(1, { energyBonus: 0, startBombs: 2, xpMult: 1, luckMult: 1, ultStart: 0 });
+    const s = new Sim(1, metaParams({ munitions: 2 }));
     expect(s.bombs).toBe(3);
     (s as any).collect('B');
     expect(s.bombs).toBeGreaterThanOrEqual(3);

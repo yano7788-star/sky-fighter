@@ -97,11 +97,11 @@ export interface BuildStats {
   swarm: boolean; railgun: boolean; hunter: boolean;
   bombCapBonus: number; aegisSeconds: number; maxEnergyBonus: number;
 }
-export function statsOf(b: Build, meta: { xpMult?: number } = {}): BuildStats {
+export function statsOf(b: Build, meta: { xpMult?: number; rateMult?: number; dmgMult?: number; magnetMult?: number } = {}): BuildStats {
   return {
-    rateMult: 1 + 0.08 * lv(b, 'rate'),
-    dmgMult: 1 + 0.12 * lv(b, 'power'),
-    magnetMult: 1 + 0.4 * lv(b, 'magnet'),
+    rateMult: (1 + 0.08 * lv(b, 'rate')) * (meta.rateMult ?? 1),
+    dmgMult: (1 + 0.12 * lv(b, 'power')) * (meta.dmgMult ?? 1),
+    magnetMult: (1 + 0.4 * lv(b, 'magnet')) * (meta.magnetMult ?? 1),
     xpMult: (1 + 0.15 * lv(b, 'scholar')) * (meta.xpMult ?? 1),
     luckMult: 1 + 0.25 * lv(b, 'luck'),
     spread: lv(b, 'spread'), pierce: lv(b, 'pierce'), homing: lv(b, 'homing'), drones: lv(b, 'drone'), laser: lv(b, 'laser'),

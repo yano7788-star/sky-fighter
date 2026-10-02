@@ -19,9 +19,11 @@ export const saveBest = (b: BestRecord): void => store.set('best', b);
 
 // 격납고(영구 성장): 크레딧과 강화 레벨
 import type { MetaLevels } from '../core/meta';
-export interface MetaSave { credits: number; levels: MetaLevels; }
+export interface MetaSave { credits: number; levels: MetaLevels; pilots: { owned: string[]; selected: string }; }
 export const loadMeta = (): MetaSave => {
-  const m = store.get<MetaSave>('meta', { credits: 0, levels: {} });
-  return { credits: Math.max(0, Number(m.credits) || 0), levels: m.levels ?? {} };
+  const m = store.get<Partial<MetaSave>>('meta', {});
+  const owned = Array.from(new Set(['ace', ...(m.pilots?.owned ?? [])]));
+  const selected = owned.includes(m.pilots?.selected ?? '') ? (m.pilots!.selected as string) : 'ace';
+  return { credits: Math.max(0, Number(m.credits) || 0), levels: m.levels ?? {}, pilots: { owned, selected } };
 };
 export const saveMeta = (m: MetaSave): void => store.set('meta', m);

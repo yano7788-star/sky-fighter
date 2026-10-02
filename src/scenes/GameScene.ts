@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { CARDS, lv, type CardId } from '../core/build';
 import { H, PLAYER, STEP_MS, W } from '../core/config';
 import { BOMB, COMPANION_FRAMES, SHIELD_R } from '../core/data';
-import { creditsFor, metaParams } from '../core/meta';
+import { creditsFor, metaParams, pilotOf } from '../core/meta';
 import { Sim } from '../core/sim';
 import type { SimEvent, SkillKey } from '../core/types';
 import { ScrollingBackground } from '../render/background';
@@ -76,6 +76,7 @@ export class GameScene extends Phaser.Scene {
     this.pools = { items: [], enemies: [], pbullets: [], missiles: [], ebullets: [], gems: [], drones: [] };
     this.shownPending = null;
     this.muzzleImgs = []; this.layers = {}; this.resultTimer = 0;
+    this.playerImg = null as unknown as Phaser.GameObjects.Image;   // 재사용된 씬 인스턴스의 파괴된 참조 제거
     this.world = this.add.container(0, 0).setScale(R);
     this.ui = this.add.container(0, 0).setScale(R);
     for (const name of ['bg', 'field', 'items', 'gems', 'enemies', 'boss', 'beam', 'companion', 'player', 'pbullets', 'missiles', 'ebullets', 'fx']) {
@@ -91,8 +92,8 @@ export class GameScene extends Phaser.Scene {
     this.ultfx = new UltFx(this, this.ui);
 
     // 플레이어 / 총구 섬광 / 보스
-    this.playerImg = this.add.image(0, 0, 'player');
-    this.playerImg.setDisplaySize(66, (66 * this.playerImg.height) / this.playerImg.width);   // 새 기체(세로로 긴 제트)
+    this.playerImg = this.add.image(0, 0, pilotOf(loadMeta().pilots.selected).skin);
+    this.applySkin(pilotOf(loadMeta().pilots.selected).skin);   // 선택한 파일럿의 기체(세로로 긴 제트)
     this.layers.player.add(this.playerImg);
     for (let i = 0; i < 2; i++) {
       const m = this.add.image(0, 0, 'dot').setScale(S * 10 / 8).setTint(0xfef9c3).setVisible(false);
@@ -118,7 +119,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ------------------------------------------------------------------ 초기화 / 재시작
-  private newSim(): void { this.sim = new Sim((Math.random() * 0xffffffff) >>> 0, metaParams(loadMeta().levels)); }
+  /** 격납고 강화 + 선택한 파일럿 패시브를 반영해 새 런을 시작하고, 파일럿의 기체 스킨을 적용한다 */
+  private newSim(): void {
+    const m = loadMeta();
+    this.sim = new Sim((Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected));
+    if (this.playerImg) this.applySkin(pilotOf(m.pilots.selected).skin);
+  }
+
+  private applySkin(key: string): void {
+    this.playerImg.setTexture(key);
+    this.playerImg.setDisplaySize(66, (66 * this.playerImg.frame.height) / this.playerImg.frame.width);
+  }
 
   private resetRun(): void {
     this.newSim();

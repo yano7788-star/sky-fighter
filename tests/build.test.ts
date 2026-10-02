@@ -243,3 +243,21 @@ describe('영구 성장(격납고)', () => {
     expect(creditsFor(2000, 5, true)).toBe(100 + 150 + 300);
   });
 });
+
+describe('파일럿', () => {
+  it('언니는 연사·피해 보너스, 동생은 에너지·흡수·경험치 보너스를 받는다', () => {
+    const base = new Sim(1, metaParams({}, 'ace'));
+    const a = new Sim(1, metaParams({}, 'sister1'));
+    expect(a.stats.rateMult).toBeCloseTo(base.stats.rateMult * 1.15); expect(a.stats.dmgMult).toBeCloseTo(base.stats.dmgMult * 1.1);
+    const b = new Sim(1, metaParams({}, 'sister2'));
+    expect(b.player.maxEnergy).toBe(base.player.maxEnergy + 25); expect(b.stats.magnetMult).toBeCloseTo(1.3); expect(b.stats.xpMult).toBeCloseTo(1.1);
+  });
+  it('알 수 없는 파일럿 id는 기본(에이스)으로 처리한다', () => {
+    expect(metaParams({}, 'nobody').rateMult).toBe(1);
+  });
+  it('격납고 강화와 파일럿 패시브가 곱/합으로 함께 적용된다', () => {
+    const s = new Sim(1, metaParams({ hull: 2, intel: 3 }, 'sister2'));
+    expect(s.player.maxEnergy).toBe(100 + 20 + 25);
+    expect(s.stats.xpMult).toBeCloseTo(1.3 * 1.1);
+  });
+});
