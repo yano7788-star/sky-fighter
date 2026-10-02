@@ -443,3 +443,34 @@ describe('런 모디파이어', () => {
     const o = offerMutators(createRng(9)); expect(o).toHaveLength(3); expect(new Set(o).size).toBe(3);
   });
 });
+
+describe('융합 확장 (아이기스 오빗 / 프리즘 / 오버클럭)', () => {
+  const make = (levels: Record<string, number>) => { const s = new Sim(1); s.build.levels = levels as never; s.stats = statsOf(s.build); return s; };
+  it('조건을 만족해야 융합 카드가 열린다 (패시브와의 융합 포함)', () => {
+    const b = newBuild(); b.levels.drone = 2; b.levels.aegis = 1;
+    expect(fusionAvailable(b, 'aegisorbit')).toBe(false);
+    b.levels.aegis = 2; expect(fusionAvailable(b, 'aegisorbit')).toBe(true);
+    const c = newBuild(); c.levels.laser = 3; c.levels.spread = 3; expect(fusionAvailable(c, 'prism')).toBe(true);
+    const d = newBuild(); d.levels.rate = 3; d.levels.power = 3; expect(fusionAvailable(d, 'overdrive')).toBe(true);
+  });
+  it('프리즘: 레이저가 3줄기로 갈라져 양옆의 적도 맞힌다', () => {
+    const s = make({ laser: 3, spread: 3, prism: 1 });
+    s.enemies.push({ ...mkEnemy('sniper', s.player.x + 38, s.player.y - 200), hp: 6, maxHp: 6 });
+    for (let i = 0; i < 12; i++) { s.player.invincible = 99999; s.step(idle(s, true)); }
+    expect(s.laser.offs).toEqual([-38, 0, 38]);
+    expect(s.enemies.length === 0 || s.enemies[0].hp < 6).toBe(true);
+  });
+  it('오버클럭: 콤보 5 이상일 때만 연사·피해가 오른다', () => {
+    const a = make({ rate: 3, power: 3, overdrive: 1 }), b = make({ rate: 3, power: 3, overdrive: 1 });
+    b.combo = 6; b.comboTimer = 100;
+    a.step(idle(a, true)); b.step(idle(b, true));
+    expect(b.bullets[0].dmg).toBeCloseTo(a.bullets[0].dmg * 1.2);
+  });
+  it('아이기스 오빗: 드론이 닿는 적 탄을 지운다', () => {
+    const s = make({ drone: 2, aegis: 2, aegisorbit: 1 });
+    const d = s.dronePositions()[0];
+    s.enemyBullets.push({ x: d.x, y: d.y, vx: 0, vy: 0, color: '#fff', r: 4 });
+    const e0 = s.player.energy; s.step(idle(s));
+    expect(s.enemyBullets).toHaveLength(0); expect(s.player.energy).toBe(e0);
+  });
+});

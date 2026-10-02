@@ -1,4 +1,4 @@
-import { CARDS, hasFusion, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
+import { CARDS, hasFusion, type FusionId, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config';
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
@@ -53,7 +53,7 @@ export class Sim {
 
   // 폭탄 폭발장 / 레이저 상태 (렌더링이 읽는다)
   bombT = 0; bombX = 0; bombY = 0;
-  laser = { on: false, x: 0, w: 0 };
+  laser = { on: false, x: 0, w: 0, offs: [0] as number[] };   // offs: 빔 가로 위치 오프셋(프리즘 융합 시 3줄기)
 
   combo = 0;
   comboTimer = 0;
@@ -326,11 +326,12 @@ export class Sim {
     if (this.droneCd > 0) this.droneCd--;
     if (this.droneMissileCd > 0) this.droneMissileCd--;
 
-    const baseDmg = st.dmgMult * (1 + 0.15 * st.pierce) * (this.timeStopped ? ULT_KIND.timestop.boost : 1);
+    const od = st.overdrive && this.combo >= 5;   // 오버클럭 융합: 콤보 중에는 더 빠르고 강하게
+    const baseDmg = st.dmgMult * (1 + 0.15 * st.pierce) * (this.timeStopped ? ULT_KIND.timestop.boost : 1) * (od ? 1.2 : 1);
     const pierceN = st.pierce + (st.railgun ? 2 : 0);
 
     if (wantFire && this.fireCd <= 0) {
-      this.fireCd = Math.max(3, Math.round(8 / st.rateMult));
+      this.fireCd = Math.max(3, Math.round(8 / (st.rateMult * (od ? 1.35 : 1))));
       this.emit({ t: 'muzzle' }); this.emit({ t: 'sfx', name: 'laser' });
       const b = (dx: number, dy: number, vx: number) => this.bullets.push(this.mkBullet(p.x + dx, p.y + dy, vx, -13, baseDmg, pierceN));
       switch (this.weaponLevel) {
@@ -376,21 +377,22 @@ export class Sim {
     // 레이저: 사격 중 전방 관통 빔 (5프레임마다 피해)
     this.laser.on = false;
     if (st.laser > 0 && wantFire) {
-      const w = (10 + 3 * st.laser) * (st.railgun ? 2.2 : 1);
-      this.laser.on = true; this.laser.x = p.x; this.laser.w = w;
-      if (this.frame % 5 === 0) this.laserTick(w, (0.7 + 0.35 * st.laser) * st.dmgMult * (st.railgun ? 2 : 1));
+      const offs = st.prism ? [-38, 0, 38] : [0];
+      const w = (10 + 3 * st.laser) * (st.railgun ? 2.2 : 1) * (st.prism ? 0.8 : 1);
+      this.laser.on = true; this.laser.x = p.x; this.laser.w = w; this.laser.offs = offs;
+      if (this.frame % 5 === 0) for (const o of offs) this.laserTick(w, (0.7 + 0.35 * st.laser) * st.dmgMult * (st.railgun ? 2 : 1) * (od ? 1.2 : 1), o);
     }
   }
 
-  private laserTick(w: number, dmg: number): void {
-    const p = this.player;
+  private laserTick(w: number, dmg: number, off = 0): void {
+    const p = this.player, lx = p.x + off;
     for (const e of this.enemies) {
-      if (e.y < p.y && e.y >= ON_SCREEN_Y && Math.abs(e.x - p.x) < w / 2 + ENEMY_DEFS[e.type].hitR * 0.6) this.damageEnemy(e, dmg);
+      if (e.y < p.y && e.y >= ON_SCREEN_Y && Math.abs(e.x - lx) < w / 2 + ENEMY_DEFS[e.type].hitR * 0.6) this.damageEnemy(e, dmg);
     }
     const b = this.boss;
-    if (b && !b.dying && b.y > 20 && b.y < p.y && Math.abs(b.x - p.x) < w / 2 + b.width / 2) { this.damageBoss(dmg); this.emit({ t: 'hitspark', x: p.x, y: b.y + b.height / 2 }); }
+    if (b && !b.dying && b.y > 20 && b.y < p.y && Math.abs(b.x - lx) < w / 2 + b.width / 2) { this.damageBoss(dmg); this.emit({ t: 'hitspark', x: lx, y: b.y + b.height / 2 }); }
     const m = this.midBoss;
-    if (m && !m.dying && m.y > 20 && m.y < p.y && Math.abs(m.x - p.x) < w / 2 + m.width / 2) { this.damageMid(dmg); this.emit({ t: 'hitspark', x: p.x, y: m.y + m.height / 2 }); }
+    if (m && !m.dying && m.y > 20 && m.y < p.y && Math.abs(m.x - lx) < w / 2 + m.width / 2) { this.damageMid(dmg); this.emit({ t: 'hitspark', x: lx, y: m.y + m.height / 2 }); }
   }
 
   // ---- 피해 처리 공통 (흡혈 포함) ----
@@ -695,12 +697,18 @@ export class Sim {
   private updateEnemyBullets(): void {
     if (this.timeStopped) return;   // 시간 정지: 적 탄은 허공에 멈춰 있다
     const p = this.player, dogOn = this.comp.dog.active;
+    const orbit = this.stats.aegisorbit && this.stats.drones > 0 ? this.dronePositions() : null;   // 아이기스 오빗 융합: 드론이 탄을 막는다
     for (let i = this.enemyBullets.length - 1; i >= 0; i--) {
       if (i >= this.enemyBullets.length) continue;   // applyDamage(리스폰)가 탄을 전부 지운 경우
       const eb = this.enemyBullets[i];
       const sp = this.enemyBulletSpeed;
       eb.x += eb.vx * sp; eb.y += eb.vy * sp;
       const d = Math.hypot(p.x - eb.x, p.y - eb.y);
+      if (orbit && orbit.some(d => Math.hypot(d.x - eb.x, d.y - eb.y) < 17 + eb.r)) {
+        this.enemyBullets.splice(i, 1);
+        if (this.frame % 2 === 0) this.emit({ t: 'explosion', x: eb.x, y: eb.y, color: '#67e8f9', count: 2 });
+        continue;
+      }
       // 강아지 방어막: 반경 안으로 들어온 탄은 사라진다
       if (dogOn && d < SHIELD_R + eb.r) {
         this.enemyBullets.splice(i, 1);
@@ -1031,5 +1039,5 @@ export class Sim {
   }
 
   /** 현재 빌드에서 융합 카드 보유 여부 (렌더링/HUD용) */
-  hasFusion(id: 'swarm' | 'railgun' | 'hunter'): boolean { return hasFusion(this.build, id); }
+  hasFusion(id: FusionId): boolean { return hasFusion(this.build, id); }
 }

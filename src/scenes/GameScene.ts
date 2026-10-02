@@ -467,10 +467,13 @@ export class GameScene extends Phaser.Scene {
     const s = this.sim, p = s.player, g = this.beamG, f = this.fieldG;
     g.clear(); f.clear();
     if (s.laser.on) {
-      const w = s.laser.w * (1 + Math.sin(s.frame * 0.6) * 0.08), rail = s.hasFusion('railgun');
-      g.fillStyle(rail ? 0x38bdf8 : 0x3b82f6, 0.35); g.fillRect(p.x - w / 2 - 3, 0, w + 6, p.y - 24);
-      g.fillStyle(rail ? 0xe0f2fe : 0x93c5fd, 0.8); g.fillRect(p.x - w / 2, 0, w, p.y - 24);
-      g.fillStyle(0xffffff, 0.95); g.fillRect(p.x - w * 0.18, 0, w * 0.36, p.y - 24);
+      const w = s.laser.w * (1 + Math.sin(s.frame * 0.6) * 0.08), rail = s.hasFusion('railgun'), prism = s.hasFusion('prism');
+      for (const o of s.laser.offs) {
+        const bx = p.x + o;
+        g.fillStyle(prism ? 0xe879f9 : rail ? 0x38bdf8 : 0x3b82f6, 0.35); g.fillRect(bx - w / 2 - 3, 0, w + 6, p.y - 24);
+        g.fillStyle(prism ? 0xf5d0fe : rail ? 0xe0f2fe : 0x93c5fd, 0.8); g.fillRect(bx - w / 2, 0, w, p.y - 24);
+        g.fillStyle(0xffffff, 0.95); g.fillRect(bx - w * 0.18, 0, w * 0.36, p.y - 24);
+      }
     }
     if (s.bombT > 0) {   // 폭탄 폭발장: 퍼져 나가는 원
       const k = 1 - s.bombT / BOMB.fieldFrames, r = BOMB.fieldRadiusMax * Math.sqrt(k), a = 1 - k;

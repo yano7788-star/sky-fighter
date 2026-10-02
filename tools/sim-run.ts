@@ -50,7 +50,7 @@ function runOne(seed: number): RunResult {
     } else laserSide = 0;
     // 레벨업 카드: 융합 > 모듈 > 패시브 순으로 (사람처럼 한 빌드를 키움)
     if (s.pending) {
-      const pick = s.pending.findIndex(id => ['swarm', 'railgun', 'hunter'].includes(id));
+      const pick = s.pending.findIndex(id => ['swarm', 'railgun', 'hunter', 'aegisorbit', 'prism', 'overdrive'].includes(id));
       const mod = s.pending.findIndex(id => ['spread', 'pierce', 'homing', 'drone', 'laser'].includes(id));
       s.chooseCard(pick >= 0 ? pick : mod >= 0 ? mod : 0);
     }
