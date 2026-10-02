@@ -1,12 +1,12 @@
 import type { Boss, BossConfig, EnemyBullet, EnemyType, MidBossConfig, Rank } from './types';
 
-// 보스 1~5 설정 (HP: 650/1200/1800/3700/6600 — 플레이어가 성장하는 로그라이트 구조에 맞춰 상향)
+// 보스 1~5 설정 (HP: 700/1300/1950/3900/6800 — 플레이어가 성장하는 로그라이트 구조에 맞춰 상향)
 export const BOSS_CONFIGS: Record<number, BossConfig> = {
-  1: { name: 'STAGE 1: TANK BUSTER',     hp: 650,  color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
-  2: { name: 'STAGE 2: CYBER STEALTH',   hp: 1200, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
-  3: { name: 'STAGE 3: AEGIS FLAGSHIP',  hp: 1800, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
-  4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 3700, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
-  5: { name: 'STAGE 5: VOID ARCHANGEL',  hp: 6600, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 },
+  1: { name: 'STAGE 1: TANK BUSTER',     hp: 700,  color: '#4d7c0f', subColor: '#bef264', w: 130, h: 110, shotCd: 44 },
+  2: { name: 'STAGE 2: CYBER STEALTH',   hp: 1300, color: '#0284c7', subColor: '#38bdf8', w: 140, h: 120, shotCd: 38 },
+  3: { name: 'STAGE 3: AEGIS FLAGSHIP',  hp: 1950, color: '#ca8a04', subColor: '#facc15', w: 150, h: 130, shotCd: 34 },
+  4: { name: 'STAGE 4: HEAVY DESTROYER', hp: 3900, color: '#b91c1c', subColor: '#f87171', w: 155, h: 135, shotCd: 30 },
+  5: { name: 'STAGE 5: VOID ARCHANGEL',  hp: 6800, color: '#7e22ce', subColor: '#c084fc', w: 165, h: 150, shotCd: 26 },
 };
 
 // ---------------------------------------------------------------------------
@@ -79,10 +79,10 @@ export function fireBossPattern(b: Boss, c: PatternCtx): void {
 // ---------------------------------------------------------------------------
 export interface EnemyDef { hp: number; score: number; hitR: number; bodyR: number; xp: number; }
 export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
-  scout:    { hp: 1, score: 10, hitR: 20, bodyR: 14, xp: 2 },   // 직선 강하 + 가끔 사격
-  zigzag:   { hp: 2, score: 20, hitR: 22, bodyR: 15, xp: 4 },   // 좌우로 흔들리며 내려오고 조준탄을 쏨
-  kamikaze: { hp: 1, score: 15, hitR: 20, bodyR: 14, xp: 3 },   // 플레이어 쪽으로 가속하며 돌진
-  sniper:   { hp: 4, score: 40, hitR: 26, bodyR: 18, xp: 8 },   // 상단에 멈춰서 조준 사격 후 퇴장
+  scout:    { hp: 2, score: 10, hitR: 20, bodyR: 14, xp: 3 },   // 직선 강하 + 가끔 사격
+  zigzag:   { hp: 3, score: 20, hitR: 22, bodyR: 15, xp: 5 },   // 좌우로 흔들리며 내려오고 조준탄을 쏨
+  kamikaze: { hp: 2, score: 15, hitR: 20, bodyR: 14, xp: 4 },   // 플레이어 쪽으로 가속하며 돌진
+  sniper:   { hp: 5, score: 40, hitR: 26, bodyR: 18, xp: 10 },   // 상단에 멈춰서 조준 사격 후 퇴장
 };
 /** 스테이지(1~5)별 등장 가중치 */
 export const ENEMY_WEIGHTS: Record<number, Partial<Record<EnemyType, number>>> = {
@@ -107,13 +107,17 @@ export const MID_BOSS_AT = 0.55;           // 스테이지 전투 시간의 이 
 // ---------------------------------------------------------------------------
 export const FIGHT_FRAMES: Record<number, number> = { 1: 2100, 2: 2400, 3: 2700, 4: 3000, 5: 3300 };   // 35 / 40 / 45 / 50 / 55초
 /** 스테이지별 일반 적 스폰 간격(프레임) — 높은 스테이지일수록 촘촘 */
-export const SPAWN_INTERVAL: Record<number, number> = { 1: 34, 2: 30, 3: 27, 4: 24, 5: 21 };
+export const SPAWN_INTERVAL: Record<number, number> = { 1: 30, 2: 26, 3: 23, 4: 20, 5: 17 };
+/** 스테이지가 오를수록 일반 적 체력 배율 */
+export const enemyHpScale = (tier: number) => 1 + 0.14 * (tier - 1);
+/** 적이 이 높이(y) 아래로 내려와 '화면 안'에 들어오기 전에는 맞지 않는다 (화면 밖에서 죽는 문제 방지) */
+export const ON_SCREEN_Y = 14;
 
 // ---------------------------------------------------------------------------
 // 아이템 드랍: 한 번의 난수로 기본 4종, 별도 난수로 신규 3종
 // ---------------------------------------------------------------------------
-export const DROP_BASE: [number, 'P' | 'M' | 'E' | 'B'][] = [[0.05, 'P'], [0.09, 'M'], [0.13, 'E'], [0.14, 'B']];   // 누적 확률
-export const DROP_EXTRA: [number, 'G' | 'L'][] = [[0.02, 'G'], [0.028, 'L']];
+export const DROP_BASE: [number, 'P' | 'M' | 'E' | 'B'][] = [[0.04, 'P'], [0.07, 'M'], [0.105, 'E'], [0.113, 'B']];   // 누적 확률
+export const DROP_EXTRA: [number, 'G' | 'L'][] = [[0.01, 'G'], [0.014, 'L']];
 
 // ---------------------------------------------------------------------------
 // 콤보 / 랭크
@@ -140,7 +144,7 @@ export const LIFESTEAL_CAP = 0.8;        // 흡혈은 최대 에너지의 80%까
 export const MOB_HIT_VALUE = 8;          // 일반 적 처치 1회를 피해량 8로 환산
 export const SHIELD_R = 52;              // 강아지 방어막 반경
 /** 처치 수가 쌓일수록 동료 아이템 드랍 확률 상승 (스테이지당 한 번은 거의 확실히 등장) */
-export const companionDropChance = (pity: number) => Math.min(0.6, 0.02 + 0.006 * pity);
+export const companionDropChance = (pity: number) => Math.min(0.45, 0.01 + 0.004 * pity);
 
 // ---------------------------------------------------------------------------
 // 폭탄 (강화판): 즉시 피해 + 잠깐 남는 폭발장 + 무적

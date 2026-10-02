@@ -99,8 +99,9 @@ export class ParallaxOverlay {
 
   constructor(scene: Phaser.Scene, parent: Phaser.GameObjects.Container) {
     const defs = [
-      { speed: 2.7, alpha: 0.55, scale: 1.2, flipX: false, xOff: -40 },
-      { speed: 4.1, alpha: 0.38, scale: 0.85, flipX: true, xOff: 60 },
+      // scale>=1.3 이고 |xOff| <= (scale-1)*W/2 라서 이미지의 좌우 끝이 항상 화면 밖에 있다 (끝이 잘려 보이는 문제 방지)
+      { speed: 2.7, alpha: 0.55, scale: 1.3, flipX: false, xOff: -35 },
+      { speed: 4.1, alpha: 0.38, scale: 1.45, flipX: true, xOff: 55 },
     ];
     for (const d of defs) {
       const imgs: Phaser.GameObjects.Image[] = [];

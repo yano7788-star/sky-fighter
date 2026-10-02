@@ -23,6 +23,7 @@ const ITEM_COLORS: Record<ItemType, string> = { P: '#10b981', M: '#ec4899', E: '
 
 /** 부트 시 한 번 만드는 공용 텍스처 */
 export function buildStaticTextures(scene: Phaser.Scene): void {
+  buildSoftCard(scene);
   makeTexture(scene, 'pbullet', 10, 10, c => { c.fillStyle = '#fde047'; c.beginPath(); c.arc(5, 5, 3.5, 0, Math.PI * 2); c.fill(); });
   makeTexture(scene, 'missile', 8, 20, c => {
     c.fillStyle = '#f43f5e'; c.fillRect(1.5, 5, 5, 14);
@@ -111,6 +112,27 @@ function outlinedBoss(scene: Phaser.Scene, key: string, src: HTMLImageElement, s
   for (const [ox, oy] of o) octx.drawImage(sil, ox * k, oy * k);
   octx.shadowBlur = 0;
   octx.drawImage(src, pad, pad);
+  tex.refresh();
+}
+
+/** 궁극기 컷인 카드: 모서리를 둥글게 + 가장자리를 부드럽게 페더링해서 화면에 자연스럽게 녹아들게 한다 */
+export function buildSoftCard(scene: Phaser.Scene): void {
+  if (scene.textures.exists('skill_card_soft') || !scene.textures.exists('skill_card')) return;
+  const src = scene.textures.get('skill_card').getSourceImage() as HTMLImageElement;
+  const w = src.width, h = src.height;
+  const tex = scene.textures.createCanvas('skill_card_soft', w, h);
+  if (!tex) return;
+  const ctx = tex.context;
+  ctx.drawImage(src, 0, 0);
+  const img = ctx.getImageData(0, 0, w, h), d = img.data;
+  const r = 44, F = 38;   // 모서리 반경, 페더(흐림) 폭
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = Math.abs(x + 0.5 - w / 2) - (w / 2 - r), dy = Math.abs(y + 0.5 - h / 2) - (h / 2 - r);
+    const sdf = Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - r;   // 음수 = 안쪽
+    let f = Math.max(0, Math.min(1, -sdf / F)); f = f * f * (3 - 2 * f);
+    d[(y * w + x) * 4 + 3] = Math.round(d[(y * w + x) * 4 + 3] * f);
+  }
+  ctx.putImageData(img, 0, 0);
   tex.refresh();
 }
 

@@ -73,6 +73,12 @@ export class Fx {
     }
   }
 
+  /** 중심으로 빨려 드는 불꽃 (에너지 충전 연출) */
+  chargeSpark(x: number, y: number, color: string): void {
+    const c = hex(color), a = Math.random() * Math.PI * 2, d = 36 + Math.random() * 14;
+    if (this.sparks.length < 160) this.sparks.push({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, vx: -Math.cos(a) * 11, vy: -Math.sin(a) * 11, life: 8, max: 8, len: 7, color: c });
+  }
+
   /** 짧게 번쩍이는 둥근 섬광 (가산 합성) */
   flashBlob(x: number, y: number, size: number, color = 0xffffff): void {
     if (this.blobs.length < 24) this.blobs.push({ x, y, size, life: 9, max: 9, color });

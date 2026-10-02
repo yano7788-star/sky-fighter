@@ -77,7 +77,7 @@ describe('시뮬레이션', () => {
     s.enemies.push({ ...mkEnemy('scout', 100, -30), speed: 0 }, { ...mkEnemy('scout', 100, 200), speed: 0 });
     s.frame = 100;
     s.fireBomb();
-    expect(s.enemies.map(e => e.hp)).toEqual([1, 0]);
+    expect(s.enemies.map(e => e.hp)).toEqual([2, 0]);   // 화면 밖(첫 번째)은 그대로, 화면 안(두 번째)은 파괴
     expect(s.bombs).toBe(0);
   });
 
@@ -151,7 +151,7 @@ describe('적 4종', () => {
 
   it('지그재그는 체력 2: 한 발로는 안 죽는다', () => {
     const s = new Sim(1);
-    s.enemies.push(mkEnemy('zigzag', 225, 300));
+    s.enemies.push({ ...mkEnemy('zigzag', 225, 300), hp: 2, maxHp: 2 });
     s.bullets.push(bullet(225, 300));
     s.step(idle(s));
     expect(s.enemies).toHaveLength(1); expect(s.enemies[0].hp).toBe(1);
@@ -261,7 +261,7 @@ describe('중간보스', () => {
   it('레이저는 예고(CHARGE) 후 발사(FIRE)되고 맞으면 피해를 준다', () => {
     const s = new Sim(1);
     s.bossTier = 2; s.stageFrames = Math.ceil(FIGHT_FRAMES[2] * 0.55) - 1; s.step(idle(s));
-    const m = s.midBoss!; m.y = m.targetY; m.state = 'CHARGE'; m.stateTimer = 60; m.laserX = s.player.x;
+    const m = s.midBoss!; m.y = m.targetY; m.state = 'CHARGE'; m.stateTimer = 60; m.x = s.player.x; m.lockX = m.x; m.laserX = m.x;
     for (let i = 0; i < 12 && (m.state as string) !== 'FIRE'; i++) s.step(idle(s));
     expect(m.state as string).toBe('FIRE');
     const e0 = s.player.energy; s.player.invincible = 0;

@@ -2,7 +2,7 @@ import { CARDS, hasFusion, newBuild, offerCards, statsOf, xpNeeded, type Build, 
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W } from './config';
 import {
   BOMB, BOSS_CONFIGS, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
-  FIGHT_FRAMES, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
+  FIGHT_FRAMES, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
   fireBossPattern, rankFor,
 } from './data';
 import { NO_META, type MetaParams } from './meta';
@@ -259,7 +259,7 @@ export class Sim {
   private applyUltDamage(): void {
     const p = this.player;
     this.enemyBullets.length = 0;
-    for (const e of this.enemies) if (e.y > -10) e.hp -= Math.max(1, Math.ceil(ULT.enemyPct * e.maxHp));
+    for (const e of this.enemies) if (e.y >= 0) e.hp -= Math.max(1, Math.ceil(ULT.enemyPct * e.maxHp));
     if (this.midBoss && !this.midBoss.dying) {
       this.midBoss.hp -= Math.ceil(ULT.enemyPct * this.midBoss.maxHp);
       this.midBoss.state = 'MOVE'; this.midBoss.stateTimer = 0;   // 레이저 중단
@@ -313,8 +313,8 @@ export class Sim {
     if (homingLv > 0 && wantFire && this.missileCd <= 0) {
       this.missileCd = MISSILE_CD[homingLv];
       this.emit({ t: 'sfx', name: 'missile' });
-      this.missiles.push({ x: p.x - 26, y: p.y, vx: -3, vy: -5, speed: 7.5, dmg: 3 * st.dmgMult });
-      this.missiles.push({ x: p.x + 26, y: p.y, vx: 3, vy: -5, speed: 7.5, dmg: 3 * st.dmgMult });
+      this.missiles.push({ x: p.x - 26, y: p.y, vx: -3, vy: -5, speed: 7.5, dmg: 2.2 * st.dmgMult });
+      this.missiles.push({ x: p.x + 26, y: p.y, vx: 3, vy: -5, speed: 7.5, dmg: 2.2 * st.dmgMult });
     }
 
     // 드론: 기체 주위를 돌며 함께 사격 (헌터 융합: 유도 미사일도 발사)
@@ -327,7 +327,7 @@ export class Sim {
       if (st.hunter && this.droneMissileCd <= 0) {
         this.droneMissileCd = 70;
         const d = ds[Math.floor(this.rng() * ds.length)];
-        this.missiles.push({ x: d.x, y: d.y, vx: d.x < p.x ? -2 : 2, vy: -5, speed: 7.5, dmg: 2.5 * st.dmgMult });
+        this.missiles.push({ x: d.x, y: d.y, vx: d.x < p.x ? -2 : 2, vy: -5, speed: 7.5, dmg: 1.8 * st.dmgMult });
       }
     }
 
@@ -343,7 +343,7 @@ export class Sim {
   private laserTick(w: number, dmg: number): void {
     const p = this.player;
     for (const e of this.enemies) {
-      if (e.y < p.y && e.y > -10 && Math.abs(e.x - p.x) < w / 2 + ENEMY_DEFS[e.type].hitR * 0.6) this.damageEnemy(e, dmg);
+      if (e.y < p.y && e.y >= ON_SCREEN_Y && Math.abs(e.x - p.x) < w / 2 + ENEMY_DEFS[e.type].hitR * 0.6) this.damageEnemy(e, dmg);
     }
     const b = this.boss;
     if (b && !b.dying && b.y > 20 && b.y < p.y && Math.abs(b.x - p.x) < w / 2 + b.width / 2) { this.damageBoss(dmg); this.emit({ t: 'hitspark', x: p.x, y: b.y + b.height / 2 }); }
@@ -375,7 +375,7 @@ export class Sim {
       const d = Math.hypot(tg.x - b.x, tg.y - b.y);
       if (d < best && Math.abs(diff(tg)) < 1.4) { best = d; target = tg; }
     };
-    for (const e of this.enemies) if (e.hp > 0 && e.y > 0) consider(e);
+    for (const e of this.enemies) if (e.hp > 0 && e.y >= ON_SCREEN_Y) consider(e);
     if (this.boss && !this.boss.dying) consider(this.boss);
     if (this.midBoss && !this.midBoss.dying) consider(this.midBoss);
     if (!target) return;
@@ -400,7 +400,7 @@ export class Sim {
       if (!target && this.midBoss && !this.midBoss.dying) target = this.midBoss;
       if (!target && this.enemies.length > 0) {
         let minDist = Infinity;
-        for (const e of this.enemies) { const d = Math.hypot(e.x - m.x, e.y - m.y); if (d < minDist) { minDist = d; target = e; } }
+        for (const e of this.enemies) { if (e.y < ON_SCREEN_Y) continue; const d = Math.hypot(e.x - m.x, e.y - m.y); if (d < minDist) { minDist = d; target = e; } }
       }
       if (target) {
         const desired = Math.atan2(target.y - m.y, target.x - m.x), current = Math.atan2(m.vy, m.vx);
@@ -564,7 +564,7 @@ export class Sim {
     this.midDone = true;
     this.midBoss = {
       tier, x: W / 2, y: -80, targetY: 120, width: c.w, height: c.h, vx: 1.8 + tier * 0.2,
-      hp: c.hp, maxHp: c.hp, shootCd: 0, state: 'MOVE', stateTimer: 0, laserX: W / 2, dying: false, deathTimer: 0,
+      hp: c.hp, maxHp: c.hp, shootCd: 0, state: 'MOVE', stateTimer: 0, lockX: W / 2, laserX: W / 2, dying: false, deathTimer: 0,
     };
     this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'shake', v: 6 });
   }
@@ -599,12 +599,13 @@ export class Sim {
           this.enemyBullets.push({ x: m.x, y: m.y + 36, vx: Math.sin(base + o) * c.fanSpeed, vy: Math.cos(base + o) * c.fanSpeed, color: c.color, r: 5 });
         }
       }
-      if (++m.stateTimer > 300) { m.state = 'CHARGE'; m.stateTimer = 0; m.laserX = p.x; }   // 예고선은 이 시점의 플레이어 위치에 고정
+      if (++m.stateTimer > 300) { m.state = 'CHARGE'; m.stateTimer = 0; m.lockX = Math.max(m.width / 2 + 10, Math.min(W - m.width / 2 - 10, p.x)); m.laserX = m.x; }   // 조준 위치는 이 시점의 플레이어 x로 고정
     } else if (m.state === 'CHARGE') {
-      // 예고선은 고정(1.2초) — 보고 피할 수 있어야 공정하다
-      if (++m.stateTimer >= 70) { m.state = 'FIRE'; m.stateTimer = 0; this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'shake', v: 8 }); }
+      // 보스가 조준 위치로 미끄러져 가고, 예고선은 보스 코에서 곧게 내려온다 (1.2초 — 보고 피할 수 있어야 공정)
+      m.x += Math.max(-6, Math.min(6, (m.lockX - m.x) * 0.07)); m.laserX = m.x;
+      if (++m.stateTimer >= 70) { m.state = 'FIRE'; m.stateTimer = 0; m.laserX = m.x; this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'shake', v: 8 }); }
     } else {
-      m.stateTimer++;
+      m.stateTimer++; m.laserX = m.x;
       if (Math.abs(p.x - m.laserX) < 34 + p.radius * 0.5 && p.y > m.y) this.applyDamage(40);
       if (m.stateTimer >= 45) { m.state = 'MOVE'; m.stateTimer = 0; m.shootCd = 0; }
     }
@@ -649,7 +650,7 @@ export class Sim {
       }
       if (d < p.radius + eb.r) {
         this.enemyBullets.splice(i, 1);
-        this.applyDamage(20);
+        this.applyDamage(22);
         continue;
       }
       // 그레이즈: 판정 바로 바깥을 스치면 보너스 (피격 직후 무적 중에는 제외)
@@ -678,7 +679,8 @@ export class Sim {
     const speed = type === 'scout' ? 3.2 + this.rng() * 1.5
       : type === 'zigzag' ? 2.4 + this.rng() * 0.6
       : type === 'kamikaze' ? 4.2 + this.rng() * 1.0 : 2.6;
-    this.enemies.push({ type, x, y: -30, hp: def.hp, maxHp: def.hp, speed, baseX: x, age: 0, fireCd: 50 + this.rng() * 60, hold: 0 });
+    const hp = Math.ceil(def.hp * enemyHpScale(Math.min(MAX_TIER, this.bossTier)));
+    this.enemies.push({ type, x, y: -30, hp, maxHp: hp, speed, baseX: x, age: 0, fireCd: 50 + this.rng() * 60, hold: 0 });
   }
 
   private aimedShot(e: Enemy, spd: number, color: string, r: number, spread = 0): void {
@@ -699,7 +701,7 @@ export class Sim {
       case 'zigzag':
         e.y += e.speed;
         e.x = Math.max(30, Math.min(W - 30, e.baseX + Math.sin(e.age * 0.06) * 80));
-        if (--e.fireCd <= 0 && e.y > 40 && e.y < H * 0.55) { this.aimedShot(e, 2.6, '#fb923c', 4); e.fireCd = 110 + this.rng() * 40; }
+        if (--e.fireCd <= 0 && e.y > 40 && e.y < H * 0.55) { this.aimedShot(e, 2.6, '#fb923c', 4); e.fireCd = 95 + this.rng() * 40; }
         break;
       case 'kamikaze':
         e.y += e.speed;
@@ -709,7 +711,7 @@ export class Sim {
         if (e.y < 150 && e.hold === 0) e.y += e.speed;
         else if (e.hold < 170) {
           e.hold++;
-          if (--e.fireCd <= 0) { this.aimedShot(e, 3.0, '#38bdf8', 4.5, -0.12); this.aimedShot(e, 3.0, '#38bdf8', 4.5, 0.12); e.fireCd = 60; }
+          if (--e.fireCd <= 0) { this.aimedShot(e, 3.0, '#38bdf8', 4.5, -0.12); this.aimedShot(e, 3.0, '#38bdf8', 4.5, 0.12); e.fireCd = 50; }
         } else e.y += e.speed * 1.5;
         if (e.hold === 0 && e.y >= 150) e.hold = 1;
         break;
@@ -727,8 +729,9 @@ export class Sim {
       const e = this.enemies[i];
       const def = ENEMY_DEFS[e.type];
       this.moveEnemy(e);
+      const vulnerable = e.y >= ON_SCREEN_Y;   // 화면에 들어오기 전에는 무적
 
-      for (let j = this.bullets.length - 1; j >= 0; j--) {
+      for (let j = this.bullets.length - 1; vulnerable && j >= 0; j--) {
         const b = this.bullets[j];
         if (b.hits?.includes(e)) continue;
         if (Math.hypot(b.x - e.x, b.y - e.y) < def.hitR) {
@@ -736,7 +739,7 @@ export class Sim {
           if (b.pierce > 0) { (b.hits ??= []).push(e); b.pierce--; } else { this.bullets.splice(j, 1); break; }
         }
       }
-      for (let m = this.missiles.length - 1; m >= 0; m--) {
+      for (let m = this.missiles.length - 1; vulnerable && m >= 0; m--) {
         const ms = this.missiles[m];
         if (Math.hypot(ms.x - e.x, ms.y - e.y) < def.hitR + 2) {
           this.missiles.splice(m, 1); this.damageEnemy(e, ms.dmg);
@@ -783,7 +786,7 @@ export class Sim {
   /** 미사일 착탄 지점 주변(반경 52)의 다른 적에게 절반 피해 */
   private missileSplash(x: number, y: number, except: Enemy, dmg: number): void {
     for (const o of this.enemies) {
-      if (o === except || o.y < -10) continue;
+      if (o === except || o.y < ON_SCREEN_Y) continue;
       if (Math.hypot(o.x - x, o.y - y) < 52) { this.damageEnemy(o, dmg); o.flash = 6; o.lastHit = 'missile'; }
     }
   }
@@ -906,7 +909,7 @@ export class Sim {
     this.score += n;
     for (let i = 0; i < n; i += 3) this.boom(this.enemyBullets[i].x, this.enemyBullets[i].y, '#fde68a', 1);
     this.enemyBullets.length = 0;
-    for (const e of this.enemies) if (e.y > -10) e.hp = 0;   // 화면 안의 적은 전부 파괴 (처치 점수/드랍/경험치 정상 처리)
+    for (const e of this.enemies) if (e.y >= 0) e.hp = 0;   // 화면 안의 적은 전부 파괴 (처치 점수/드랍/경험치 정상 처리)
     if (this.boss && !this.boss.dying) {
       this.boss.hp -= Math.max(BOMB.minBurst, Math.ceil(this.boss.maxHp * BOMB.bossBurstPct));
       this.boom(this.boss.x, this.boss.y, '#ef4444', 30);
@@ -928,7 +931,7 @@ export class Sim {
       const b = this.enemyBullets[i];
       if (Math.hypot(b.x - this.bombX, b.y - this.bombY) < radius) { this.enemyBullets.splice(i, 1); this.score += 1; }
     }
-    for (const e of this.enemies) if (e.y > -10 && Math.hypot(e.x - this.bombX, e.y - this.bombY) < radius) e.hp -= 1;
+    for (const e of this.enemies) if (e.y >= 0 && Math.hypot(e.x - this.bombX, e.y - this.bombY) < radius) e.hp -= 1;
     const tick = BOMB.fieldPctTotal / BOMB.fieldFrames;
     if (this.boss && !this.boss.dying && Math.hypot(this.boss.x - this.bombX, this.boss.y - this.bombY) < radius + this.boss.width / 2) this.boss.hp -= this.boss.maxHp * tick;
     if (this.midBoss && !this.midBoss.dying && Math.hypot(this.midBoss.x - this.bombX, this.midBoss.y - this.bombY) < radius + this.midBoss.width / 2) this.midBoss.hp -= this.midBoss.maxHp * tick;

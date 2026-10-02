@@ -59,7 +59,8 @@ export interface MidBoss {
   /** MOVE: 좌우 이동 + 부채꼴 사격 / CHARGE: 정지·레이저 예고선 / FIRE: 레이저 발사 */
   state: 'MOVE' | 'CHARGE' | 'FIRE';
   stateTimer: number;
-  laserX: number;
+  lockX: number;     // CHARGE 동안 보스가 미끄러져 가는 목표 x (플레이어의 x를 조준)
+  laserX: number;    // 레이저/예고선의 x — 항상 보스 자신의 x (보스 코에서 곧게 내려온다)
   dying: boolean; deathTimer: number;
 }
 

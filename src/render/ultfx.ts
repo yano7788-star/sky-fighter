@@ -16,7 +16,7 @@ export class UltFx {
   private dim: Phaser.GameObjects.Rectangle;
   private flash: Phaser.GameObjects.Rectangle;
   private card: Phaser.GameObjects.Image;
-  private cardFrame: Phaser.GameObjects.Graphics;
+  private glow: Phaser.GameObjects.Image;
   private palms: Phaser.GameObjects.Image[] = [];
 
   constructor(scene: Phaser.Scene, ui: Phaser.GameObjects.Container) {
@@ -24,9 +24,9 @@ export class UltFx {
     ui.add(this.root);
     this.dim = scene.add.rectangle(0, 0, W, H, 0x02060e, 0).setOrigin(0, 0);
     this.g = scene.add.graphics();
-    this.card = scene.add.image(W / 2, H * 0.48, 'skill_card');
-    this.cardFrame = scene.add.graphics();
-    this.root.add([this.dim, this.g, this.card, this.cardFrame]);
+    this.glow = scene.add.image(W / 2, H * 0.48, 'dot').setTint(0x67e8f9).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+    this.card = scene.add.image(W / 2, H * 0.48, 'skill_card_soft');
+    this.root.add([this.dim, this.g, this.glow, this.card]);
     for (let i = 0; i < 10; i++) { const p = scene.add.image(0, 0, 'skill_palm').setVisible(false); this.palms.push(p); this.root.add(p); }
     this.flash = scene.add.rectangle(0, 0, W, H, 0xffffff, 0).setOrigin(0, 0);
     this.root.add(this.flash);
@@ -43,7 +43,8 @@ export class UltFx {
     const phase = sim.ult.phase, t = sim.ult.t;
     if (phase === 'IDLE') { this.root.setVisible(false); return; }
     this.root.setVisible(true);
-    const g = this.g; g.clear(); this.cardFrame.clear();
+    const g = this.g; g.clear();
+    this.glow.setAlpha(0);
     this.palms.forEach(p => p.setVisible(false));
     this.card.setVisible(false); this.flash.setAlpha(0);
 
@@ -61,9 +62,9 @@ export class UltFx {
       const sc = Math.min((W * 0.86) / this.card.frame.width, (H * 0.8) / this.card.frame.height);
       const s = (0.8 + 0.2 * easeOutBack(inK)) * (1 + (0.025 * t) / T) * sc;
       this.card.setVisible(true).setScale(s).setAlpha(Math.min(1, t / 10) * out).setPosition(W / 2, H * 0.48 + (1 - inK) * 36);
-      const cw = this.card.frame.width * s, ch = this.card.frame.height * s;
-      this.cardFrame.lineStyle(3, 0x67e8f9, Math.min(1, t / 10) * out);
-      this.cardFrame.strokeRoundedRect(W / 2 - cw / 2, this.card.y - ch / 2, cw, ch, 14);
+      // 카드 뒤의 은은한 청록 후광 (딱딱한 테두리 대신)
+      const ch = this.card.frame.height * s;
+      this.glow.setPosition(W / 2, this.card.y).setDisplaySize(ch * 0.95, ch * 1.2).setAlpha(0.3 * Math.min(1, t / 14) * out);
     } else if (phase === 'FALL') {
       const T = ULT.frames.FALL, k = t / T, fall = Math.pow(k, 2.2);
       this.dim.setFillStyle(0x02060e, 0.82 - 0.27 * k);

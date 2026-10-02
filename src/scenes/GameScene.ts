@@ -308,6 +308,7 @@ export class GameScene extends Phaser.Scene {
     this.bombQueued = false; this.skillQueued = null;
 
     for (const e of s.drainEvents()) this.handleEvent(e);
+    if (s.midBoss && s.midBoss.state === 'FIRE') this.shake = Math.max(this.shake, 3);   // 레이저 발사 중 진동
     if (s.frame % 2 === 0) for (const m of s.missiles) this.fx.trail(m.x, m.y, '#ec4899');
     if (s.stagePhase === 'INTRO') this.bg.setTier(s.bossTier);
     if (this.overlay.stage() !== s.bossTier) this.overlay.setStage(s.bossTier);
@@ -514,15 +515,33 @@ export class GameScene extends Phaser.Scene {
     g.fillStyle(0xf97316, 1); g.fillRect(bx, by, bw * Math.max(0, m.hp / m.maxHp), 5);
     g.lineStyle(1, 0xfed7aa, 1); g.strokeRect(bx, by, bw, 5);
 
-    // 레이저: 예고선(가는 점멸선) → 발사(굵은 빔)
+    // 레이저: 보스 코에서 곧게 내려오는 예고선 → 발사. 발사 중에는 배경 전체가 번쩍이고 바닥에 충돌 섬광이 생긴다
+    const nx = m.laserX, ny = m.y + m.height * 0.62;
     if (m.state === 'CHARGE') {
-      const a = 0.25 + 0.35 * Math.abs(Math.sin(m.stateTimer * 0.35));
-      g.lineStyle(2, 0xff4d4d, a); g.beginPath(); g.moveTo(m.laserX, m.y + m.height / 2); g.lineTo(m.laserX, H); g.strokePath();
-      g.fillStyle(0xff4d4d, a * 0.5); g.fillCircle(m.x, m.y + m.height / 2, 6 + m.stateTimer * 0.15);
+      const k = m.stateTimer / 70, a = 0.25 + 0.4 * Math.abs(Math.sin(m.stateTimer * 0.35));
+      g.lineStyle(2, 0xff4d4d, a); g.beginPath(); g.moveTo(nx, ny); g.lineTo(nx, H); g.strokePath();
+      for (const off of [-34, 34]) { g.lineStyle(1, 0xff7a7a, a * 0.5); g.beginPath(); g.moveTo(nx + off, ny + 24); g.lineTo(nx + off, H); g.strokePath(); }   // 맞는 폭을 알려 주는 가이드
+      const r = 5 + k * 20 + Math.sin(frame * 0.5) * 2;   // 코 앞에 에너지가 모이는 구체
+      g.fillStyle(0xff3b3b, 0.35); g.fillCircle(nx, ny, r * 1.8); g.fillStyle(0xffd0d0, 0.9); g.fillCircle(nx, ny, r * 0.6);
+      if (frame % 2 === 0) this.fx.chargeSpark(nx, ny, '#ff8a8a');
     } else if (m.state === 'FIRE') {
-      const w = 68 * Math.min(1, m.stateTimer / 6) * Math.min(1, (45 - m.stateTimer) / 8 + 0.2);
-      g.fillStyle(0xff3b3b, 0.45); g.fillRect(m.laserX - w / 2, m.y + m.height / 2, w, H);
-      g.fillStyle(0xfff1f1, 0.9); g.fillRect(m.laserX - w * 0.22, m.y + m.height / 2, w * 0.44, H);
+      const t = m.stateTimer, w = 66 * Math.min(1, t / 6) * Math.min(1, (45 - t) / 8 + 0.2), flick = 0.85 + Math.random() * 0.15;
+      g.fillStyle(0x02040c, 0.2 * Math.min(1, t / 5)); g.fillRect(0, 0, W, H);       // 배경을 살짝 어둡게 눌러 빔을 돋보이게
+      g.fillStyle(0xff2d2d, 0.06 * flick); g.fillRect(0, 0, W, H);                   // 화면 전체 붉은 기운
+      for (let i = 0; i < 6; i++) {                                                  // 부드러운 후광: 겹겹의 사각형
+        const k = i / 5; g.fillStyle(0xff5a3c, 0.05 + 0.05 * (1 - k) * flick); g.fillRect(nx - w * (2.1 - k * 1.2), ny, w * (4.2 - k * 2.4), H);
+      }
+      g.fillStyle(0xff3b3b, 0.5); g.fillRect(nx - w / 2, ny, w, H);
+      g.fillStyle(0xfff1f1, 0.95); g.fillRect(nx - w * 0.2, ny, w * 0.4, H);
+      for (let i = 0; i < 6; i++) {                                                  // 빔을 따라 흐르는 밝은 띠
+        const yy = ny + ((frame * 30 + i * 150) % (H - ny)); g.fillStyle(0xffffff, 0.55); g.fillRect(nx - w * 0.34, yy, w * 0.68, 16);
+      }
+      g.fillStyle(0xffe4e4, 0.9); g.fillCircle(nx, ny, w * 0.38);                    // 발사구 광구
+      g.fillStyle(0xff5a3c, 0.35 * flick); g.fillCircle(nx, ny, w * 0.8);
+      g.fillStyle(0xff7a3c, 0.5 * flick); g.fillEllipse(nx, H - 6, w * 3, 38);       // 바닥 충돌 섬광
+      g.fillStyle(0xffffff, 0.8 * flick); g.fillEllipse(nx, H - 6, w * 1.3, 18);
+      if (frame % 2 === 0) this.fx.sparkBurst(nx + (Math.random() < 0.5 ? -w / 2 : w / 2), ny + Math.random() * (H - ny), '#ffb4a8', 2);   // 빔 가장자리 불꽃
+      if (frame % 3 === 0) this.fx.sparkBurst(nx + (Math.random() - 0.5) * w * 1.6, H - 10, '#ffd2a0', 2);                                    // 바닥에서 튀는 불꽃
     }
   }
 
