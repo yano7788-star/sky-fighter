@@ -131,10 +131,10 @@ export interface BuildStats {
   swarm: boolean; railgun: boolean; hunter: boolean; aegisorbit: boolean; prism: boolean; overdrive: boolean;
   bombCapBonus: number; aegisSeconds: number; maxEnergyBonus: number;
 }
-export function statsOf(b: Build, meta: { xpMult?: number; rateMult?: number; dmgMult?: number; magnetMult?: number; lowHp?: boolean } = {}): BuildStats {
+export function statsOf(b: Build, meta: { xpMult?: number; rateMult?: number; dmgMult?: number; magnetMult?: number; lowHp?: boolean; rateBoost?: number } = {}): BuildStats {
   const R = (id: RelicId, v: number) => (hasRelic(b, id) ? v : 1);
   return {
-    rateMult: (1 + 0.08 * lv(b, 'rate')) * (meta.rateMult ?? 1) * R('r_overclock', 1.15),
+    rateMult: (1 + 0.08 * lv(b, 'rate')) * (meta.rateMult ?? 1) * R('r_overclock', 1.15) * (meta.rateBoost ?? 1),
     dmgMult: (1 + 0.12 * lv(b, 'power')) * (meta.dmgMult ?? 1) * (meta.lowHp ? R('r_laststand', 1.4) : 1),
     magnetMult: (1 + 0.4 * lv(b, 'magnet')) * (meta.magnetMult ?? 1) * R('r_magnet', 2),
     xpMult: (1 + 0.15 * lv(b, 'scholar')) * (meta.xpMult ?? 1) * R('r_knowledge', 1.3),

@@ -670,3 +670,23 @@ describe('유물(렐릭)', () => {
     expect(s.bombs).toBe(1);
   });
 });
+
+describe('하이퍼 모드', () => {
+  const graze = (s: Sim, n: number) => { for (let i = 0; i < n; i++) { s.enemyBullets.push({ x: s.player.x + s.player.radius + 8, y: s.player.y, vx: 0, vy: 0, color: '#fff', r: 3 }); s.player.invincible = 0; s.step(idle(s)); } };
+  it('그레이즈로 게이지가 차고 가득 차면 자동 발동: 탄 소거·연사 증가', () => {
+    const s = new Sim(1); const rate0 = s.stats.rateMult;
+    graze(s, 24); expect(s.hyper.t).toBe(0); expect(s.hyper.gauge).toBe(96);
+    s.enemyBullets.push({ x: 5, y: 5, vx: 0, vy: 0, color: '#fff', r: 3 });
+    graze(s, 1);
+    expect(s.hyper.t).toBeGreaterThan(300); expect(s.run.hypers).toBe(1);
+    expect(s.enemyBullets.length).toBe(0); expect(s.stats.rateMult).toBeCloseTo(rate0 * 1.2);
+  });
+  it('발동 중에는 점수 2배, 끝나면 게이지 0·연사 원복', () => {
+    const s = new Sim(1); s.player.invincible = 99999; const rate0 = s.stats.rateMult;
+    s.hyper.t = 3; s.hyper.gauge = 100; (s as any).refreshStats();
+    const sc0 = s.score; (s as any).killScore(10); const withHyper = s.score - sc0;
+    for (let i = 0; i < 4; i++) s.step(idle(s));
+    expect(s.hyper.t).toBe(0); expect(s.hyper.gauge).toBe(0); expect(s.stats.rateMult).toBeCloseTo(rate0);
+    const sc1 = s.score; (s as any).killScore(10); expect(withHyper).toBeGreaterThan((s.score - sc1) * 1.5);
+  });
+});

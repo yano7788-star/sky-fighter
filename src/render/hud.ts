@@ -87,6 +87,7 @@ export class Hud {
       cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(38, 36)),
       dog: add(scene.add.image(UI.dog.x, UI.dog.y, 'ally_dog').setDisplaySize(38, 36)),
     };
+    text('hyperLabel', W / 2, H - 34, 9, '#8b5cf6', 0.5, 1);
     text('ultLabel', UI.ult.x, UI.ult.y + BTN_R + 9, 9, '#fde68a', 0.5, 0.5);
     text('catLabel', UI.cat.x, UI.cat.y + BTN_R + 9, 9, '#fb7185', 0.5, 0.5);
     text('dogLabel', UI.dog.x, UI.dog.y + BTN_R + 9, 9, '#fb923c', 0.5, 0.5);
@@ -280,6 +281,13 @@ export class Hud {
     const g = this.g, f = sim.frame, b = this.btn!;
     const canAct = sim.stagePhase !== 'BOSS_DYING' && sim.stagePhase !== 'CLEAR';
     const pulse = 0.5 + 0.5 * Math.sin(f * 0.14);
+
+    // 하이퍼 게이지: 바닥 중앙의 가는 막대 (그레이즈로 충전, 발동 중에는 남은 시간)
+    const hy = sim.hyper, hx = W / 2 - 60, hyY = H - 26, on = hy.t > 0;
+    g.fillStyle(0x0f172a, 0.7); g.fillRoundedRect(hx, hyY, 120, 8, 4);
+    if (hy.gauge > 0) { g.fillStyle(on ? (Math.floor(f / 4) % 2 === 0 ? 0xf0abfc : 0xffffff) : 0xc084fc, 1); g.fillRoundedRect(hx, hyY, 120 * Math.min(1, hy.gauge / 100), 8, 4); }
+    g.lineStyle(1.5, on ? 0xf0abfc : 0x7c3aed, 0.9); g.strokeRoundedRect(hx, hyY, 120, 8, 4);
+    this.setText('hyperLabel', on ? 'HYPER x2' : 'HYPER').setColor(on ? '#f0abfc' : '#8b5cf6');
 
     // 필살기: 항상 표시. 게이지가 차오르고, 가득 차면 빛난다
     const u = UI.ult, ur = BTN_R, frac = Math.min(1, sim.ult.gauge / 100), ready = sim.ultReady;

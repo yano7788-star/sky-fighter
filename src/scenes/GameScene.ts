@@ -554,6 +554,11 @@ export class GameScene extends Phaser.Scene {
   private renderPlayerAuras(): void {
     const g = this.auraG, p = this.sim.player, f = this.sim.frame;
     g.clear();
+    if (this.sim.hyper.t > 0) {   // 하이퍼 중: 보랏빛 오라가 일렁인다
+      const k = 0.5 + 0.5 * Math.sin(f * 0.3);
+      g.lineStyle(3, 0xf0abfc, 0.55 + 0.35 * k); g.strokeCircle(p.x, p.y, 30 + k * 5);
+      g.fillStyle(0xc084fc, 0.1 + 0.08 * k); g.fillCircle(p.x, p.y, 30);
+    }
     if (p.shield > 0) {
       g.lineStyle(2.5, 0x60a5fa, 0.9); g.strokeCircle(p.x, p.y, 38 + Math.sin(f * 0.15) * 2);   // 방벽은 피격 전까지 유지
       g.fillStyle(0x3b82f6, 0.14); g.fillCircle(p.x, p.y, 38);

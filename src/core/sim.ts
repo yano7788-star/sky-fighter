@@ -4,7 +4,7 @@ import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config'
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
   FIGHT_FRAMES, HAZARD, HAZARDS, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
-  fireBossPattern, rankFor, BOSS_HP_MULT, BOSS_SP, BOSS_SPECIALS,
+  fireBossPattern, rankFor, BOSS_HP_MULT, BOSS_SP, HYPER, BOSS_SPECIALS,
 } from './data';
 import { NO_META, pilotOf, type MetaParams } from './meta';
 import { createRng, type Rng } from './rng';
@@ -79,7 +79,8 @@ export class Sim {
   enemies: Enemy[] = [];
   items: Item[] = [];
   hazards: Hazard[] = [];
-  run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0 };   // 업적용 한 판 통계
+  run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0, hypers: 0 };
+  hyper = { gauge: 0, t: 0 };     // 하이퍼 모드: gauge 0~100 충전, t>0이면 발동 중(남은 프레임)   // 업적용 한 판 통계
   windDir = 0; windWarn = 0; windT = 0;     // 바람: 예고(windWarn) 후 windT 동안 windDir 방향으로 분다
   private hazCd: Record<string, number> = {};
   events: SimEvent[] = [];
@@ -104,7 +105,7 @@ export class Sim {
   private lowHp = false;
   private relicGraze = 0;
   private phoenixUsed = false;
-  private refreshStats(): BuildStats { return (this.stats = statsOf(this.build, { ...this.meta, lowHp: this.lowHp })); }
+  private refreshStats(): BuildStats { return (this.stats = statsOf(this.build, { ...this.meta, lowHp: this.lowHp, rateBoost: this.hyper.t > 0 ? HYPER.rate : 1 })); }
   hasRelic(id: Parameters<typeof hasRelic>[1]): boolean { return hasRelic(this.build, id); }
 
   get multiplier(): number { return comboMultiplier(this.combo); }
@@ -205,6 +206,7 @@ export class Sim {
     this.frame++;
     const p = this.player;
     const gauge0 = this.ult.gauge;
+    if (this.hyper.t > 0) { if (--this.hyper.t === 0) { this.hyper.gauge = 0; this.refreshStats(); } else this.hyper.gauge = (100 * this.hyper.t) / HYPER.frames; }
     if (this.hasRelic('r_laststand')) { const low = p.energy <= p.maxEnergy * 0.5; if (low !== this.lowHp) { this.lowHp = low; this.refreshStats(); } }
     p.targetX = inp.targetX; p.targetY = inp.targetY;
     const ultPhase0 = this.ult.phase, bombs0 = this.bombs;
@@ -845,6 +847,18 @@ export class Sim {
     }
   }
 
+  /** 하이퍼 발동: 화면의 적 탄을 모두 점수로 바꾸고, 일정 시간 점수 ×2·연사 +20% */
+  private activateHyper(): void {
+    const p = this.player;
+    this.hyper.gauge = 100; this.hyper.t = HYPER.frames; this.run.hypers++;
+    this.score += this.enemyBullets.length * HYPER.bulletScore;
+    for (const b of this.enemyBullets) if (this.frame % 2 === 0) this.emit({ t: 'explosion', x: b.x, y: b.y, color: '#f0abfc', count: 1 });
+    this.enemyBullets.length = 0;
+    this.refreshStats();
+    this.emit({ t: 'sfx', name: 'enrage' }); this.emit({ t: 'flash', kind: 'bomb', v: 0.35 }); this.emit({ t: 'shake', v: 6 });
+    this.emit({ t: 'ring', x: p.x, y: p.y, color: '#f0abfc', max: 240 }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#ffffff', max: 150 });
+  }
+
   private updateEnemyBullets(): void {
     if (this.timeStopped) return;   // 시간 정지: 적 탄은 허공에 멈춰 있다
     const p = this.player, dogOn = this.comp.dog.active;
@@ -873,7 +887,8 @@ export class Sim {
       }
       // 그레이즈: 판정 바로 바깥을 스치면 보너스 (피격 직후 무적 중에는 제외)
       if (!eb.grazed && p.invincible === 0 && d < p.radius + eb.r + GRAZE_MARGIN) {
-        eb.grazed = true; this.grazeCount++; this.score += GRAZE_SCORE;
+        eb.grazed = true; this.grazeCount++; this.score += GRAZE_SCORE * (this.hyper.t > 0 ? HYPER.scoreMult : 1);
+        if (this.hyper.t <= 0 && (this.hyper.gauge += HYPER.perGraze) >= 100) this.activateHyper();
         if (this.hasRelic('r_grazebomb') && ++this.relicGraze % 20 === 0 && this.bombs < this.maxBombs) { this.bombs++; this.emit({ t: 'sfx', name: 'item' }); this.emit({ t: 'ring', x: p.x, y: p.y, color: '#f9a8d4', max: 70 }); }
         this.ult.gauge = Math.min(100, this.ult.gauge + ULT.gaugePerGraze);
         this.emit({ t: 'graze', x: eb.x, y: eb.y });
@@ -1001,7 +1016,7 @@ export class Sim {
   private killScore(base: number): number {
     this.combo++; this.comboTimer = COMBO_WINDOW;
     this.run.kills++; this.run.maxCombo = Math.max(this.run.maxCombo, this.combo);
-    const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score * (this.hasRelic('r_bounty') ? 1.2 : 1));
+    const pts = Math.round(base * comboMultiplier(this.combo) * this.meta.mut.score * (this.hasRelic('r_bounty') ? 1.2 : 1) * (this.hyper.t > 0 ? HYPER.scoreMult : 1));
     this.score += pts;
     this.emit({ t: 'combo', combo: this.combo, mult: comboMultiplier(this.combo) });
     return pts;
@@ -1203,7 +1218,7 @@ export class Sim {
   runStats(daily = false): RunStats {
     const fusions = FUSION_IDS.filter(id => hasFusion(this.build, id)).length;
     return { score: this.score, bossTier: this.bossTier, cleared: this.state === 'GAMECLEAR' || this.endless, endless: this.endless,
-      kills: this.run.kills, maxCombo: this.run.maxCombo, graze: this.grazeCount, hits: this.run.hits, bombs: this.run.bombs, ults: this.run.ults,
+      hypers: this.run.hypers, kills: this.run.kills, maxCombo: this.run.maxCombo, graze: this.grazeCount, hits: this.run.hits, bombs: this.run.bombs, ults: this.run.ults,
       fusions, mutator: this.meta.mutator ?? null, daily };
   }
 
