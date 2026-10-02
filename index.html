@@ -25,19 +25,29 @@
 
     // 논리 좌표계(VW x VH, CSS px)와 실제 캔버스 해상도(DPR 반영)를 분리 — 고해상도 화면에서도 선명하게
     let VW = 0, VH = 0, DPR = 1;
+    var gameReady = false;   // 스크립트 끝까지 초기화된 뒤에만 true (let/const TDZ 방지)
     function resize() {
       const oldW = VW, oldH = VH;
-      VW = window.innerWidth; VH = window.innerHeight;
+      const nw = window.innerWidth, nh = window.innerHeight;
+      if (nw <= 0 || nh <= 0) return;                    // 숨겨진 패널/iframe 등 크기 0 — 유효한 크기가 올 때까지 대기
+      VW = nw; VH = nh;
       DPR = Math.min(window.devicePixelRatio || 1, 2);   // 성능을 위해 2배까지만
       canvas.width = Math.round(VW * DPR); canvas.height = Math.round(VH * DPR);
-      if (oldW && typeof player !== 'undefined') {       // 창 크기가 바뀌면 위치를 비율대로 재보정
+      if (gameReady) pauseSnap = null;   // 크기가 달라진 일시정지 스냅샷은 버림
+      if (!oldW && gameReady) {      // 처음 유효한 크기를 받았을 때 위치 초기화
+        player.x = player.targetX = VW / 2; player.y = player.targetY = VH - 140;
+        stars.forEach(o => { o.x = Math.random() * VW; o.y = Math.random() * VH; });
+        asteroids.forEach(o => { o.x = Math.random() * VW; o.y = Math.random() * VH; });
+        embers.forEach(o => { o.x = Math.random() * VW; o.y = Math.random() * VH; });
+      }
+      if (oldW && gameReady) {       // 창 크기가 바뀌면 위치를 비율대로 재보정
         const rx = VW / oldW, ry = VH / oldH;
         [player].forEach(o => { o.x *= rx; o.y *= ry; o.targetX *= rx; o.targetY *= ry; });
         stars.forEach(s => { s.x *= rx; s.y *= ry; });
         asteroids.forEach(s => { s.x *= rx; s.y *= ry; });
         embers.forEach(s => { s.x *= rx; s.y *= ry; });
         if (boss) { boss.x *= rx; }
-        [bullets, missiles, enemyBullets, enemies, items].forEach(arr => arr.forEach(o => { o.x *= rx; o.y *= ry; }));
+        [bullets, missiles, enemyBullets, enemies, items, particles, rings].forEach(arr => arr.forEach(o => { o.x *= rx; o.y *= ry; }));
       }
     }
     resize();
@@ -358,7 +368,7 @@
     }
 
     function fireBomb() {
-      if (bombs <= 0 || gameState !== 'PLAYING') return;
+      if (bombs <= 0 || gameState !== 'PLAYING' || paused) return;
       if (stagePhase === 'BOSS_DYING' || stagePhase === 'CLEAR') return;   // 보스 폭발·클리어 연출 중 폭탄 낭비 방지
       if (frame - lastBombTime < 20) return;
       lastBombTime = frame;
@@ -428,7 +438,7 @@
     window.addEventListener('keydown', e => {
       const k = e.key.toLowerCase();
       if (PREVENT_KEYS.includes(k)) e.preventDefault();
-      if (e.repeat) return;
+      if (e.repeat) { if (!paused && ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' '].includes(k) && gameState === 'PLAYING') keys.add(k); return; }
       if (k === 'p' || k === 'escape') { setPaused(!paused); return; }
       if (paused) { if (k === 'enter' || k === ' ') setPaused(false); return; }
       if (k === 'm') { toggleMute(); return; }
@@ -438,7 +448,12 @@
     });
     window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
     window.addEventListener('blur', () => keys.clear());
-    document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+    // 플레이 도중 탭을 닫아도 신기록이 사라지지 않게 저장 (메모리의 best는 건드리지 않아 NEW RECORD 판정 유지)
+    function persistBestInRun() {
+      if (gameState === 'PLAYING' && score > store.get('best', { score: 0, stage: 0 }).score) store.set('best', { score, stage: bossTier });
+    }
+    window.addEventListener('pagehide', persistBestInRun);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { persistBestInRun(); setPaused(true); } });
 
     // 게임패드: 좌스틱/십자키 이동, A·RT·RB 발사, B·X 폭탄, Start 일시정지
     let padX = 0, padY = 0, padFire = false;
@@ -1039,7 +1054,7 @@
       // 3. 상단 UI
       ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`SCORE ${score}`, 50, 34);
       ctx.fillStyle = '#64748b'; ctx.font = 'bold 11px sans-serif'; ctx.fillText(`BEST ${Math.max(best.score, score)}`, 50, 49);
-      ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`STAGE ${bossTier}`, VW / 2, 34);
+      ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`STAGE ${bossTier}`, VW / 2 + (VW < 480 ? 24 : 0), 34);
       if (hasHomingMissile) { ctx.fillStyle = '#ec4899'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`MISSILE (${Math.ceil(missileTimer / 60)}s)`, 50, 66); }
       
       // 일시정지 버튼
@@ -1057,6 +1072,7 @@
     // ==========================================
     function tick() {
       frame++;
+      updateMusic();   // 틱 단위(60Hz)로 갱신해서 주사율과 무관하게 크로스페이드 속도 일정
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;   // 텍스트 기준선 등 상태가 프레임 간에 새지 않도록 초기화
       if (stateTimer > 0) stateTimer--;
@@ -1219,15 +1235,16 @@
         }
 
         boss.displayHp += (boss.hp - boss.displayHp) * 0.15; 
-        const barW = VW * 0.7, barX = (VW - barW) / 2 + 10;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'; ctx.fillRect(barX, 58, barW, 12);
+        const compact = VW < 480, bossBarY = compact ? 96 : 58;   // 좁은 화면에서는 보스 바를 아래로 내려 HUD와 겹치지 않게
+        const barW = compact ? VW - 96 : VW * 0.7, barX = compact ? 70 : (VW - barW) / 2 + 10;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'; ctx.fillRect(barX, bossBarY, barW, 12);
         ctx.fillStyle = boss.phase2 ? ((frame % 6 < 3) ? '#ef4444' : '#f59e0b') : boss.color; 
-        ctx.fillRect(barX, 58, barW * Math.max(0, boss.displayHp / boss.maxHp), 12);
-        ctx.strokeStyle = boss.phase2 ? '#f87171' : boss.subColor; ctx.lineWidth = 1.5; ctx.strokeRect(barX, 58, barW, 12);
+        ctx.fillRect(barX, bossBarY, barW * Math.max(0, boss.displayHp / boss.maxHp), 12);
+        ctx.strokeStyle = boss.phase2 ? '#f87171' : boss.subColor; ctx.lineWidth = 1.5; ctx.strokeRect(barX, bossBarY, barW, 12);
         
         ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; 
         const phaseLabel = boss.phase2 ? ' [PHASE 2]' : '';
-        ctx.fillText(`${boss.name}${phaseLabel} (${Math.max(0, boss.hp)} / ${boss.maxHp})`, VW / 2 + 10, 52);
+        ctx.fillText(`${boss.name}${phaseLabel} (${Math.max(0, boss.hp)} / ${boss.maxHp})`, barX + barW / 2, bossBarY - 6);
 
         if (!boss.dying) {
         for (let j = bullets.length - 1; j >= 0; j--) {
@@ -1360,11 +1377,11 @@
       if (Math.abs(dt - STEP) < 2) dt = STEP;       // 60Hz 지터 보정
       acc += Math.min(dt, 100);                     // 탭 복귀 등 긴 지연은 잘라서 순간이동 방지
       if (paused) { acc = 0; drawPaused(); return; }
-      updateMusic();
       let n = 0;
       while (acc >= STEP - 0.5 && n < 3) { tick(); acc -= STEP; n++; }
       if (n >= 3) acc = 0;
     }
+    gameReady = true;
     requestAnimationFrame(frameLoop);
 
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
