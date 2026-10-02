@@ -53,7 +53,9 @@ export class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   create(): void {
-    this.input.addPointer(2);
+    // Phaser는 같은 씬 인스턴스를 재사용하므로, 이전 실행에서 파괴된 오브젝트 참조를 반드시 버린다
+    this.pools = { items: [], enemies: [], pbullets: [], missiles: [], ebullets: [] };
+    this.muzzleImgs = []; this.layers = {}; this.resultTimer = 0;
     this.world = this.add.container(0, 0).setScale(R);
     this.ui = this.add.container(0, 0).setScale(R);
     for (const name of ['bg', 'items', 'enemies', 'boss', 'player', 'pbullets', 'missiles', 'ebullets', 'fx']) {
@@ -113,7 +115,10 @@ export class GameScene extends Phaser.Scene {
     const onHidden = () => { this.persistBestInRun(); this.setPaused(true); };
     this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden); audio.resume(); });
-    window.addEventListener('blur', () => this.keys.clear());
+    const onBlur = () => this.keys.clear();
+    const onPageHide = () => this.persistBestInRun();
+    window.addEventListener('blur', onBlur); window.addEventListener('pagehide', onPageHide);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { window.removeEventListener('blur', onBlur); window.removeEventListener('pagehide', onPageHide); });
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -153,7 +158,7 @@ export class GameScene extends Phaser.Scene {
 
   private setPaused(v: boolean): void {
     if (v === this.paused || (v && (this.resultKind || !this.sim))) return;
-    this.paused = v;
+    this.paused = v; this.acc = 0;
     this.activeId = null; this.firing = false; this.keys.clear();
     this.hud.setPaused(v);
     if (v) audio.suspend(); else audio.resume();
@@ -169,7 +174,7 @@ export class GameScene extends Phaser.Scene {
     this.padY = dz(pad.axes[1]?.getValue() ?? 0) + (btn(13) ? 1 : 0) - (btn(12) ? 1 : 0);
     this.padFire = btn(0) || btn(5) || btn(7);
     if (edge('start', btn(9))) { audio.unlock(); if (this.paused) this.setPaused(false); else if (this.resultKind) this.resultTap(); else this.setPaused(true); }
-    if (edge('a', btn(0)) && this.resultKind) this.resultTap();
+    if (edge('a', btn(0))) { if (this.paused) this.setPaused(false); else if (this.resultKind) this.resultTap(); }
     if (edge('bomb', btn(1) || btn(2)) && !this.paused && !this.resultKind) this.bombQueued = true;
   }
 
@@ -195,7 +200,11 @@ export class GameScene extends Phaser.Scene {
 
   private tick(): void {
     audio.updateMusic(this.wantedBgm());
-    if (this.hitStop > 0) { this.hitStop--; return; }     // 히트스톱: 타격 순간 잠깐 멈춤
+    if (this.hitStop > 0) {                                // 히트스톱: 타격 순간 잠깐 멈춤
+      this.hitStop--;
+      if (this.bombQueued) { this.bombQueued = false; this.sim.fireBomb(); for (const e of this.sim.drainEvents()) this.handleEvent(e); }   // 폭탄은 지연 없이
+      return;
+    }
     const s = this.sim;
     this.hud.tick(s); this.fx.tick(); this.bg.tick();
     if (this.shake > 0.3) this.shake *= 0.88; else this.shake = 0;
@@ -275,7 +284,8 @@ export class GameScene extends Phaser.Scene {
   private render(): void {
     const s = this.sim;
     // 화면 흔들림은 월드에만 적용 (HUD는 흔들리지 않음)
-    this.world.setPosition(this.shake > 0.3 ? (Math.random() - 0.5) * this.shake * R : 0, this.shake > 0.3 ? (Math.random() - 0.5) * this.shake * R : 0);
+    const sh = this.paused ? 0 : this.shake;   // 일시정지 중에는 흔들림 정지
+    this.world.setPosition(sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0, sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0);
     this.bg.render();
 
     this.sync('items', this.layers.items, s.items, it => `item_${it.type}`, (img, it) => img.setPosition(it.x, it.y));
@@ -297,7 +307,8 @@ export class GameScene extends Phaser.Scene {
     const b = this.sim.boss, g = this.bossG, frame = this.sim.frame;
     g.clear();
     if (!b) { this.bossImg.setVisible(false); return; }
-    const jx = b.dying ? (Math.random() - 0.5) * 8 : 0, jy = b.dying ? (Math.random() - 0.5) * 6 : 0;
+    const jit = b.dying && !this.paused;
+    const jx = jit ? (Math.random() - 0.5) * 8 : 0, jy = jit ? (Math.random() - 0.5) * 6 : 0;
     const alpha = b.dying && Math.floor(frame / 3) % 2 === 0 ? 0.6 : 1;
     const cx = b.x + jx, cy = b.y + jy;
     const col = (c: string) => Phaser.Display.Color.HexStringToColor(c).color;

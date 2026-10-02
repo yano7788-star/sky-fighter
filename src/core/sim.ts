@@ -216,6 +216,8 @@ export class Sim {
       this.emit({ t: 'ring', x: b.x, y: b.y, color: '#ef4444', max: 120 });
     }
 
+    if (b.phase2Alert > 0) b.phase2Alert--;
+
     if (b.dying) {
       // 폭발 중: 이동·공격 정지, 기체 위에서 연쇄 폭발
       b.deathTimer++;

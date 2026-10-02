@@ -103,6 +103,19 @@ describe('시뮬레이션', () => {
     expect(s.player.energy).toBe(e);
   });
 
+  it('2페이즈 경고(phase2Alert)는 시간이 지나면 사라진다', () => {
+    const s = new Sim(1);
+    s.player.invincible = 99999;
+    s.stagePhase = 'WARNING'; s.phaseTimer = 1; s.step(idle(s));
+    expect(s.boss).not.toBeNull();
+    s.boss!.hp = s.boss!.maxHp * 0.4;
+    s.step(idle(s));
+    expect(s.boss!.phase2).toBe(true);
+    expect(s.boss!.phase2Alert).toBeGreaterThan(0);
+    for (let i = 0; i < 100; i++) { s.player.invincible = 99999; s.step(idle(s)); }
+    expect(s.boss!.phase2Alert).toBe(0);
+  });
+
   it('플레이어는 화면 밖으로 나가지 않는다', () => {
     const s = new Sim(1);
     for (let i = 0; i < 120; i++) s.step({ targetX: -999, targetY: -999, fire: false, bomb: false });

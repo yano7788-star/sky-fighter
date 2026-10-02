@@ -14,10 +14,12 @@ const BGM_TRACKS: Record<BgmName, { src: string; vol: number; loopEnd: number }>
  *  - 효과음: WebAudio 합성음 (파일 없음)
  *  - BGM: HTMLAudio 스트리밍 mp3 (디코딩 메모리를 쓰지 않아 모바일에 유리), 일반/보스 크로스페이드
  */
+interface Track { el: HTMLAudioElement; gain: GainNode | null; vol: number; failed: boolean; retryAt: number; }
+
 class AudioSystem {
   muted: boolean = !!store.get('muted', false);
   private ctx: AudioContext | null = null;
-  private els: Partial<Record<BgmName, HTMLAudioElement & { failed?: boolean }>> = {};
+  private tracks: Partial<Record<BgmName, Track>> = {};
   private unlocked = false;
   private lastPlayed: Partial<Record<SfxName, number>> = {};
   private suspended = false;
@@ -31,7 +33,9 @@ class AudioSystem {
     if (this.ctx && this.ctx.state === 'suspended' && !this.suspended) void this.ctx.resume();
     if (!this.unlocked) {
       this.unlocked = true;
-      const n = this.get('normal'); this.play(n);
+      // 두 트랙 모두 이 사용자 제스처 안에서 한 번 재생→정지해 모바일(iOS) 자동재생 제한을 풀어 둔다
+      this.primeTrack(this.get('normal'), false);
+      this.primeTrack(this.get('boss'), true);
     }
   }
 
@@ -64,45 +68,65 @@ class AudioSystem {
   }
 
   // ---------------------------------------------------------------- BGM
-  private get(name: BgmName): HTMLAudioElement & { failed?: boolean } {
-    let el = this.els[name];
-    if (!el) {
-      el = new Audio(BGM_TRACKS[name].src) as HTMLAudioElement & { failed?: boolean };
-      el.loop = true; el.volume = 0; el.preload = 'auto';
-      el.addEventListener('error', () => { el!.failed = true; });
-      this.els[name] = el;
+  private get(name: BgmName): Track {
+    let t = this.tracks[name];
+    if (!t) {
+      const el = new Audio(BGM_TRACKS[name].src);
+      el.loop = true; el.preload = 'auto';
+      const track: Track = { el, gain: null, vol: 0, failed: false, retryAt: 0 };
+      // 볼륨은 WebAudio 게인으로 제어 (iOS Safari는 HTMLMediaElement.volume을 무시하기 때문)
+      if (this.ctx) {
+        try {
+          const src = this.ctx.createMediaElementSource(el);
+          track.gain = this.ctx.createGain(); track.gain.gain.value = 0;
+          src.connect(track.gain); track.gain.connect(this.ctx.destination);
+        } catch { track.gain = null; }
+      }
+      if (!track.gain) el.volume = 0;
+      el.addEventListener('error', () => { track.failed = true; });
+      this.tracks[name] = track; t = track;
     }
-    return el;
+    return t;
   }
-  private play(el: HTMLAudioElement): void {
-    const p = el.play();
-    if (p && p.catch) p.catch(() => { /* 자동재생 차단 — 다음 사용자 입력에서 다시 시도 */ });
+  private setVol(t: Track, v: number): void {
+    t.vol = v;
+    if (t.gain) t.gain.gain.value = v; else t.el.volume = Math.max(0, Math.min(1, v));
+  }
+  private play(t: Track): void {
+    const now = performance.now();
+    if (now < t.retryAt) return;
+    const p = t.el.play();
+    if (p && p.catch) p.catch(() => { t.retryAt = now + 1000; });   // 자동재생 차단 — 1초 뒤 재시도
+  }
+  private primeTrack(t: Track, pauseAfter: boolean): void {
+    const p = t.el.play();
+    if (pauseAfter) { if (p && p.then) p.then(() => { t.el.pause(); t.el.currentTime = 0; }).catch(() => { /* 무시 */ }); }
+    else if (p && p.catch) p.catch(() => { /* 무시 */ });
   }
 
   /** 매 틱(60Hz) 호출: want 트랙으로 크로스페이드, null이면 페이드아웃 */
   updateMusic(want: BgmName | null): void {
     if (!this.unlocked || this.suspended) return;
-    if (want === 'boss' && this.els.boss?.failed) want = 'normal';
+    if (want === 'boss' && this.tracks.boss?.failed) want = 'normal';
     for (const name of Object.keys(BGM_TRACKS) as BgmName[]) {
       const cfg = BGM_TRACKS[name];
-      if (name === want && !this.els[name]) this.get(name);
-      const el = this.els[name];
-      if (!el || el.failed) continue;
+      const t = name === want ? this.get(name) : this.tracks[name];
+      if (!t || t.failed) continue;
       const target = name === want && !this.muted ? cfg.vol : 0;
-      const dv = target - el.volume;
-      el.volume = Math.max(0, Math.min(1, el.volume + dv * 0.06 + Math.sign(dv) * 0.002));
-      if (target > 0 && el.paused) this.play(el);
-      if (target === 0 && el.volume < 0.01 && !el.paused) el.pause();
-      if (cfg.loopEnd && el.currentTime > cfg.loopEnd) el.currentTime = 0;
+      const dv = target - t.vol;
+      this.setVol(t, Math.max(0, Math.min(1, t.vol + dv * 0.06 + Math.sign(dv) * 0.002)));
+      if (target > 0 && t.el.paused) this.play(t);
+      if (target === 0 && t.vol < 0.01 && !t.el.paused) t.el.pause();
+      if (cfg.loopEnd && t.el.currentTime > cfg.loopEnd) t.el.currentTime = 0;
     }
   }
 
-  rewind(): void { for (const el of Object.values(this.els)) { try { el.currentTime = 0; } catch { /* 메타데이터 로딩 전 */ } } }
+  rewind(): void { for (const t of Object.values(this.tracks)) { try { t.el.currentTime = 0; } catch { /* 메타데이터 로딩 전 */ } } }
 
   /** 일시정지: 모든 소리를 멈춘다 */
   suspend(): void {
     this.suspended = true;
-    for (const el of Object.values(this.els)) el.pause();
+    for (const t of Object.values(this.tracks)) t.el.pause();
     if (this.ctx && this.ctx.state === 'running') void this.ctx.suspend();
   }
   resume(): void {
