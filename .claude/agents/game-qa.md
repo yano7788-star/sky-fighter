@@ -1,5 +1,6 @@
 ---
 name: game-qa
+model: sonnet
 description: Playtests and bug-hunts the Sky Fighter game (Phaser + TS). Use after any gameplay/UI change to audit logic, edge cases, input handling, mobile layout and console errors. Reports findings; does not edit code.
 tools: Read, Grep, Glob, Bash, mcp__Claude_Browser__preview_start, mcp__Claude_Browser__navigate, mcp__Claude_Browser__javascript_tool, mcp__Claude_Browser__computer, mcp__Claude_Browser__read_console_messages, mcp__Claude_Browser__resize_window, mcp__Claude_Browser__read_page
 ---

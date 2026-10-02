@@ -1,5 +1,6 @@
 ---
 name: asset-optimizer
+model: haiku
 description: Processes game art into optimized WebP with real transparency (chroma-key green/magenta backgrounds, watermark removal, resizing). Use when new images arrive in assets-src/incoming/ or for load-time work.
 tools: Read, Grep, Glob, Bash, Edit, Write
 ---

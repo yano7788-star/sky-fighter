@@ -43,6 +43,7 @@ docs/         DESIGN.md(게임 디자인·아이디어), ROADMAP.md(점검+로�
 ## 에이전트 (.claude/agents/, 세션 시작 시 로드됨)
 - `game-qa` 버그 사냥(수정 없이 보고), `game-balance` 시뮬레이션 기반 수치 조정, `asset-optimizer` 에셋 용량/전처리
 - 개발 서버가 떠 있어야 하는 검증은 `window.__game` (dev 전용)으로 씬 상태 접근: `__game.scene.getScene('GameScene').sim`
+- **모델 배정(토큰 절약)**: `asset-optimizer`=haiku(기계적 변환·용량 작업), `game-qa`/`game-balance`=sonnet(코드 리뷰·수치 판단). 큰 추론이 필요 없는 작업(파일 추출·검색·반복 실행)은 haiku, 일반 코드 리뷰는 sonnet, 설계·어려운 디버깅만 메인 모델(또는 opus)에서 직접 처리한다. 서브에이전트를 임의로 띄울 때도 `model` 파라미터를 같은 기준으로 지정한다.
 
 ## 시스템 메모
 - 레벨업/궁극기 연출 중에는 `Sim.step`이 즉시 return (정지). `sim.pending`이 null이 아니면 씬이 카드 오버레이를 띄우고 `chooseCard(i)`로 해제.

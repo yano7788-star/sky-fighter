@@ -1,5 +1,6 @@
 ---
 name: game-balance
+model: sonnet
 description: Tunes difficulty and progression (boss HP/patterns, spawn rates, drops, score thresholds, lives/bombs) using the headless Node simulator. Use for balance, difficulty curve, pacing questions.
 tools: Read, Grep, Glob, Bash, Edit
 ---
