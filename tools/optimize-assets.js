@@ -8,7 +8,7 @@ try { sharp = require('sharp'); }
 catch (e) { sharp = require(require.resolve('sharp', { paths: [process.env.SHARP_DIR || process.cwd()] })); }
 
 const ROOT = path.resolve(__dirname, '..');
-const OUT = path.join(ROOT, 'assets', 'img');
+const OUT = path.join(ROOT, 'public', 'assets', 'img');
 fs.mkdirSync(OUT, { recursive: true });
 
 // Same algorithm as removeFakeBackground() in index.html
@@ -61,7 +61,7 @@ async function patchStartWatermark(src) {
 }
 
 async function bg(name, maxW, maxKB) {
-  const src = path.join(ROOT, name + '.png'), dst = path.join(OUT, name + '.webp');
+  const src = path.join(ROOT, 'assets-src', 'originals', name + '.png'), dst = path.join(OUT, name + '.webp');
   let input = src;
   if (CROP_BOTTOM[name]) { const m = await sharp(src).metadata(); input = await sharp(src).extract({ left: 0, top: 0, width: m.width, height: m.height - CROP_BOTTOM[name] }).toBuffer(); }
   if (name === 'Startscreen') input = await patchStartWatermark(src);
@@ -102,7 +102,7 @@ function removeSmallBlobs(data, w, h) {
 }
 
 async function sprite(name, maxSide) {
-  const src = path.join(ROOT, name + '.png'), dst = path.join(OUT, name + '.webp');
+  const src = path.join(ROOT, 'assets-src', 'originals', name + '.png'), dst = path.join(OUT, name + '.webp');
   const { data, info } = await sharp(src).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   removeFakeBackground(data, info.width, info.height);
   removeSmallBlobs(data, info.width, info.height);
@@ -113,7 +113,7 @@ async function sprite(name, maxSide) {
 }
 
 async function stats(name) {
-  const { data, info } = await sharp(path.join(ROOT, name + '.png')).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { data, info } = await sharp(path.join(ROOT, 'assets-src', 'originals', name + '.png')).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: h } = info, rb = w * 3;
   const mad = (ya, yb, n) => {
     let s = 0;
