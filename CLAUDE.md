@@ -58,3 +58,4 @@ docs/         DESIGN.md(게임 디자인·아이디어), ROADMAP.md(점검+로�
 - 게임 중 일시정지 메뉴: 계속하기 / 메인 화면으로(두 번 눌러 확인, 키 Q·T, 패드 B). 나갈 때 점수·크레딧·업적은 정산 저장.
 - 유물(렐릭, build.ts `RELIC_DEFS`/`offerRelics`): 보스 격파(최종 보스 제외, 무한 모드는 포함) 때 3택1. 레벨업과 같은 `pending` 카드 오버레이를 쓰고 `CARDS`의 kind='relic'(Build.levels에 1로 저장). 스탯형은 `statsOf`, 효과형은 sim 훅(그레이즈 폭탄/연쇄 폭발/불사조 등). 보스 약점 노출(`Boss.stun`)은 특수 공격 직후 80f, 피해 ×1.6. 보스 체력은 `BOSS_HP_MULT`(1.5)로 보정(유물 도입 후 봇 클리어율 ~18%).
 - 하이퍼 모드(`HYPER`, `Sim.activateHyper`): 그레이즈 +4씩 충전, 100이면 자동 발동(탄 소거→점수, 6초간 점수 ×2·연사 +20%). HUD는 바닥 중앙 막대.
+- 일일 미션(`core/missions.ts`, `MissionScene`): 날짜 시드로 3개 선택, 여러 판 누적(sum)/한 판 최고(max), 완료 시 크레딧 1회 + 전체 완료 보너스. `finishRun`에서 `applyRun(prev)`로 반영(무한 모드 이어하기 중복 방지). 업적과 같은 결과 화면 줄에 표시. 신규 적 이미지는 `tools/process-incoming.cjs newenemies`.

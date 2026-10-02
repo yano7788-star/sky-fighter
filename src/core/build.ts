@@ -1,4 +1,5 @@
 import type { Rng } from './rng';
+import { ROUTES, type RouteId } from './routes';
 
 /**
  * 런 중 성장(빌드) 시스템 — 레벨업 카드로 모듈을 강화하고, 조건을 만족하면 두 모듈을 "융합"해 진화시킨다.
@@ -8,8 +9,8 @@ export type ModuleId = 'spread' | 'pierce' | 'homing' | 'drone' | 'laser';
 export type PassiveId = 'rate' | 'power' | 'magnet' | 'vitality' | 'scholar' | 'bombcap' | 'luck' | 'aegis';
 export type FusionId = 'swarm' | 'railgun' | 'hunter' | 'aegisorbit' | 'prism' | 'overdrive';
 export type RelicId = 'r_overclock' | 'r_knowledge' | 'r_magnet' | 'r_laststand' | 'r_grazebomb' | 'r_chain' | 'r_battery' | 'r_phoenix' | 'r_bounty' | 'r_shield' | 'r_bombpack' | 'r_medic';
-export type CardId = ModuleId | PassiveId | FusionId | RelicId;
-export type CardKind = 'module' | 'passive' | 'fusion' | 'relic';
+export type CardId = ModuleId | PassiveId | FusionId | RelicId | RouteId;
+export type CardKind = 'module' | 'passive' | 'fusion' | 'relic' | 'route';
 
 export interface CardDef {
   id: CardId;
@@ -40,8 +41,10 @@ const RELIC_DEFS: Record<RelicId, CardDef> = {
   r_medic:      relic('r_medic', '🩹', '응급 키트', '보스를 격파할 때마다 에너지 30% 회복', '#4ade80'),
 };
 
+// 항로 선택 카드: 레벨업 카드 오버레이를 그대로 쓴다 (빌드에는 저장되지 않음)
+const ROUTE_DEFS = Object.fromEntries(Object.values(ROUTES).map(r => [r.id, { id: r.id, kind: 'route', name: r.name, desc: () => r.desc, max: 1, weight: 0, color: r.color, icon: r.icon } as CardDef])) as Record<RouteId, CardDef>;
 export const CARDS: Record<CardId, CardDef> = {
-  ...RELIC_DEFS,
+  ...RELIC_DEFS, ...ROUTE_DEFS,
   // ---- 무기 모듈 (최대 4레벨) ----
   spread:  { id: 'spread',  kind: 'module', name: '산탄',      max: 4, weight: 10, color: '#fbbf24', icon: '⫷', desc: l => `옆으로 퍼지는 보조탄 +${l * 2}발` },
   pierce:  { id: 'pierce',  kind: 'module', name: '관통탄',    max: 4, weight: 10, color: '#f87171', icon: '➤', desc: l => `기본탄이 적 ${l}기 관통, 피해 +${l * 15}%` },
@@ -108,7 +111,7 @@ export function offerCards(b: Build, rng: Rng, count = 3): CardId[] {
   }
   const pool = (Object.keys(CARDS) as CardId[]).filter(id => {
     const c = CARDS[id];
-    return c.kind !== 'fusion' && c.kind !== 'relic' && lv(b, id) < c.max && !out.includes(id);
+    return c.kind !== 'fusion' && c.kind !== 'relic' && c.kind !== 'route' && lv(b, id) < c.max && !out.includes(id);
   });
   while (out.length < count && pool.length) {
     // 이미 가진 모듈을 더 강화하도록 약간 가중(빌드가 한 방향으로 쌓이는 맛)

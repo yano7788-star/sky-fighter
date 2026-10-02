@@ -84,6 +84,7 @@ export class Hud {
     text('combo', 50, 84, 13, '#facc15', 0, 1).setShadow(0, 0, '#000', 4, true, true);
     text('level', W / 2, 50, 12, '#7dd3fc', 0.5, 1);
     text('mut', W / 2, 63, 10.5, '#fbbf24', 0.5, 1);
+    text('route', W / 2, 76, 10.5, '#7dd3fc', 0.5, 1);
     this.btn = {
       ult: add(scene.add.image(UI.ult.x, UI.ult.y, 'skill_palm').setDisplaySize(34, 40)),
       cat: add(scene.add.image(UI.cat.x, UI.cat.y, 'ally_cat').setDisplaySize(38, 36)),
@@ -148,7 +149,7 @@ export class Hud {
     };
     this.resultGroup.push(add(s.add.rectangle(0, 0, W, H, 0x03050a, 0.9).setOrigin(0, 0)));
     this.resultTexts.dim = this.resultGroup[0] as Phaser.GameObjects.Text;
-    mk('ach', H / 2 - 84, 14); mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
+    mk('ach', H / 2 - 66, 14); this.resultTexts.ach.setOrigin(0.5, 1); mk('title', H / 2 - 40, 34); mk('l1', H / 2 + 8, 20); mk('l2', H / 2 + 42, 22); mk('l3', H / 2 + 76, 22);
     mk('record', H / 2 + 110, 16); mk('credits', H / 2 + 138, 15); mk('prompt', H / 2 + 176, 16);
     this.resultG = add(s.add.graphics()); this.resultGroup.push(this.resultG);
     mk('btnC', RESULT_BTN.cont.y, 19); mk('btnT', RESULT_BTN.title.y, 15);
@@ -189,7 +190,7 @@ export class Hud {
     const t = this.resultTexts;
     const over = r.kind === 'GAMEOVER';
     t.title.setText(over ? 'MISSION OVER' : 'MISSION CLEAR!').setColor(over ? '#f87171' : '#10b981');
-    t.ach.setText(r.newAch && r.newAch.length ? '🏆 ' + r.newAch.join(' · ') : '').setColor('#fbbf24');
+    t.ach.setText(r.newAch && r.newAch.length ? r.newAch.map(a => (a.startsWith('📋') ? a : '🏆 ' + a)).join('\n') : '').setAlign('center').setLineSpacing(2).setColor('#fbbf24');
     t.l1.setText(over ? '' : '지구의 평화를 지켰습니다.').setColor('#facc15');
     t.l2.setText(`최종 점수: ${r.score}`).setColor('#fff');
     t.l3.setText(over ? `최종 도달: STAGE ${r.stage}  ·  LV ${r.level}` : `LV ${r.level}`).setColor('#fff');
@@ -271,6 +272,7 @@ export class Hud {
     g.fillStyle(0x22d3ee, 1); g.fillRect(0, 0, W * xr, 5);
     this.setText('level', `LV ${sim.level}`);
     const md = mutatorOf(sim.meta.mutator);
+    const rd = sim.routeDef; this.setText('route', rd ? `${rd.icon} ${rd.name}` : '').setColor(rd?.color ?? '#7dd3fc');
     this.setText('mut', (this.daily ? '📅 ' : '') + (md ? `${md.icon} ${md.name}` : '')).setColor(md?.color ?? '#fbbf24');
 
     // 4-3. 스킬 버튼 (필살기 게이지 링 / 동료)

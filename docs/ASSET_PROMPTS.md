@@ -206,3 +206,44 @@ Bottom-right: a living meteor creature — a jagged cracked asteroid body with g
 Keep the bottom-right corner of the whole image empty. No text, no labels, no watermark.
 ```
 받으면 `assets-src/incoming/enemies_new_sheet.png` 로 넣고 "에셋 넣었어"라고 알려 주세요 → 2×2로 자르고 크로마키 제거 후 `enemy_drone/mine/turret/rock`으로 연결합니다.
+
+---
+
+## 8. 지상전 모드 에셋 (기획: `docs/GROUND_MODE.md`)
+공통 규칙(매우 중요 — 이전 시트에서 배경이 섞였던 문제 방지): **"exactly N sprites, nothing else"**, **배경은 순수 초록(#00FF00) 단색**, 풍경·하늘·배경 오브젝트·중복 스프라이트 금지, 각 스프라이트는 자기 칸 안에 완전히 들어갈 것, 칸 구분선·글자·워터마크 없음, 피사체에 초록색 쓰지 않기, 전체 이미지 우하단 모서리 비우기. **위에서 내려다본(top-down, 약 80~90도) 시점**, 스타일은 기존 게임과 동일한 "디테일한 SF 세미리얼".
+
+### 8-1. 파일럿 3명 (탑다운 캐릭터) — `ground_pilots_sheet.png`
+참고용으로 기존 파일럿 이미지(`pilot_sister1/2`, 에이스 기체 조종사)를 첨부해서 같은 인물임을 유지하세요.
+```
+IMPORTANT: output exactly three character sprites and nothing else, arranged in a single row of 3 equal square cells. The entire image background must be one perfectly flat solid pure green (#00FF00) — no scenery, no extra objects, no duplicates, no cell borders. Each sprite is fully inside its own cell and does not overlap anything.
+Top-down view (camera looking almost straight down) of a stylized sci-fi pilot character in a flight suit holding a compact rifle, facing downward toward the bottom of the image, shown from above as a game character sprite, semi-realistic detailed sci-fi style, matching the attached reference portraits. Left: the main pilot (neutral build, helmet under the arm). Middle: the older sister (athletic, short hair, baseball cap, aggressive stance, carrying a shotgun). Right: the younger sister (long hair tied back, slender, carrying a long-barrel precision rifle). Keep the bottom-right corner empty. No text, no watermark.
+```
+
+### 8-2. 지상 적 6종 — `ground_enemies_sheet.png` (3열×2행)
+```
+IMPORTANT: output exactly six enemy sprites and nothing else, arranged in a 3 columns x 2 rows grid of equal square cells. The entire image background must be one perfectly flat solid pure green (#00FF00) — no scenery, no extra objects, no duplicates, no cell borders. Each sprite fully inside its own cell.
+Top-down view (camera looking almost straight down), sci-fi shooter enemies facing downward, semi-realistic detailed style:
+Row 1: (1) rifleman soldier in gray-red armor with a rifle; (2) assault trooper in heavy plated armor with a glowing red melee blade, in a charging pose; (3) sniper soldier in a dark hood lying prone with a very long rifle and a small red laser sight.
+Row 2: (4) a ground turret with a rotating round hub and four short barrels on an octagonal steel base; (5) a small hovering combat drone with a red eye (same design family as a swarm drone); (6) a medium armored vehicle seen from above with a rotating cannon turret and a mortar tube, tracks on both sides.
+Keep the bottom-right corner empty. No text, no watermark.
+```
+
+### 8-3. 지상 타일/소품 — 이미지 3장 (각각 따로)
+```
+(a) `tile_floor.png` — A seamless tileable top-down texture of a sci-fi military base floor: dark steel plates with rivets, faint scratches, a few yellow hazard stripe segments. Perfectly seamless on all four edges, flat even lighting, 1024x1024, no objects, no perspective.
+(b) `tile_wall.png` — A seamless tileable top-down texture of a thick sci-fi concrete-and-steel wall top surface, darker than the floor with subtle panel lines, seamless on all edges, 1024x1024.
+(c) `props_sheet.png` — exactly eight props in a 4x2 grid on a perfectly flat solid pure green (#00FF00) background (no scenery, no duplicates): top-down view of a low cover barrier, a metal crate, a stack of two crates, an explosive red barrel with a hazard symbol, a closed hangar door section, an open hangar door section, a weapon crate with a glowing lid, a ground light fixture. Keep the bottom-right corner empty. No text.
+```
+
+### 8-4. 지상 보스 "격납고 수문장" — `ground_boss.png`
+```
+Top-down view of a huge sci-fi hangar guardian walker mech, facing downward, with two shoulder cannons, a central glowing red core, heavy armor plates and a rotating gatling arm, semi-realistic detailed style, centered with 10% margin, on a perfectly flat solid pure green (#00FF00) background with no scenery and no duplicates. The subject contains no green. Keep the bottom-right corner empty. No text, no watermark.
+```
+
+### 8-5. 전환 컷 3장 (각각 따로, 16:9 또는 9:16 세로) — 배경 있음(크로마키 아님)
+1. `cut_shotdown.png`: 불꽃에 휩싸인 전투기에서 조종사가 탈출하는 순간, 구름 위 하늘, 역동적인 시네마틱.
+2. `cut_landing.png`: 구름을 뚫고 지상 군사 기지에 착지하는 조종사의 뒷모습, 아래로 내려다보는 시점.
+3. `cut_takeoff.png`: 격납고에서 새 기체에 올라타 시동을 거는 조종사, 시네마틱.
+(공통 문구: `cinematic sci-fi game cutscene illustration, semi-realistic, dramatic lighting, vertical 9:16, no text, no watermark`)
+
+**우선순위**: 8-1 → 8-2 → 8-3 → 8-4 → 8-5. 8-1~8-3까지 있으면 지상전 코어(M3)를 바로 붙일 수 있습니다. 받으면 `assets-src/incoming/` 에 넣고 "에셋 넣었어"라고 알려 주세요(자르기·크로마키·연결은 제가 처리).
