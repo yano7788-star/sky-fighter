@@ -1,10 +1,10 @@
 import { store } from './storage';
 
-export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak' | 'gPistol' | 'gShotgun' | 'gSmg' | 'gRail' | 'gRoll' | 'gHurt' | 'gEnemyShot' | 'gHit' | 'gKill' | 'gStyle' | 'gThrow';
+export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak' | 'gPistol' | 'gShotgun' | 'gSmg' | 'gRail' | 'gRoll' | 'gHurt' | 'gEnemyShot' | 'gHit' | 'gKill' | 'gStyle' | 'gThrow' | 'gRifle' | 'gSwing' | 'gMelee' | 'gDoor' | 'gDoorKick' | 'gDoorBreak' | 'gGlass' | 'gCrate' | 'gCasing' | 'gPump' | 'gBeep' | 'gDodge' | 'gBombLand';
 export type BgmName = 'normal' | 'solar' | 'boss';
 
 const BASE = import.meta.env.BASE_URL;
-const THROTTLE_MS: Partial<Record<SfxName, number>> = { bossHit: 60, laserHit: 90, bossHeavy: 80, bossBreak: 200, gSmg: 28, gEnemyShot: 70, gHit: 45, gKill: 60 };   // 연사 무기의 피격음은 간격을 둬서 뭉개지지 않게
+const THROTTLE_MS: Partial<Record<SfxName, number>> = { bossHit: 60, laserHit: 90, bossHeavy: 80, bossBreak: 200, gSmg: 28, gEnemyShot: 70, gHit: 30, gKill: 60, gCasing: 45, gGlass: 60, gDoor: 120, gCrate: 50, gSwing: 90 };   // 연사 무기의 피격음은 간격을 둬서 뭉개지지 않게
 const BGM_TRACKS: Record<BgmName, { src: string; vol: number; loopEnd: number }> = {
   normal: { src: `${BASE}assets/audio/under_heavy_fire.mp3`, vol: 0.25, loopEnd: 175.3 },   // loopEnd: 끝부분 무음 구간 건너뛰기
   solar:  { src: `${BASE}assets/audio/target_solar_core.mp3`, vol: 0.26, loopEnd: 0 },    // 후반(4·5스테이지) 일반 전투곡
@@ -137,6 +137,19 @@ class AudioSystem {
       case 'gKill': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'sine', 160 * pr, 55, 0.14, 0.3, t); this.layer(ctx, 'square', 1000 * pr, 400, 0.05, 0.05, t); break; }
       case 'gStyle': { this.layer(ctx, 'sine', 600, 1500, 0.18, 0.16, t); this.layer(ctx, 'triangle', 900, 2000, 0.22, 0.1, t + 0.04); break; }
       case 'gThrow': { this.layer(ctx, 'triangle', 300, 600, 0.12, 0.1, t); this.noise(ctx, 0.1, 0.1, 2400, t); break; }
+      case 'gRifle': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'sawtooth', 1100 * pr, 180, 0.06, 0.1, t); this.noise(ctx, 0.06, 0.22, 5200, t); this.layer(ctx, 'sine', 120, 55, 0.12, 0.22, t); break; }
+      case 'gSwing': { this.noise(ctx, 0.1, 0.14, 2200, t); this.layer(ctx, 'triangle', 520, 190, 0.09, 0.05, t); break; }
+      case 'gMelee': { this.layer(ctx, 'sine', 150, 48, 0.16, 0.42, t); this.noise(ctx, 0.09, 0.28, 2600, t); this.layer(ctx, 'square', 380, 120, 0.05, 0.08, t); this.duck(160, 0.6); break; }
+      case 'gDoor': { this.layer(ctx, 'triangle', 170, 105, 0.24, 0.05, t); this.noise(ctx, 0.2, 0.06, 600, t); break; }
+      case 'gDoorKick': { this.layer(ctx, 'sine', 105, 38, 0.22, 0.5, t); this.noise(ctx, 0.12, 0.32, 1800, t); this.layer(ctx, 'square', 230, 90, 0.08, 0.1, t); this.duck(160, 0.6); break; }
+      case 'gDoorBreak': { this.noise(ctx, 0.32, 0.46, 3500, t); this.layer(ctx, 'sine', 85, 30, 0.38, 0.55, t); this.layer(ctx, 'sawtooth', 320, 90, 0.16, 0.16, t); this.duck(260, 0.5); break; }
+      case 'gGlass': { this.noise(ctx, 0.28, 0.3, 9000, t); this.layer(ctx, 'triangle', 3300, 1200, 0.1, 0.1, t); this.layer(ctx, 'square', 2500, 900, 0.08, 0.05, t + 0.02); break; }
+      case 'gCrate': { this.noise(ctx, 0.12, 0.3, 1500, t); this.layer(ctx, 'sine', 125, 68, 0.13, 0.32, t); break; }
+      case 'gCasing': { const pr = 0.9 + Math.random() * 0.25; this.layer(ctx, 'triangle', 3300 * pr, 2400 * pr, 0.05, 0.05, t); break; }
+      case 'gPump': { this.layer(ctx, 'square', 260, 170, 0.06, 0.09, t); this.noise(ctx, 0.05, 0.12, 3000, t); this.layer(ctx, 'square', 200, 130, 0.06, 0.08, t + 0.07); break; }
+      case 'gBeep': { this.layer(ctx, 'sine', 1900, 1850, 0.05, 0.08, t); break; }
+      case 'gDodge': { this.layer(ctx, 'sine', 700, 1500, 0.16, 0.12, t); this.noise(ctx, 0.1, 0.08, 5000, t); break; }
+      case 'gBombLand': { this.layer(ctx, 'triangle', 320, 160, 0.08, 0.1, t); this.noise(ctx, 0.06, 0.1, 2400, t); break; }
       case 'heal':    osc.type = 'sine';     f.setValueAtTime(300, t); exp(800, 0.25);  g.setValueAtTime(0.2, t);  g.exponentialRampToValueAtTime(0.01, t + 0.25); osc.start(t); osc.stop(t + 0.25); break;
     }
   }
