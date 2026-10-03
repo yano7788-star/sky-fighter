@@ -23,6 +23,7 @@ const PREVENT_KEYS = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '];
 const ENEMY_W: Record<string, number> = { sniper: 58, scout: 42, zigzag: 46, kamikaze: 36, drone: 40, mine: 50, turret: 54, rock: 56 };   // 화면에 그려지는 가로 크기(논리 px)
 
 export class GameScene extends Phaser.Scene {
+  private static groundPreviewed = false;
   private sim!: Sim;
   private hud!: Hud;
   private levelup!: LevelUpOverlay;
@@ -173,7 +174,8 @@ export class GameScene extends Phaser.Scene {
   private newSim(): void {
     const m = loadMeta();
     this.sim = new Sim(this.daily ? this.daily.seed : (Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected, this.mutatorId));
-    this.sim.groundEnabled = true;   // 3스테이지 보스 직후 지상전(강하) 진입 허용 (헤드리스 시뮬레이션은 꺼 둔다)
+    this.sim.groundEnabled = true;
+    if (!GameScene.groundPreviewed && /[?&]ground(=|&|$)/.test(location.search)) { GameScene.groundPreviewed = true; this.sim.groundRequest = true; }   // ?ground 로 열면 시작하자마자 지상전을 체험 (확인용)   // 3스테이지 보스 직후 지상전(강하) 진입 허용 (헤드리스 시뮬레이션은 꺼 둔다)
     if (this.playerImg) this.applySkin(pilotOf(m.pilots.selected).skin);
   }
 
