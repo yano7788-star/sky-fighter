@@ -124,7 +124,55 @@ async function tileAtlas(file) {
   console.log('t2_atlas', (fs.statSync(out).size / 1024).toFixed(0) + 'KB');
 }
 
+/** 4방향(아래·위·왼·오른쪽) × 9동작 시트 (흰 배경 + 라벨 + 발밑 초록 그림자) → 한 장의 스프라이트시트 p3_dir.png (칸 하나 = frameW×frameH, 프레임 번호 = 방향*9+동작) */
+async function dirSheet(file, out, cols, rows, targetH) {
+  const { data, info } = await sharp(path.join(IN, file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const w = info.width, h = info.height, keep = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) { const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2]; keep[i] = ((r > 222 && g > 222 && b > 222) || g - Math.max(r, b) > 22) ? 0 : 1; }
+  for (let pass = 0; pass < 2; pass++) {   // 흰 테두리 잔상 제거: 배경에 닿은 밝은 픽셀을 깎는다
+    const del = [];
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; if (!keep[i]) continue; const p = i * 4; if (Math.min(data[p], data[p + 1], data[p + 2]) < 170) continue; if (!keep[i - 1] || !keep[i + 1] || !keep[i - w] || !keep[i + w]) del.push(i); }
+    for (const i of del) keep[i] = 0;
+  }
+  const lab = new Int32Array(w * h), comps = [], st = [];
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (!keep[s0] || lab[s0]) continue;
+    const c = { id: comps.length + 1, a: 0, x0: w, y0: h, x1: 0, y1: 0 }; comps.push(c); lab[s0] = c.id; st.push(s0);
+    while (st.length) { const p = st.pop(), x = p % w, y = (p / w) | 0; c.a++; if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const q = ny * w + nx; if (keep[q] && !lab[q]) { lab[q] = c.id; st.push(q); } } }
+  }
+  // 라벨(머리글·왼쪽 글자 상자)은 건너뛰고, 캐릭터 덩어리의 가운데 좌표로 열·행 중심을 구한다
+  const hdr = Math.min(...comps.filter(c => c.a > 1500 && (c.x1 - c.x0) > 55 && (c.y1 - c.y0) < 60).map(c => c.y0)), isLabel = c => c.y1 < hdr + 60 || (c.x1 < 110 && c.a > 600);
+  const chars = comps.filter(c => c.a > 3000 && !isLabel(c)), rowY = []; 
+  for (const c of chars.sort((p, q) => p.y0 - q.y0)) { const r = rowY.find(rr => Math.abs(rr.top - c.y0) < 40); if (r) { r.n++; r.top = Math.min(r.top, c.y0); } else rowY.push({ top: c.y0, n: 1 }); }
+  const tops = rowY.map(r => r.top).slice(0, rows), colX = [];
+  for (const c of chars.filter(c => Math.abs(c.y0 - tops[0]) < 40).sort((p, q) => p.x0 - q.x0)) colX.push((c.x0 + c.x1) / 2);
+  console.log('cols', colX.map(Math.round).join(','), 'rows', tops.join(','));
+  if (colX.length !== cols || tops.length !== rows) throw new Error('grid detect failed');
+  const rowOf = (cy) => { let r0 = 0; for (let i = 0; i < rows; i++) if (cy >= tops[i] - 30) r0 = i; return r0; };
+  const bottoms = tops.map((_, i) => Math.max(...chars.filter(c => rowOf((c.y0 + c.y1) / 2) === i).map(c => c.y1)));   // 방향마다 발 위치를 맞춘다 (방향을 바꿔도 캐릭터가 튀지 않게)
+  const winW = 120, winH = Math.max(...chars.map(c => c.y1 - c.y0)) + 12, cell = new Map();
+  for (const c of comps) {
+    if (isLabel(c) || c.a < 4) continue;
+    const cx = (c.x0 + c.x1) / 2, cy = (c.y0 + c.y1) / 2; let ri = 0; for (let i = 0; i < rows; i++) if (cy >= tops[i] - 30) ri = i;
+    let ci = 0, bd = 1e9; colX.forEach((x, i) => { const d = Math.abs(cx - x); if (d < bd) { bd = d; ci = i; } });
+    const k = ri * cols + ci; (cell.get(k) ?? cell.set(k, []).get(k)).push(c.id);
+  }
+  const fw = Math.round(winW * targetH / winH), fh = targetH, sheet = Buffer.alloc(fw * cols * fh * rows * 4);
+  for (let k = 0; k < cols * rows; k++) {
+    const ri = Math.floor(k / cols), ci = k % cols, ids = new Set(cell.get(k) ?? []), x0 = Math.round(colX[ci] - winW / 2), y0 = bottoms[ri] - winH + 5;
+    const buf = Buffer.alloc(winW * winH * 4);
+    for (let y = 0; y < winH; y++) for (let x = 0; x < winW; x++) { const sx = x0 + x, sy = y0 + y; if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue; const si = sy * w + sx; if (!ids.has(lab[si])) continue; const p = si * 4, d = (y * winW + x) * 4; buf[d] = data[p]; buf[d + 1] = data[p + 1]; buf[d + 2] = data[p + 2]; buf[d + 3] = 255; }
+    const { data: small } = await sharp(buf, { raw: { width: winW, height: winH, channels: 4 } }).resize(fw, fh, { kernel: 'cubic' }).raw().toBuffer({ resolveWithObject: true });
+    for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) { const si = (y * fw + x) * 4, di = ((ri * fh + y) * fw * cols + ci * fw + x) * 4; sheet[di] = small[si]; sheet[di + 1] = small[si + 1]; sheet[di + 2] = small[si + 2]; sheet[di + 3] = small[si + 3] >= 128 ? 255 : 0; }
+  }
+  const outFile = path.join(OUT, out + '.png');
+  await sharp(sheet, { raw: { width: fw * cols, height: fh * rows, channels: 4 } }).png({ palette: true, colors: 48, dither: 0, effort: 10 }).toFile(outFile);
+  console.log(out, 'frame', fw + 'x' + fh, (fs.statSync(outFile).size / 1024).toFixed(1) + 'KB');
+}
+
 async function main() {
+  if (process.argv[2] === 'v3') { await dirSheet('ground2_dir_armed.jpg', 'p3_armed', 9, 4, 72); return; }
   if (process.argv[2] === 'v2') {
     await frameGroup('ground2_pilot_sis2_topdown.webp', 4, 2, [[0, 'p2_walk0'], [1, 'p2_walk1'], [2, 'p2_walk2'], [3, 'p2_walk3'], [4, 'p2_fire0'], [5, 'p2_fire1']], 0.14, 58);
     await frameGroup('ground2_pilot_sis2_topdown.webp', 4, 2, [[6, 'p2_corpse']], 0.14, 52);
