@@ -77,7 +77,26 @@ async function save(img, label, c, name, maxDim, { scale: forced } = {}) {
 const byX = (a, b) => (a.minX + a.maxX) - (b.minX + b.maxX);
 const byY = (a, b) => (a.minY + a.maxY) - (b.minY + b.maxY);
 
+/** v2 시트(균등 격자): 칸 안쪽(inset)만 보고 가장 큰 덩어리를 한 스프라이트로 저장한다. 칸 구분선·워터마크·떠다니는 잡물은 무시 */
+async function gridSheet(file, cols, rows, items, inset = 14) {
+  const img = await loadKeyed(file), cw = Math.floor(img.w / cols), ch = Math.floor(img.h / rows);
+  for (const [idx, name, dim] of items) {
+    const cx = (idx % cols) * cw + inset, cy = Math.floor(idx / cols) * ch + inset, sw = cw - 2 * inset, sh = ch - 2 * inset;
+    const sub = Buffer.alloc(sw * sh * 4);
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) { const si = ((cy + y) * img.w + cx + x) * 4, di = (y * sw + x) * 4; sub[di] = img.data[si]; sub[di + 1] = img.data[si + 1]; sub[di + 2] = img.data[si + 2]; sub[di + 3] = img.data[si + 3]; }
+    const simg = { data: sub, w: sw, h: sh }, { label, comps } = components(simg);
+    if (!comps.length) { console.log('empty', name); continue; }
+    const big = Math.max(...comps.map(c => c.area)), main = merge(comps.filter(c => c.area > big * 0.12), 8).sort((p, q) => q.area - p.area)[0];
+    await save(simg, label, main, name, dim);
+  }
+}
+
 async function main() {
+  if (process.argv[2] === 'v2') {
+    await gridSheet('ground2_items.png', 4, 2, [[0, 'i_pistol', 30], [1, 'i_smg', 40], [2, 'i_shotgun', 52], [3, 'i_rail', 54], [4, 'i_grenade', 16], [5, 'i_medkit', 24], [6, 'i_ammo', 24], [7, 'i_crate', 34]]);
+    await gridSheet('ground2_boss.png', 3, 2, [[0, 'b2_0', 190], [3, 'b2_1', 190], [1, 'b2_2', 190], [2, 'b2_dmg1', 190], [5, 'b2_dmg2', 190]], 10);
+    return;
+  }
   const probe = process.argv[2] === 'probe';
   // ---- 파일럿: sheet1(앞면, 윗줄 에이스/언니/동생), sheet2(뒷면: 윗줄 언니/동생, 아랫줄 에이스)
   {

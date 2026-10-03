@@ -13,6 +13,7 @@ const IMAGES = [
 // 지상전 픽셀 아트 (PNG 팔레트 이미지, NEAREST 필터로 그린다) — tools/process-ground.cjs
 export const GROUND_PNG = [
   'g_ace_f', 'g_ace_b', 'g_sis1_f', 'g_sis1_b', 'g_sis2_f', 'g_sis2_b', 'g_rifle', 'g_charger', 'g_sniper', 'g_turret', 'g_drone', 'g_tank', 'g_boss', 'g_floor', 'g_wall',
+  'i_pistol', 'i_smg', 'i_shotgun', 'i_rail', 'i_grenade', 'i_medkit', 'i_ammo', 'i_crate', 'b2_0', 'b2_1', 'b2_2', 'b2_dmg1', 'b2_dmg2',
   'p_barrier', 'p_stack', 'p_crate', 'p_crates2', 'p_door', 'p_door2', 'p_dooropen', 'p_barrel', 'p_weapon', 'p_weapon2', 'p_pad',
 ];
 

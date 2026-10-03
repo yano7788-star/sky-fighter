@@ -14,7 +14,6 @@ const COVER_TEX = { barrier: 'p_barrier', crate: 'p_crate', stack: 'p_stack', cr
 const SKIN = ['ace', 'sis1', 'sis2'];
 const BLOOD: Record<GKind, number> = { rifle: 0x8b1a1a, charger: 0x8b1a1a, sniper: 0x8b1a1a, heavy: 0x8b1a1a, dog: 0x8b1a1a, turret: 0x20262e, drone: 0x20262e, tank: 0x20262e, boss: 0x20262e };
 const SPARK: Record<GKind, string> = { rifle: '#fca5a5', charger: '#fca5a5', sniper: '#fca5a5', heavy: '#fca5a5', dog: '#fca5a5', turret: '#fde68a', drone: '#fde68a', tank: '#fde68a', boss: '#fde68a' };
-const WEAPON_TINT: Record<WeaponId, number> = { pistol: 0xb8c0cc, smg: 0x9bb4d6, shotgun: 0xc9a27a, rail: 0x7dd3fc };
 /** 픽셀 아트 표시 배율 (판정은 그대로, 눈에 잘 띄게 키운다). 보스는 원본 크기가 이미 크다 */
 const K = { player: 1.3, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
 const HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
@@ -474,6 +473,11 @@ export class GroundScene extends Phaser.Scene {
       default: return 0;
     }
   }
+  /** 보스 스프라이트: 체력에 따라 외피 파손, 평소엔 걸음 프레임을 번갈아 */
+  private bossFrame(e: GEnemy): string {
+    const k = e.hp / e.maxHp; if (k < 0.34) return 'b2_dmg2'; if (k < 0.67) return 'b2_dmg1';
+    return ['b2_0', 'b2_1', 'b2_0', 'b2_2'][Math.floor(this.time.now / 260) % 4];
+  }
   private onScreen(y: number, m = 80): boolean { return y > this.camY - m && y < this.camY + H + m; }
 
   private render(): void {
@@ -500,7 +504,7 @@ export class GroundScene extends Phaser.Scene {
     // 시체: 바닥에 남아 있다 (쓰러진 방향으로 눕는다)
     for (const c of g.corpses) {
       let img = this.corpseImgs.get(c.id);
-      if (!img) { img = this.add.image(c.x, c.y, ENEMY_TEX[c.kind]).setTint(0x5a3636); this.corpseLayer.add(img); this.corpseImgs.set(c.id, img); }
+      if (!img) { img = this.add.image(c.x, c.y, c.kind === 'boss' ? 'b2_dmg2' : ENEMY_TEX[c.kind]).setTint(0x5a3636); this.corpseLayer.add(img); this.corpseImgs.set(c.id, img); }
       const ks = (c.kind === 'boss' ? K.boss : c.kind === 'heavy' ? K.heavy : c.kind === 'dog' ? K.dog : K.enemy);
       img.setVisible(this.onScreen(c.y)).setPosition(px(c.x), px(c.y)).setRotation(c.a + (c.kind === 'sniper' ? 0 : -Math.PI / 2)).setScale(ks * 0.95, ks * 0.62).setAlpha(0.92);
     }
@@ -518,9 +522,8 @@ export class GroundScene extends Phaser.Scene {
     for (const k of g.pickups) {
       livePk.add(k.id);
       let img = this.pickupImgs.get(k.id);
-      if (!img) { img = this.add.image(k.x, k.y, k.kind === 'weapon' ? 'p_weapon' : 'p_pad').setScale(k.kind === 'weapon' ? 0.62 : 0.8).setRotation(k.kind === 'weapon' ? ((k.id * 1.7) % 3) - 1.5 : 0); this.pickupLayer.add(img); this.pickupImgs.set(k.id, img); }
+      if (!img) { img = this.add.image(k.x, k.y, k.kind === 'weapon' ? `i_${k.weapon}` : 'i_medkit').setScale(1.25).setRotation(k.kind === 'weapon' ? ((k.id * 1.7) % 1.2) - 0.6 : 0); this.pickupLayer.add(img); this.pickupImgs.set(k.id, img); }
       const vis = this.onScreen(k.y); img.setVisible(vis).setPosition(px(k.x), px(k.y + Math.sin(k.t * 0.08) * 1.5));
-      img.setTint(k.kind === 'heart' ? 0xff8a8a : WEAPON_TINT[k.weapon!]);
       if (vis) { this.ovG.lineStyle(1, k.kind === 'heart' ? 0xf87171 : 0xfde68a, 0.4 + 0.3 * Math.sin(k.t * 0.1)); this.ovG.strokeCircle(k.x, k.y, 16 + Math.sin(k.t * 0.1) * 1.5); }
       if (k.kind === 'weapon' && Math.hypot(p.x - k.x, p.y - k.y) < 30) nearW = `E 줍기: ${WEAPONS[k.weapon!].name}${k.ammo !== undefined && k.ammo < 999 ? ' ' + k.ammo : ''}`;
     }
@@ -534,6 +537,7 @@ export class GroundScene extends Phaser.Scene {
       const vis = this.onScreen(e.y, 120); img.setVisible(vis);
       if (!vis) continue;
       const ks = e.kind === 'boss' ? K.boss : e.kind === 'tank' ? K.tank : e.kind === 'heavy' ? K.heavy : e.kind === 'dog' ? K.dog : K.enemy, bob = e.kind === 'drone' ? Math.sin(t * 0.012 + e.id) * 2 : 0;
+      if (e.kind === 'boss') img.setTexture(this.bossFrame(e));
       img.setPosition(px(e.x), px(e.y + bob)).setRotation(this.spriteRot(e)).setScale(ks, e.kind === 'dog' ? ks * 0.7 : ks);
       if (e.flash > 0) img.setTintFill(0xffffff);
       else if (e.state === 'STUN') img.setTint(0xffcc66);
