@@ -173,10 +173,10 @@ async function dirSheet(file, out, cols, rows, targetH) {
 
 /** 정탑다운 4방향 시트(방향별 열 묶음 × IDLE/WALK/RUN/SHOOT 행): 총이 바라보는 방향으로 곧게 뻗어 있다 → p4_top.png (칸 S×S, 프레임 = 방향*10+동작, 동작 0 idle / 1-3 walk / 4-6 run / 7-9 shoot).
  *  방향 순서: 0 아래, 1 왼쪽, 2 위, 3 오른쪽. 각 프레임은 '머리 쪽 가장자리'를 기준으로 몸통 중심(pivot)이 칸 중앙에 오게 맞춰 회전 중심이 어긋나지 않는다. */
-async function topSheet(file, out, scale) {
+async function topSheet(file, out, scale, f = 1, PIV = [62, 70, 62, 70]) {   // f: 시트 가로 해상도 / 2000 (좌표 임계값 보정)
   const { data, info } = await sharp(path.join(IN, file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const w = info.width, h = info.height, keep = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) { const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2]; keep[i] = (r > 222 && g > 222 && b > 222) ? 0 : 1; }
+  for (let i = 0; i < w * h; i++) { const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2]; keep[i] = (data[i * 4 + 3] < 128 || (r > 222 && g > 222 && b > 222)) ? 0 : 1; }   // 투명 배경(webp) 또는 흰 배경
   for (let pass = 0; pass < 2; pass++) { const del = []; for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; if (!keep[i]) continue; const p = i * 4; if (Math.min(data[p], data[p + 1], data[p + 2]) < 170) continue; if (!keep[i - 1] || !keep[i + 1] || !keep[i - w] || !keep[i + w]) del.push(i); } for (const i of del) keep[i] = 0; }
   const lab = new Int32Array(w * h), comps = [], st = [];
   for (let s0 = 0; s0 < w * h; s0++) {
@@ -185,17 +185,17 @@ async function topSheet(file, out, scale) {
     while (st.length) { const p = st.pop(), x = p % w, y = (p / w) | 0; c.a++; if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const q = ny * w + nx; if (keep[q] && !lab[q]) { lab[q] = c.id; st.push(q); } } }
   }
-  const isLabel = c => c.y1 < 130 || (c.x1 < 225 && c.a > 600);
-  const big = comps.filter(c => c.a > 1500 && !isLabel(c)), small = comps.filter(c => c.a >= 3 && c.a <= 1500 && !isLabel(c) && c.y0 > 120 && c.x0 > 225);
-  const dirOf = c => { const cx = (c.x0 + c.x1) / 2; return cx < 620 ? 0 : cx < 1060 ? 1 : cx < 1480 ? 2 : 3; }, rowOf = c => { const cy = (c.y0 + c.y1) / 2; return cy < 360 ? 0 : cy < 625 ? 1 : cy < 900 ? 2 : 3; };
+  const f2 = f * f, isLabel = c => c.y1 < 130 * f || (c.x1 < 225 * f && c.a > 600 * f2);
+  const big = comps.filter(c => c.a > 1500 * f2 && !isLabel(c)), small = comps.filter(c => c.a >= 3 && c.a <= 1500 * f2 && !isLabel(c) && c.y0 > 120 * f && c.x0 > 225 * f);
+  const dirOf = c => { const cx = (c.x0 + c.x1) / 2; return cx < 620 * f ? 0 : cx < 1060 * f ? 1 : cx < 1480 * f ? 2 : 3; }, rowOf = c => { const cy = (c.y0 + c.y1) / 2; return cy < 360 * f ? 0 : cy < 625 * f ? 1 : cy < 900 * f ? 2 : 3; };
   const groups = new Map();
   for (const c of big) { const k = dirOf(c) * 4 + rowOf(c); (groups.get(k) ?? groups.set(k, []).get(k)).push({ ...c, ids: [c.id] }); }
   for (const g of groups.values()) g.sort((p, q) => p.x0 - q.x0);
   for (const c of small) {   // 총구 화염·탄피·불꽃은 가장 가까운 캐릭터 프레임에 붙인다
-    let best = null, bd = 190; for (const g of groups.values()) for (const f of g) { const dx = Math.max(f.x0 - c.x1, 0, c.x0 - f.x1), dy = Math.max(f.y0 - c.y1, 0, c.y0 - f.y1), d = Math.hypot(dx, dy); if (d < bd) { bd = d; best = f; } }
+    let best = null, bd = 190 * f; for (const g of groups.values()) for (const f of g) { const dx = Math.max(f.x0 - c.x1, 0, c.x0 - f.x1), dy = Math.max(f.y0 - c.y1, 0, c.y0 - f.y1), d = Math.hypot(dx, dy); if (d < bd) { bd = d; best = f; } }
     if (best) best.ids.push(c.id);
   }
-  const S = 160, ox = 70, oy = 62, PIV = [62, 70, 62, 70];   // 머리쪽 가장자리에서 몸통 중심까지(원본 px)
+  const S = 160, ox = 70, oy = 62;   // PIV: 머리쪽 가장자리에서 몸통 중심까지(원본 px)
   const half = Math.round(S / scale / 2), sheet = Buffer.alloc(S * 10 * S * 4 * 4), tips = [[], [], [], []];
   void ox; void oy;
   const want = (d, r) => (r === 0 ? 1 : r === 3 ? (d === 1 ? 2 : 3) : 3);
@@ -221,7 +221,7 @@ async function topSheet(file, out, scale) {
 }
 
 async function main() {
-  if (process.argv[2] === 'v4') { await topSheet('ground2_topdown_dirs.webp', 'p4_top', 0.5); return; }
+  if (process.argv[2] === 'v4') { await topSheet('ground2_topdown_dirs2.webp', 'p4_top', 0.65, 0.768, [38, 40, 38, 40]); return; }
   if (process.argv[2] === 'v3') { await dirSheet('ground2_dir_armed.jpg', 'p3_armed', 9, 4, 72); return; }
   if (process.argv[2] === 'v2') {
     await frameGroup('ground2_pilot_sis2_topdown.webp', 4, 2, [[0, 'p2_walk0'], [1, 'p2_walk1'], [2, 'p2_walk2'], [3, 'p2_walk3'], [4, 'p2_fire0'], [5, 'p2_fire1']], 0.14, 58);

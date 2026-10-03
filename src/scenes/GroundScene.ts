@@ -16,7 +16,7 @@ const SKIN = ['ace', 'sis1', 'sis2'];
 const BLOOD: Record<GKind, number> = { rifle: 0x8b1a1a, charger: 0x8b1a1a, sniper: 0x8b1a1a, heavy: 0x8b1a1a, dog: 0x8b1a1a, turret: 0x20262e, drone: 0x20262e, tank: 0x20262e, boss: 0x20262e };
 const SPARK: Record<GKind, string> = { rifle: '#fca5a5', charger: '#fca5a5', sniper: '#fca5a5', heavy: '#fca5a5', dog: '#fca5a5', turret: '#fde68a', drone: '#fde68a', tank: '#fde68a', boss: '#fde68a' };
 /** 픽셀 아트 표시 배율 (판정은 그대로, 눈에 잘 띄게 키운다). 보스는 원본 크기가 이미 크다 */
-const TIP_D = [53, 44, 54, 46];   // 시트 방향별(아래·왼·위·오른쪽) 몸통 중심 → 총구 거리(px)
+const TIP_D = [58, 51, 60, 55];   // 시트 방향별(아래·왼·위·오른쪽) 몸통 중심 → 총구 거리(px)
 const DIR_ANG = [Math.PI / 2, Math.PI, -Math.PI / 2, 0];   // 각 방향 프레임이 바라보는 각도
 const K = { player: 1.2, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
 const HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
@@ -625,7 +625,7 @@ export class GroundScene extends Phaser.Scene {
     const g = this.g, p = g.p, img = this.playerImg;
     // 정탑다운 도트: 총이 바라보는 방향으로 곧게 뻗은 4방향 프레임 + 조준각과의 나머지(≤45°)만큼 몸통 중심으로 회전
     const dir = this.dirOf(p.aim), firing = this.muzzleT > 0 || this.time.now - this.lastShotAt < 90;
-    const col = firing ? 7 + (Math.floor(this.time.now / 50) % 3) : p.moving ? [4, 5, 6, 5][Math.floor(p.walk * 0.9) % 4] : 0;
+    const col = firing ? 7 + (Math.floor(this.time.now / 50) % 3) : p.moving ? Math.floor(p.walk * 0.75) % 4 : 0;   // 이동: 대기 + 걷기 3프레임 = 4프레임 순환 (달리기 줄은 쓰지 않는다)
     let rot = Math.atan2(Math.sin(p.aim - DIR_ANG[dir]), Math.cos(p.aim - DIR_ANG[dir])), sc = K.player;
     if (p.rollT > 0) { const k = 1 - p.rollT / 18; rot += k * Math.PI * 2 * (p.rdx >= 0 ? 1 : -1); sc *= 0.88; }
     img.setTexture('p4_top', dir * 10 + (p.rollT > 0 ? 0 : col)).setOrigin(0.5, 0.5).setFlipX(false);
