@@ -1,128 +1,139 @@
 import { createRng, type Rng } from './rng';
-import { COLS, ROWS, SECTIONS, T, TILE, WORLD_H, WORLD_W, blocksBullet, blocksMove, blocksSight, buildLevel, flowField, sectionOfRow, tileAt, type Level } from './groundmap';
+import { COLS, ROWS, SECTIONS, TILE, WORLD_H, WORLD_W, buildLevel, flowField, sectionOfRow, type Level } from './groundmap';
 
 /**
- * 지상전 「강하」 규칙 (순수 TS, Phaser 무관). 한 틱 = 1/60초.
- * 핫라인 마이애미식: 옥상 → 건물 2개 층 → 격납고까지 위로 걸어 올라가는 스크롤 맵. 일반 적은 한두 방에 쓰러지지만
- * 시야각·소음에 반응하고, 시체·무기·탄피는 바닥에 남는다. 연출은 events 로 내보내고 렌더/사운드는 씬이 처리한다.
+ * 지상전 「강하」 규칙 (순수 TS, Phaser 무관). 한 틱 = 1/60초, 길이 단위는 월드 px (타일 64, 도트 4).
+ * 탑다운 슈터 MVP(assets-src/mvp/HANDOFF.md)의 규칙·수치를 그대로 이식했다: 무기별 발사 시퀀스, 근접·폭탄·구르기,
+ * 부서지는 문·유리창·상자, 총 겹침 방지, 시야/소음/거리장 AI, 앞/뒤 쓰러짐, 피격 11가지 효과표.
+ * 우리 게임에 맞춘 부분: 플레이어 체력 4칸, 구역 정리 → 위층 문 해제, 격납고 보스, 무기 줍기/탄약, 점수·콤보.
  */
 export const GW = WORLD_W, GH = WORLD_H;
+export type WeaponId = 'pistol' | 'smg' | 'rifle' | 'shotgun' | 'rail';
+export type GKind = 'rifle' | 'charger' | 'sniper' | 'turret' | 'drone' | 'boss' | 'heavy' | 'dog';
+export type FeelKey = WeaponId | 'melee' | 'door' | 'bomb';
+const f = (sec: number): number => Math.round(sec * 60);   // 초 → 틱
 
-export type WeaponId = 'pistol' | 'shotgun' | 'smg' | 'rail';
-export type GKind = 'rifle' | 'charger' | 'sniper' | 'turret' | 'drone' | 'tank' | 'boss' | 'heavy' | 'dog';
-export type CoverKind = 'barrier' | 'crate' | 'stack' | 'crates2' | 'barrel';
-
-export const WEAPONS: Record<WeaponId, { name: string; dmg: number; cd: number; speed: number; spread: number; pellets: number; ammo: number; pierce: number; kick: number; noise: number }> = {
-  pistol:  { name: '권총',       dmg: 1.25, cd: 13, speed: 10,  spread: 0.03, pellets: 1, ammo: Infinity, pierce: 0, kick: 0.6, noise: 230 },
-  shotgun: { name: '샷건',       dmg: 0.95, cd: 38, speed: 9,   spread: 0.55, pellets: 7, ammo: 9,        pierce: 0, kick: 2.2, noise: 650 },
-  smg:     { name: 'SMG',        dmg: 0.62, cd: 5,  speed: 11,  spread: 0.11, pellets: 1, ammo: 110,      pierce: 0, kick: 0.5, noise: 330 },
-  rail:    { name: '레일 라이플', dmg: 7,    cd: 58, speed: 20,  spread: 0,    pellets: 1, ammo: 9,        pierce: 9, kick: 3,   noise: 450 },
+// ---------------------------------------------------------------- 무기 (시퀀스 [포즈, 틱, 이벤트?])
+type Seq = [string, number, string?][];
+export interface WeaponDef { name: string; dmg: number; cd: number; speed: number; spread: number; pellets: number; life: number; noise: number; move: number; muzzle: [number, number]; ammo: number; pierce: number; seq: Seq }
+export const WEAPONS: Record<WeaponId, WeaponDef> = {
+  pistol:  { name: '권총',       dmg: 34,  cd: f(0.26),  speed: 1050 / 60, spread: 0.02, pellets: 1, life: 90, noise: 600, move: 230 / 60, muzzle: [13, 2], ammo: Infinity, pierce: 0, seq: [['shoot', f(0.1)]] },
+  rifle:   { name: '소총',       dmg: 20,  cd: f(0.11),  speed: 1200 / 60, spread: 0.03, pellets: 1, life: 90, noise: 700, move: 230 / 60, muzzle: [14, 0], ammo: 60,       pierce: 0, seq: [['shoot', f(0.07)]] },
+  smg:     { name: 'SMG',        dmg: 13,  cd: f(0.075), speed: 1100 / 60, spread: 0.07, pellets: 1, life: 90, noise: 700, move: 170 / 60, muzzle: [21, 0], ammo: 90,       pierce: 0, seq: [['shoot_a', f(0.06)], ['aim', f(0.3)]] },
+  shotgun: { name: '샷건',       dmg: 22,  cd: 0,        speed: 870 / 60,  spread: 0.2,  pellets: 6, life: 25, noise: 800, move: 110 / 60, muzzle: [20, 1], ammo: 8,        pierce: 0, seq: [['shoot', f(0.09)], ['pump_back', f(0.14), 'casing'], ['pump_fwd', f(0.14)], ['aim', f(0.32)]] },
+  rail:    { name: '레일 라이플', dmg: 140, cd: f(0.97),  speed: 1800 / 60, spread: 0,    pellets: 1, life: 60, noise: 800, move: 200 / 60, muzzle: [14, 0], ammo: 8,        pierce: 6, seq: [['shoot', f(0.13)]] },
+};
+/** 피격 효과표: dmg·knock(px/s)·stun·hitPose·flash(틱)·blood[앞,뒤]·spread·mist·stamp·shake·stop(틱) / 사망 */
+export interface Feel { dmg: number; knock: number; stun: number; pose: number; flash: number; blood: [number, number]; spread: number; mist: number; stamp: number; shake: number; stop: number;
+  dKnock: number; dBlood: number; dMist: number; dGibs: number; dPool: number; dShake: number; dStop: number; dSlow: number }
+export const FEEL: Record<FeelKey, Feel> = {
+  pistol:  { dmg: 34, knock: 260, stun: f(0.25), pose: f(0.14), flash: f(0.07), blood: [9, 3],  spread: 0.55, mist: 1, stamp: 10, shake: 3.5, stop: f(0.03),  dKnock: 430,  dBlood: 24, dMist: 3, dGibs: 0, dPool: 30, dShake: 6,  dStop: f(0.05), dSlow: 0 },
+  rifle:   { dmg: 20, knock: 110, stun: f(0.12), pose: f(0.09), flash: f(0.05), blood: [5, 2],  spread: 0.6,  mist: 0, stamp: 7,  shake: 1.5, stop: 0,        dKnock: 300,  dBlood: 16, dMist: 2, dGibs: 0, dPool: 26, dShake: 4,  dStop: f(0.04), dSlow: 0 },
+  smg:     { dmg: 13, knock: 50,  stun: f(0.07), pose: f(0.06), flash: f(0.04), blood: [3, 1],  spread: 0.7,  mist: 0, stamp: 5,  shake: 1,   stop: 0,        dKnock: 220,  dBlood: 12, dMist: 1, dGibs: 0, dPool: 24, dShake: 3,  dStop: f(0.03), dSlow: 0 },
+  shotgun: { dmg: 22, knock: 210, stun: f(0.4),  pose: f(0.2),  flash: f(0.09), blood: [7, 3],  spread: 0.8,  mist: 1, stamp: 12, shake: 4,   stop: f(0.045), dKnock: 740,  dBlood: 36, dMist: 5, dGibs: 4, dPool: 40, dShake: 11, dStop: f(0.09), dSlow: 250 },
+  rail:    { dmg: 140, knock: 600, stun: f(0.6), pose: f(0.2),  flash: f(0.1),  blood: [14, 5], spread: 0.35, mist: 2, stamp: 14, shake: 6,   stop: f(0.05),  dKnock: 900,  dBlood: 30, dMist: 4, dGibs: 2, dPool: 36, dShake: 9,  dStop: f(0.07), dSlow: 150 },
+  melee:   { dmg: 55, knock: 520, stun: f(0.5),  pose: f(0.25), flash: f(0.12), blood: [16, 4], spread: 1.2,  mist: 3, stamp: 14, shake: 8,   stop: f(0.08),  dKnock: 640,  dBlood: 28, dMist: 4, dGibs: 1, dPool: 34, dShake: 9,  dStop: f(0.1),  dSlow: 200 },
+  door:    { dmg: 30, knock: 420, stun: f(0.9),  pose: f(0.3),  flash: f(0.1),  blood: [3, 0],  spread: 1,    mist: 0, stamp: 6,  shake: 4,   stop: f(0.05),  dKnock: 420,  dBlood: 18, dMist: 2, dGibs: 0, dPool: 28, dShake: 6,  dStop: f(0.05), dSlow: 0 },
+  bomb:    { dmg: 400, knock: 1100, stun: f(1), pose: f(0.3),  flash: f(0.1),  blood: [20, 6], spread: 1.5,  mist: 4, stamp: 18, shake: 12,  stop: f(0.1),   dKnock: 1100, dBlood: 44, dMist: 6, dGibs: 8, dPool: 46, dShake: 16, dStop: f(0.1),  dSlow: 350 },
 };
 
+// ---------------------------------------------------------------- 상수
 export const GROUND = {
-  hp: 4, speed: 3.1, radius: 8,
-  rollFrames: 18, rollInvuln: 24, rollSpeed: 8.2, rollCd: 66,
-  hurtInvuln: 60, moveRadius: 11, comboFrames: 150, grenadeCd: 40,
-  viewDist: 330, viewHalf: 0.96, reactFrames: 9, doorStun: 100,
+  hp: 4, hitR: 26, moveR: 36, speed: 230 / 60, enemyMoveR: 34, enemyHitR: 30,
+  hurtInvuln: 45, comboFrames: 150, grenades: 2,
+  rollSteps: [['roll_1', f(0.07)], ['roll_2', f(0.1)], ['roll_3', f(0.1)], ['roll_4', f(0.1)], ['roll_5', f(0.13)]] as Seq, rollSpeed: [420, 420, 380, 300, 150].map(v => v / 60), rollInvulnSteps: 4, rollCd: f(0.75),
+  meleeSteps: [['melee_1', f(0.1)], ['melee_2', f(0.07), 'hit'], ['melee_3', f(0.13)]] as Seq, throwSteps: [['throw_1', f(0.1)], ['throw_2', f(0.08)], ['throw_3', f(0.16), 'release']] as Seq,
+  bombFuse: f(1.9), enemyBulletSpeed: 620 / 60, enemyBulletLife: f(1.3), viewDist: 520, viewHalf: 1.25, nearSee: 160, allyAlert: 220, doorRate: 7, kickRate: 15,
 } as const;
-
-export interface GroundOpts { seed: number; pilot: 0 | 1 | 2; dmgMult: number; rateMult: number; maxHp: number; grenades: number; assist: boolean }
-export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: 2, assist: true };
-
-export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; grenade: boolean; pickup?: boolean; throwW?: boolean }
-export const NO_INPUT: GInput = { mx: 0, my: 0, ax: 0, ay: 0, fire: false, roll: false, grenade: false };
-
-export interface GPlayer {
-  x: number; y: number; r: number; hp: number; maxHp: number;
-  aim: number;                       // 조준 각도 (0 = 오른쪽, π/2 = 아래)
-  rollT: number; rollCd: number; rdx: number; rdy: number; invuln: number;
-  fireCd: number; weapon: WeaponId; ammo: number; grenades: number; grenadeCd: number;
-  kick: number; walk: number; dashBonus: number; moving: boolean; pickCd: number;
-}
-export interface GEnemy {
-  id: number; kind: GKind; x: number; y: number; r: number; hp: number; maxHp: number; section: number;
-  state: 'IDLE' | 'WIND' | 'DASH' | 'STUN';
-  aw: 0 | 1 | 2;                      // 0 순찰·대기 / 1 소음 조사 / 2 교전
-  react: number; look: number; tx: number; ty: number;   // 반응 지연, 조사 후 두리번 시간, 조사 목표
-  t: number; cd: number; fire: number; ang: number; lx: number; ly: number; dir: number; burst: number; flash: number; phase: number; styled: boolean;
-  home: { x: number; y: number; ang: number }; patrol?: [number, number][]; pi: number; moved: number;
-}
-export interface GBullet { x: number; y: number; vx: number; vy: number; r: number; dmg: number; friendly: boolean; pierce: number; hit: number[]; life: number; kind?: 'normal' | 'throw' | 'sniper'; src?: GKind; w?: WeaponId }
-export interface GCover { id: number; kind: CoverKind; x: number; y: number; w: number; h: number; hp: number; dead: boolean; section: number }
-export interface GZone { x: number; y: number; r: number; t: number; max: number; dmg: number; foe: boolean; src?: GKind }   // 폭발 예고(박격포/수류탄)
-export interface GPickup { id: number; kind: 'heart' | 'weapon'; weapon?: WeaponId; ammo?: number; x: number; y: number; t: number; section: number; dropped?: boolean }
-export interface GGrenade { x: number; y: number; sx: number; sy: number; tx: number; ty: number; t: number; max: number }
-export interface GCorpse { id: number; kind: GKind; x: number; y: number; a: number; vx: number; vy: number; section: number }
-
-export type GEvent =
-  | { t: 'shot'; x: number; y: number; weapon: WeaponId; ang: number }
-  | { t: 'hit'; x: number; y: number; dmg: number; kill: boolean; kind: GKind; ang: number }
-  | { t: 'hurt'; x: number; y: number; by?: GKind }
-  | { t: 'roll'; x: number; y: number }
-  | { t: 'boom'; x: number; y: number; r: number }
-  | { t: 'kill'; x: number; y: number; kind: GKind; pts: number; combo: number; ang: number }
-  | { t: 'style'; x: number; y: number }
-  | { t: 'pickup'; what: 'heart' | 'weapon' | 'ammo'; x: number; y: number }
-  | { t: 'drop'; x: number; y: number; weapon: WeaponId }
-  | { t: 'wallhit'; x: number; y: number; ang: number }
-  | { t: 'alert'; x: number; y: number }
-  | { t: 'doorbash'; x: number; y: number }
-  | { t: 'door'; c: number; r: number }
-  | { t: 'gate'; section: number }
-  | { t: 'section'; n: number; name: string }
-  | { t: 'cleared'; n: number }
-  | { t: 'shake'; v: number; ang?: number }
-  | { t: 'hitstop'; frames: number }
-  | { t: 'slowmo'; ms: number; scale: number }
-  | { t: 'throw'; x: number; y: number }
-  | { t: 'bossPhase'; phase: number }
-  | { t: 'coverBreak'; x: number; y: number }
-  | { t: 'reset'; section: number }
-  | { t: 'exitopen' }
-  | { t: 'win' } | { t: 'dead' };
-
-// 충돌 크기 = 그려지는 크기(스프라이트 ×1.3)의 약 92%: 캐릭터가 엄폐물과 겹쳐 보이지 않게
-const COVER_SIZE: Record<CoverKind, [number, number]> = { barrier: [76, 31], crate: [43, 33], stack: [28, 48], crates2: [38, 45], barrel: [19, 28] };
 export const SECTION_COUNT = SECTIONS.length;
 
-const ENEMY_DEF: Record<GKind, { hp: number; r: number; pts: number }> = {
-  rifle: { hp: 1.2, r: 13, pts: 100 }, charger: { hp: 2, r: 15, pts: 160 }, sniper: { hp: 1.2, r: 12, pts: 220 }, heavy: { hp: 8, r: 18, pts: 400 }, dog: { hp: 1.2, r: 11, pts: 120 },
-  turret: { hp: 11, r: 24, pts: 220 }, drone: { hp: 1, r: 10, pts: 40 }, tank: { hp: 55, r: 46, pts: 900 }, boss: { hp: 130, r: 62, pts: 4000 },
+export interface GroundOpts { seed: number; pilot: 0 | 1 | 2; dmgMult: number; rateMult: number; maxHp: number; grenades: number; assist: boolean }
+export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: GROUND.grenades, assist: true };
+
+export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; melee: boolean; bomb: boolean; pickup?: boolean; aimDist?: number }
+export const NO_INPUT: GInput = { mx: 0, my: 0, ax: 0, ay: 0, fire: false, roll: false, melee: false, bomb: false };
+
+interface Seqn { kind: 'fire' | 'melee' | 'throw' | 'roll'; steps: Seq; i: number; t: number }
+export interface GPlayer {
+  x: number; y: number; hp: number; maxHp: number; aim: number; invuln: number;
+  weapon: WeaponId; ammo: number; grenades: number; seq: Seqn | null; cd: number; rollCd: number; rollAng: number; rollI: number;
+  moving: boolean; walk: number; gunBlocked: boolean; kick: number; pickCd: number; smgAlt: number; combatT: number; hitFlash: number;
+}
+export interface GEnemy {
+  id: number; kind: GKind; x: number; y: number; hp: number; maxHp: number; section: number;
+  state: 'idle' | 'alert'; ang: number; base: number; look: number; aimT: number; cd: number; shotT: number; hitT: number; hitPose: number; stunT: number; vx: number; vy: number; moving: boolean; walk: number;
+  home: { x: number; y: number; ang: number }; patrol?: [number, number][]; pi: number; moved: number;
+  alertT: number; windT: number; dashT: number; lx: number; ly: number; burst: number; phase: number; styled: boolean; fire: number;
+  dying: boolean; fallT: number; fallF: boolean; deathAng: number; smearD: number; w: FeelKey;
+}
+export interface GBullet { x: number; y: number; vx: number; vy: number; dmg: number; friendly: boolean; w: FeelKey; life: number; dist: number; pellet: boolean; first: boolean; pierce: number; hit: number[]; dodged: boolean; src?: GKind; kind?: 'normal' | 'sniper' }
+export interface GDoor { id: number; c: number; r: number; w: number; h: number; o: 'v' | 'h'; kind: 'door' | 'gate' | 'exit'; section: number; hp: number; phi: number; target: number; rate: number; broken: boolean; locked: boolean; x0: number; y0: number; x1: number; y1: number }
+export interface GWindow { id: number; c: number; r: number; w: number; h: number; o: 'v' | 'h'; section: number; hp: number; broken: boolean; x0: number; y0: number; x1: number; y1: number }
+export interface GCrate { id: number; kind: 'crate' | 'barrel'; x: number; y: number; hp: number; broken: boolean; section: number; hitT: number; hs: number }
+export interface GPickup { id: number; kind: 'heart' | 'weapon'; weapon?: WeaponId; ammo?: number; x: number; y: number; t: number; section: number; dropped?: boolean }
+export interface GBomb { x: number; y: number; sx: number; sy: number; tx: number; ty: number; t: number; flight: number; fuse: number; bounce: number }
+type Obj = { t: 'door'; o: GDoor } | { t: 'window'; o: GWindow } | { t: 'crate'; o: GCrate };
+
+export type GEvent =
+  | { t: 'shot'; weapon: WeaponId; x: number; y: number; ang: number }
+  | { t: 'casing'; x: number; y: number; ang: number; left: boolean; weapon: WeaponId }
+  | { t: 'hit'; x: number; y: number; ang: number; w: FeelKey; kill: boolean; kind: GKind; dmg: number; armor: boolean }
+  | { t: 'kill'; x: number; y: number; ang: number; w: FeelKey; kind: GKind; pts: number; combo: number }
+  | { t: 'smear'; x: number; y: number } | { t: 'pool'; x: number; y: number; r: number } | { t: 'stamp'; x: number; y: number; ang: number; fallF: boolean; kind: GKind }
+  | { t: 'dodge'; x: number; y: number } | { t: 'hurt'; x: number; y: number; by?: GKind } | { t: 'roll'; x: number; y: number; ang: number } | { t: 'swing'; x: number; y: number; ang: number }
+  | { t: 'throw' } | { t: 'release'; x: number; y: number } | { t: 'boom'; x: number; y: number; r: number }
+  | { t: 'doorKick'; x: number; y: number } | { t: 'doorOpen'; x: number; y: number } | { t: 'doorHit'; x: number; y: number } | { t: 'doorBreak'; x: number; y: number; o: 'v' | 'h' }
+  | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
+  | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
+  | { t: 'pickup'; what: 'heart' | 'weapon'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
+  | { t: 'gate'; section: number } | { t: 'section'; n: number; name: string } | { t: 'cleared'; n: number } | { t: 'exitopen' } | { t: 'reset'; section: number }
+  | { t: 'shake'; v: number } | { t: 'hitstop'; frames: number } | { t: 'slowmo'; ms: number; scale: number } | { t: 'bossPhase'; phase: number } | { t: 'style'; x: number; y: number }
+  | { t: 'win' } | { t: 'dead' };
+
+const ENEMY_DEF: Record<GKind, { hp: number; pts: number; speed: number }> = {
+  rifle: { hp: 60, pts: 100, speed: 90 / 60 }, charger: { hp: 100, pts: 160, speed: 100 / 60 }, sniper: { hp: 60, pts: 220, speed: 70 / 60 }, heavy: { hp: 260, pts: 400, speed: 70 / 60 },
+  dog: { hp: 50, pts: 120, speed: 270 / 60 }, turret: { hp: 220, pts: 220, speed: 0 }, drone: { hp: 20, pts: 40, speed: 230 / 60 }, boss: { hp: 2400, pts: 4000, speed: 80 / 60 },
 };
-const DROPS: Partial<Record<GKind, { w: WeaponId; p: number }>> = { rifle: { w: 'smg', p: 0.4 }, heavy: { w: 'shotgun', p: 0.7 }, sniper: { w: 'rail', p: 0.3 } };
+/** 총알 종류별 피해 배율: 중장갑(헤비·포탑)은 소구경탄에 강하다 */
+const ARMOR: Partial<Record<GKind, Partial<Record<FeelKey, number>>>> = { heavy: { pistol: 0.55, rifle: 0.55, smg: 0.55, shotgun: 0.8 }, turret: { pistol: 0.6, rifle: 0.6, smg: 0.6, shotgun: 0.8 }, boss: {} };
+const DROPS: Partial<Record<GKind, { w: WeaponId; p: number }>> = { rifle: { w: 'smg', p: 0.35 }, heavy: { w: 'shotgun', p: 0.7 }, sniper: { w: 'rail', p: 0.4 }, charger: { w: 'rifle', p: 0.3 } };
+const BODY_R: Record<GKind, number> = { rifle: 34, charger: 36, sniper: 34, heavy: 46, dog: 28, turret: 60, drone: 22, boss: 96 };
+const HIT_R: Record<GKind, number> = { rifle: 30, charger: 32, sniper: 30, heavy: 42, dog: 26, turret: 58, drone: 22, boss: 92 };
 
 const LEVEL: Level = buildLevel();
+const cellOf = (x: number, y: number): number => Math.floor(y / TILE) * COLS + Math.floor(x / TILE);
+const norm = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class GroundSim {
   rng: Rng;
   opts: GroundOpts;
   frame = 0;
   state: 'PLAY' | 'WIN' | 'DEAD' = 'PLAY';
-  tiles: Uint8Array = LEVEL.tiles.slice();
+  tiles: Uint8Array = LEVEL.tiles;
   p!: GPlayer;
-  enemies: GEnemy[] = []; bullets: GBullet[] = []; cover: GCover[] = []; zones: GZone[] = []; pickups: GPickup[] = []; grenadeList: GGrenade[] = []; corpses: GCorpse[] = [];
-  doorT = new Map<number, number>();     // 스윙 도어 열림 애니메이션 (타일 인덱스 → 남은 프레임)
+  enemies: GEnemy[] = []; dying: GEnemy[] = []; bullets: GBullet[] = []; pickups: GPickup[] = []; bombs: GBomb[] = [];
+  doors: GDoor[] = []; windows: GWindow[] = []; crates: GCrate[] = [];
   events: GEvent[] = [];
   cleared: boolean[] = SECTIONS.map(() => false);
-  reached = 0;                           // 가장 높이 도달한 구역
+  reached = 0;
   score = 0; kills = 0; combo = 0; comboT = 0; time = 0; maxCombo = 0; styles = 0;
+  private cells: Obj[][] = [];
   private nextId = 1;
-  private pflow = new Int16Array(COLS * ROWS);
-  private pflowAt = -99; private pflowTile = -1;
-  private nflow = new Int16Array(COLS * ROWS);
-  private nflowAt = -999; private nflowTile = -1;
+  private pflow = new Int16Array(COLS * ROWS); private pflowAt = -99; private pflowTile = -1;
 
   constructor(opts: Partial<GroundOpts> = {}) {
     this.opts = { ...DEFAULT_GROUND_OPTS, ...opts };
     this.rng = createRng(this.opts.seed + 7919);
-    this.p = {
-      x: LEVEL.start.x, y: LEVEL.start.y, r: GROUND.radius, hp: this.opts.maxHp, maxHp: this.opts.maxHp, aim: -Math.PI / 2,
-      rollT: 0, rollCd: 0, rdx: 0, rdy: 0, invuln: 60, fireCd: 0, weapon: 'pistol', ammo: Infinity, grenades: this.opts.grenades, grenadeCd: 0, kick: 0, walk: 0, dashBonus: 0, moving: false, pickCd: 0,
-    };
+    this.p = { x: LEVEL.start.x, y: LEVEL.start.y, hp: this.opts.maxHp, maxHp: this.opts.maxHp, aim: -Math.PI / 2, invuln: 60, weapon: 'pistol', ammo: Infinity, grenades: this.opts.grenades, seq: null, cd: 0, rollCd: 0, rollAng: 0, rollI: 0, moving: false, walk: 0, gunBlocked: false, kick: 0, pickCd: 0, smgAlt: 0, combatT: 0, hitFlash: 0 };
+    this.tiles = LEVEL.tiles.slice();   // 벽 타일은 변하지 않지만 시험에서 바꿀 수 있게 복사
+    // 오브젝트 생성 + 칸 색인
+    for (const d of LEVEL.doors) { const o: GDoor = { id: this.nextId++, c: d.c, r: d.r, w: d.w, h: d.h, o: d.o, kind: d.kind, section: d.section, hp: 12, phi: 0, target: 0, rate: GROUND.doorRate, broken: false, locked: d.kind !== 'door', x0: d.c * TILE, y0: d.r * TILE, x1: (d.c + d.w) * TILE, y1: (d.r + d.h) * TILE }; this.doors.push(o); this.index(o.c, o.r, o.w, o.h, { t: 'door', o }); }
+    for (const w of LEVEL.windows) { const o: GWindow = { id: this.nextId++, c: w.c, r: w.r, w: w.w, h: w.h, o: w.o, section: w.section, hp: 2, broken: false, x0: w.c * TILE, y0: w.r * TILE, x1: (w.c + w.w) * TILE, y1: (w.r + w.h) * TILE }; this.windows.push(o); this.index(o.c, o.r, o.w, o.h, { t: 'window', o }); }
+    for (const c of LEVEL.crates) { const o: GCrate = { id: this.nextId++, kind: c.kind, x: (c.c + 0.5) * TILE, y: (c.r + 0.5) * TILE, hp: c.kind === 'barrel' ? 1 : 3, broken: false, section: c.section, hitT: 0, hs: c.kind === 'barrel' ? 22 : 28 }; this.crates.push(o); this.index(c.c, c.r, 1, 1, { t: 'crate', o }); }
     for (let s = 0; s < SECTION_COUNT; s++) this.populate(s);
     this.emit({ t: 'section', n: 0, name: SECTIONS[0].name });
   }
-
+  private index(c: number, r: number, w: number, h: number, o: Obj): void { for (let rr = r; rr < r + h; rr++) for (let cc = c; cc < c + w; cc++) { const i = rr * COLS + cc; (this.cells[i] ??= []).push(o); } }
   private emit(e: GEvent): void { this.events.push(e); }
   drain(): GEvent[] { const e = this.events; this.events = []; return e; }
   get boss(): GEnemy | undefined { return this.enemies.find(e => e.kind === 'boss'); }
@@ -132,93 +143,135 @@ export class GroundSim {
   get exitOpen(): boolean { return this.cleared[3]; }
 
   // ---------------------------------------------------------------- 구역 구성
-  /** 구역의 적·엄폐물·무기를 처음 상태로 채운다 (처음 + 사망 후 재시작) */
   private populate(s: number): void {
-    this.enemies = this.enemies.filter(e => e.section !== s); this.cover = this.cover.filter(c => c.section !== s);
-    this.pickups = this.pickups.filter(k => k.section !== s); this.corpses = this.corpses.filter(c => c.section !== s);
-    for (const m of LEVEL.spawns) if (m.section === s) this.addEnemy(m.k, m.x, m.y, m.ang ?? Math.PI / 2, m.patrol);
-    for (const c of LEVEL.covers) if (c.section === s) { const [w, h] = COVER_SIZE[c.kind]; this.cover.push({ id: this.nextId++, kind: c.kind, x: c.x, y: c.y, w, h, hp: c.kind === 'barrel' ? 1 : 999, dead: false, section: s }); }
+    this.enemies = this.enemies.filter(e => e.section !== s); this.dying = this.dying.filter(e => e.section !== s); this.pickups = this.pickups.filter(k => k.section !== s);
+    for (const m of LEVEL.spawns) if (m.section === s) this.addEnemy(m.k, m.x, m.y, ((m.ang ?? 90) * Math.PI) / 180, m.patrol);
     for (const k of LEVEL.pickups) if (k.section === s) this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: k.weapon, ammo: WEAPONS[k.weapon].ammo, x: k.x, y: k.y, t: 0, section: s });
+    for (const d of this.doors) if (d.section === s && !(this.cleared[s] && d.kind !== 'door')) { d.hp = 12; d.phi = 0; d.target = 0; d.broken = false; d.locked = d.kind !== 'door'; }
+    for (const w of this.windows) if (w.section === s) { w.hp = 2; w.broken = false; }
+    for (const c of this.crates) if (c.section === s) { c.hp = c.kind === 'barrel' ? 1 : 3; c.broken = false; }
   }
-
   private addEnemy(kind: GKind, x: number, y: number, ang = Math.PI / 2, patrol?: [number, number][]): GEnemy {
     const d = ENEMY_DEF[kind];
     const e: GEnemy = {
-      id: this.nextId++, kind, x, y, r: d.r, hp: d.hp, maxHp: d.hp, section: sectionOfRow(Math.floor(y / TILE)), state: 'IDLE', aw: 0, react: 0, look: 0, tx: x, ty: y,
-      t: 0, cd: 40 + Math.floor(this.rng() * 50), fire: 0, ang, lx: 0, ly: 0, dir: this.rng() < 0.5 ? -1 : 1, burst: 0, flash: 0, phase: 1, styled: false, home: { x, y, ang }, patrol, pi: 0, moved: 0,
+      id: this.nextId++, kind, x, y, hp: d.hp, maxHp: d.hp, section: sectionOfRow(Math.floor(y / TILE)), state: 'idle', ang, base: ang, look: this.rng() * 6, aimT: 0, cd: 20 + Math.floor(this.rng() * 60), shotT: 0, hitT: 0, hitPose: 0, stunT: 0, vx: 0, vy: 0, moving: false, walk: 0,
+      home: { x, y, ang }, patrol, pi: 0, moved: 0, alertT: 0, windT: 0, dashT: 0, lx: 0, ly: 0, burst: 0, phase: 1, styled: false, fire: 0, dying: false, fallT: 0, fallF: false, deathAng: 0, smearD: 0, w: 'pistol',
     };
     this.enemies.push(e);
     return e;
   }
-
+  /** 사망 후 이어하기: 지금 구역을 처음부터 다시 (이미 정리한 구역은 그대로) */
+  revive(): void {
+    const s = this.section, def = SECTIONS[s];
+    this.p.hp = Math.max(2, Math.ceil(this.p.maxHp / 2)); this.p.invuln = 120; this.combo = 0; this.comboT = 0; this.p.seq = null; this.p.rollI = 0;
+    this.state = 'PLAY'; this.bullets.length = 0; this.bombs.length = 0;
+    if (!this.cleared[s]) this.populate(s);
+    this.p.x = s === 0 ? LEVEL.start.x : 9 * TILE; this.p.y = s === 0 ? LEVEL.start.y : (def.r1 - 1.5) * TILE;
+    this.p.weapon = 'pistol'; this.p.ammo = Infinity;
+    this.emit({ t: 'reset', section: s });
+  }
   /** 테스트용: 지정 구역에서 시작 — 아래 구역은 정리된 것으로 처리하고 플레이어를 그 구역 입구로 옮긴다 */
   debugStart(section: number, weapon: WeaponId): void {
-    for (let s = 0; s < Math.min(section, 3); s++) { this.enemies = this.enemies.filter(e => e.section !== s); this.pickups = this.pickups.filter(k => k.section !== s); this.cleared[s] = true; this.openGates(s); }
+    for (let s = 0; s < Math.min(section, 3); s++) { this.enemies = this.enemies.filter(e => e.section !== s); this.pickups = this.pickups.filter(k => k.section !== s); this.cleared[s] = true; this.unlock(s); }
     const def = SECTIONS[section];
-    this.p.x = section === 0 ? LEVEL.start.x : 9 * TILE; this.p.y = section === 0 ? LEVEL.start.y : (def.r1 - 1) * TILE + TILE / 2; this.reached = section;
+    this.p.x = section === 0 ? LEVEL.start.x : 9 * TILE; this.p.y = section === 0 ? LEVEL.start.y : (def.r1 - 1.5) * TILE; this.reached = section;
     this.p.weapon = weapon; this.p.ammo = WEAPONS[weapon].ammo; this.p.invuln = 60;
     this.emit({ t: 'section', n: section, name: def.name });
   }
 
-  /** 사망 후 이어하기: 지금 구역을 처음부터 다시 (이미 정리한 구역은 그대로) */
-  revive(): void {
-    const s = this.section, def = SECTIONS[s];
-    this.p.hp = Math.max(2, Math.ceil(this.p.maxHp / 2)); this.p.invuln = 120; this.combo = 0; this.comboT = 0;
-    this.state = 'PLAY'; this.bullets.length = 0; this.zones.length = 0; this.grenadeList.length = 0;
-    if (!this.cleared[s]) this.populate(s);   // 정리한 구역은 다시 채우지 않는다
-    this.p.x = s === 0 ? LEVEL.start.x : (9 * TILE); this.p.y = s === 0 ? LEVEL.start.y : (def.r1 - 1) * TILE + TILE / 2; this.p.rollT = 0;
-    this.p.weapon = 'pistol'; this.p.ammo = Infinity;
-    this.emit({ t: 'reset', section: s });
+  // ---------------------------------------------------------------- 장애물 질의
+  private doorBlocks(d: GDoor): boolean { return !d.broken && (d.locked || Math.abs(d.phi) < 45); }
+  /** (x,y) 의 장애물: 벽 / 닫힌 문 / 멀쩡한 유리창 / 안 부서진 상자 */
+  obstacleAt(x: number, y: number): { type: 'wall' | 'door' | 'window' | 'crate'; o?: GDoor | GWindow | GCrate } | null {
+    const c = Math.floor(x / TILE), r = Math.floor(y / TILE);
+    if (c < 0 || c >= COLS || r < 0 || r >= ROWS || this.tiles[r * COLS + c] === 1) return { type: 'wall' };
+    const list = this.cells[r * COLS + c]; if (!list) return null;
+    for (const ob of list) {
+      if (ob.t === 'door') { if (this.doorBlocks(ob.o)) return { type: 'door', o: ob.o }; }
+      else if (ob.t === 'window') { if (!ob.o.broken) return { type: 'window', o: ob.o }; }
+      else if (!ob.o.broken && Math.abs(x - ob.o.x) < ob.o.hs && Math.abs(y - ob.o.y) < ob.o.hs) return { type: 'crate', o: ob.o };
+    }
+    return null;
   }
-
-  // ---------------------------------------------------------------- 길찾기
-  /** 이동 가능한 타일인가 (엄폐물이 놓인 타일은 제외) */
+  /** 시야: 벽·닫힌 문·상자가 막는다. 유리창은 기본적으로 통과 (glass=true 면 폭발처럼 유리도 막는다) */
+  los(ax: number, ay: number, bx: number, by: number, glass = false): boolean {
+    const dx = bx - ax, dy = by - ay, n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 14));
+    for (let i = 1; i < n; i++) { const ob = this.obstacleAt(ax + (dx * i) / n, ay + (dy * i) / n); if (ob && (ob.type !== 'window' || glass)) return false; }
+    return true;
+  }
+  canSee(ax: number, ay: number, bx: number, by: number): boolean { return this.los(ax, ay, bx, by); }
+  private rayEnd(ax: number, ay: number, ang: number, max: number): [number, number] {   // 마지막 빈 지점 (폭탄 경로)
+    let lx = ax, ly = ay; for (let d = 10; d <= max; d += 10) { const x = ax + Math.cos(ang) * d, y = ay + Math.sin(ang) * d; if (this.obstacleAt(x, y)) break; lx = x; ly = y; }
+    return [lx, ly];
+  }
   walkable = (c: number, r: number): boolean => {
-    const t = this.tiles[r * COLS + c];
-    if (blocksMove(t)) return false;
-    const x = (c + 0.5) * TILE, y = (r + 0.5) * TILE;
-    for (const k of this.cover) if (!k.dead && Math.abs(x - k.x) < k.w / 2 + 6 && Math.abs(y - k.y) < k.h / 2 + 6) return false;
+    if (this.tiles[r * COLS + c] === 1) return false;
+    const list = this.cells[r * COLS + c]; if (!list) return true;
+    for (const ob of list) { if (ob.t === 'door') { if (!ob.o.broken && ob.o.locked) return false; } else if (ob.t === 'window') { if (!ob.o.broken) return false; } else if (!ob.o.broken) return false; }
     return true;
   };
-  /** 플레이어 위치에서 퍼지는 거리장 (8프레임마다 갱신) */
   private playerFlow(): Int16Array {
-    const tile = Math.floor(this.p.y / TILE) * COLS + Math.floor(this.p.x / TILE);
-    if (this.frame - this.pflowAt >= 8 || tile !== this.pflowTile) { flowField(Math.floor(this.p.x / TILE), Math.floor(this.p.y / TILE), this.walkable, this.pflow); this.pflowAt = this.frame; this.pflowTile = tile; }
+    const tile = cellOf(this.p.x, this.p.y);
+    if (this.frame - this.pflowAt >= 15 || tile !== this.pflowTile) { flowField(Math.floor(this.p.x / TILE), Math.floor(this.p.y / TILE), this.walkable, this.pflow); this.pflowAt = this.frame; this.pflowTile = tile; }
     return this.pflow;
   }
-  /** 임의 지점 거리장 (봇·소음 조사용) */
-  flowTo(x: number, y: number, out?: Int16Array): Int16Array {
-    return flowField(Math.floor(x / TILE), Math.floor(y / TILE), this.walkable, out);
-  }
-  private noiseFlow(x: number, y: number): Int16Array {
-    const tile = Math.floor(y / TILE) * COLS + Math.floor(x / TILE);
-    if (tile !== this.nflowTile || this.frame - this.nflowAt > 120) { flowField(Math.floor(x / TILE), Math.floor(y / TILE), this.walkable, this.nflow); this.nflowTile = tile; this.nflowAt = this.frame; }
-    return this.nflow;
-  }
-  /** 거리장 기울기를 따라 한 걸음 */
-  private stepFlow(e: { x: number; y: number }, f: Int16Array, speed: number, r: number): boolean {
-    const c = Math.floor(e.x / TILE), rr = Math.floor(e.y / TILE), here = f[rr * COLS + c];
-    let best = -1, bx = 0, by = 0, bd = here < 0 ? 1e9 : here;
+  flowTo(x: number, y: number, out?: Int16Array): Int16Array { return flowField(Math.floor(x / TILE), Math.floor(y / TILE), this.walkable, out); }
+  /** 거리장 기울기를 따라 한 걸음 (현재 칸 주변 8칸 중 거리가 더 작은 칸 중심 방향) */
+  private stepFlow(o: { x: number; y: number }, fl: Int16Array, speed: number, r: number, push = false): boolean {
+    const c = Math.floor(o.x / TILE), rr = Math.floor(o.y / TILE), here = fl[rr * COLS + c];
+    let bx = 0, by = 0, bd = here < 0 ? 1e9 : here, found = false;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue; const nc = c + dx, nr = rr + dy; if (nc < 0 || nc >= COLS || nr < 0 || nr >= ROWS) continue;
-      if (dx && dy && (f[rr * COLS + nc] < 0 || f[nr * COLS + c] < 0)) continue;   // 모서리 가로지르기 방지
-      const d = f[nr * COLS + nc]; if (d >= 0 && d < bd) { bd = d; best = 1; bx = (nc + 0.5) * TILE; by = (nr + 0.5) * TILE; }
+      if (dx && dy && (fl[rr * COLS + nc] < 0 || fl[nr * COLS + c] < 0)) continue;
+      const d = fl[nr * COLS + nc]; if (d >= 0 && d < bd) { bd = d; bx = (nc + 0.5) * TILE; by = (nr + 0.5) * TILE; found = true; }
     }
-    if (best < 0) return false;
-    const a = Math.atan2(by - e.y, bx - e.x); this.move(e, Math.cos(a) * speed, Math.sin(a) * speed, r);
+    if (!found) return false;
+    const a = Math.atan2(by - o.y, bx - o.x); this.move(o, Math.cos(a) * speed, Math.sin(a) * speed, r, push); return true;
+  }
+
+  // ---------------------------------------------------------------- 이동·충돌 (원 vs 사각형, 3회 반복)
+  private pushRect(o: { x: number; y: number }, r: number, x0: number, y0: number, x1: number, y1: number): boolean {
+    const nx = Math.max(x0, Math.min(o.x, x1)), ny = Math.max(y0, Math.min(o.y, y1)), dx = o.x - nx, dy = o.y - ny, d2 = dx * dx + dy * dy;
+    if (d2 >= r * r) return false;
+    if (d2 > 1e-6) { const d = Math.sqrt(d2), push = r - d + 0.01; o.x += (dx / d) * push; o.y += (dy / d) * push; }
+    else { const l = o.x - x0, rr = x1 - o.x, t = o.y - y0, b = y1 - o.y, m = Math.min(l, rr, t, b); if (m === l) o.x = x0 - r - 0.01; else if (m === rr) o.x = x1 + r + 0.01; else if (m === t) o.y = y0 - r - 0.01; else o.y = y1 + r + 0.01; }
     return true;
   }
-  /** 시야: 벽·닫힌 문이 가린다. 열려 있는 문(누가 서 있거나 지나가는 중)은 투명 */
-  canSee(ax: number, ay: number, bx: number, by: number): boolean {
-    const dx = bx - ax, dy = by - ay, n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / (TILE / 2)));
-    for (let i = 1; i < n; i++) {
-      const x = ax + (dx * i) / n, y = ay + (dy * i) / n, t = tileAt(this.tiles, x, y);
-      if (!blocksSight(t)) continue;
-      if (t === T.DOOR && (this.doorT.get(Math.floor(y / TILE) * COLS + Math.floor(x / TILE)) ?? 0) > 0) continue;
-      return false;
+  /** pusher=true 면 문 영역에 닿을 때 문을 연다 */
+  private move(o: { x: number; y: number }, dx: number, dy: number, r: number, pusher = false): void {
+    o.x = Math.max(r, Math.min(WORLD_W - r, o.x + dx)); o.y = Math.max(r, Math.min(WORLD_H - r, o.y + dy));
+    for (let it = 0; it < 3; it++) {
+      const c0 = Math.floor((o.x - r) / TILE), c1 = Math.floor((o.x + r) / TILE), r0 = Math.floor((o.y - r) / TILE), r1 = Math.floor((o.y + r) / TILE);
+      let hit = false;
+      for (let rr = r0; rr <= r1; rr++) for (let cc = c0; cc <= c1; cc++) {
+        if (cc < 0 || cc >= COLS || rr < 0 || rr >= ROWS) continue;
+        if (this.tiles[rr * COLS + cc] === 1) { if (this.pushRect(o, r, cc * TILE, rr * TILE, (cc + 1) * TILE, (rr + 1) * TILE)) hit = true; continue; }
+        const list = this.cells[rr * COLS + cc]; if (!list) continue;
+        for (const ob of list) {
+          if (ob.t === 'door') { const d = ob.o; if (d.broken) continue; if (pusher && !d.locked && this.circleRect(o, r + 2, d)) this.pushDoor(d, o, GROUND.doorRate); if (this.doorBlocks(d) && this.pushRect(o, r, d.x0, d.y0, d.x1, d.y1)) hit = true; }
+          else if (ob.t === 'window') { if (!ob.o.broken && this.pushRect(o, r, ob.o.x0, ob.o.y0, ob.o.x1, ob.o.y1)) hit = true; }
+          else if (!ob.o.broken && this.pushRect(o, r, ob.o.x - ob.o.hs, ob.o.y - ob.o.hs, ob.o.x + ob.o.hs, ob.o.y + ob.o.hs)) hit = true;
+        }
+      }
+      if (!hit) break;
     }
-    return true;
   }
+  private circleRect(o: { x: number; y: number }, r: number, d: { x0: number; y0: number; x1: number; y1: number }): boolean { const nx = Math.max(d.x0, Math.min(o.x, d.x1)), ny = Math.max(d.y0, Math.min(o.y, d.y1)); return (o.x - nx) ** 2 + (o.y - ny) ** 2 < r * r; }
+  /** 문을 미는 쪽의 반대 방향으로 연다 (±100°) */
+  private pushDoor(d: GDoor, from: { x: number; y: number }, rate: number): void {
+    if (d.broken || d.locked) return;
+    const cx = (d.x0 + d.x1) / 2, cy = (d.y0 + d.y1) / 2, side = d.o === 'v' ? (from.x < cx ? 1 : -1) : (from.y < cy ? 1 : -1);
+    if (Math.abs(d.phi) < 5 && Math.abs(d.target) < 5) this.emit({ t: 'doorOpen', x: cx, y: cy });
+    if (d.target === 0 || rate > d.rate) { d.target = 100 * side; }
+    d.rate = Math.max(d.rate, rate);
+  }
+
+  // ---------------------------------------------------------------- 소음·알림
+  private noise(x: number, y: number, radius: number): void {
+    const s = sectionOfRow(Math.floor(y / TILE));
+    for (const e of this.enemies) if (e.state === 'idle' && e.section === s && Math.hypot(e.x - x, e.y - y) < radius) this.alertEnemy(e);
+  }
+  private alertEnemy(e: GEnemy): void { if (e.state === 'alert' || e.dying) return; e.state = 'alert'; e.alertT = f(0.7); e.windT = 0; this.emit({ t: 'alert', x: e.x, y: e.y }); }
 
   // ---------------------------------------------------------------- 틱
   step(inp: GInput): void {
@@ -227,22 +280,26 @@ export class GroundSim {
     const p = this.p;
     if (this.comboT > 0 && --this.comboT === 0) this.combo = 0;
     if (p.invuln > 0) p.invuln--;
-    if (p.fireCd > 0) p.fireCd--;
+    if (p.cd > 0) p.cd--;
     if (p.rollCd > 0) p.rollCd--;
-    if (p.grenadeCd > 0) p.grenadeCd--;
-    if (p.dashBonus > 0) p.dashBonus--;
+    if (p.rollI > 0) p.rollI--;
     if (p.pickCd > 0) p.pickCd--;
+    if (p.hitFlash > 0) p.hitFlash--;
     p.kick *= 0.8;
-    for (const [k, v] of this.doorT) { if (v <= 1) this.doorT.delete(k); else this.doorT.set(k, v - 1); }
+    this.updateDoors();
+    for (const c of this.crates) if (c.hitT > 0) c.hitT--;
     this.updatePlayer(inp);
-    this.updateGrenades();
+    this.updateBombs();
     this.updateEnemies();
+    this.updateDying();
     this.updateBullets();
-    this.updateZones();
     this.updatePickups(inp);
-    this.updateCorpses();
     this.updateSections();
     if (p.hp <= 0 && (this.state as string) !== 'DEAD') { this.state = 'DEAD'; this.emit({ t: 'dead' }); }
+  }
+
+  private updateDoors(): void {
+    for (const d of this.doors) { if (d.broken) continue; const diff = d.target - d.phi; if (Math.abs(diff) > 0.01) d.phi += Math.max(-d.rate, Math.min(d.rate, diff)); }
   }
 
   private updateSections(): void {
@@ -250,477 +307,378 @@ export class GroundSim {
     if (s > this.reached) { this.reached = s; this.emit({ t: 'section', n: s, name: SECTIONS[s].name }); this.score += 200; }
     for (let i = 0; i < 3; i++) {   // 일반 구역: 모두 정리하면 위층 문이 열린다
       if (this.cleared[i] || this.enemies.some(e => e.section === i)) continue;
-      this.cleared[i] = true; this.openGates(i);
+      this.cleared[i] = true; this.unlock(i);
       this.score += 300 + 150 * i; this.emit({ t: 'cleared', n: i });
-      const r = SECTIONS[i].r0; this.pickups.push({ id: this.nextId++, kind: 'heart', x: 9 * TILE, y: (r + 4) * TILE, t: 0, section: i });
+      this.pickups.push({ id: this.nextId++, kind: 'heart', x: 9 * TILE, y: (SECTIONS[i].r0 + 4) * TILE, t: 0, section: i });
     }
     if (!this.cleared[3] && this.reached === 3 && !this.boss) {
-      this.cleared[3] = true; this.score += 800;
-      for (let r = 0; r < 2; r++) for (let c = 8; c <= 9; c++) if (this.tiles[r * COLS + c] === T.EXIT) this.tiles[r * COLS + c] = T.FLOOR;
-      this.emit({ t: 'exitopen' }); this.emit({ t: 'gate', section: 3 }); this.emit({ t: 'cleared', n: 3 });
-      this.enemies = this.enemies.filter(k => k.section !== 3);   // 남은 드론 정리
+      this.cleared[3] = true; this.score += 800; this.unlock(3);
+      this.emit({ t: 'exitopen' }); this.emit({ t: 'cleared', n: 3 });
+      this.enemies = this.enemies.filter(k => k.section !== 3);
     }
-    if (this.cleared[3] && this.p.y < 2 * TILE && Math.abs(this.p.x - 9 * TILE) < 2 * TILE) { this.state = 'WIN'; this.emit({ t: 'win' }); this.emit({ t: 'slowmo', ms: 700, scale: 0.3 }); }
+    if (this.cleared[3] && this.p.y < 2.2 * TILE && Math.abs(this.p.x - 9 * TILE) < 2.2 * TILE) { this.state = 'WIN'; this.emit({ t: 'win' }); this.emit({ t: 'slowmo', ms: 700, scale: 0.3 }); }
   }
-  private openGates(section: number): void {
-    const r0 = SECTIONS[section].r0;
-    for (let r = r0; r <= r0 + 1; r++) for (let c = 8; c <= 9; c++) if (this.tiles[r * COLS + c] === T.GATE) this.tiles[r * COLS + c] = T.FLOOR;
+  /** 구역의 잠긴 문(위층 문 / 출구)을 열어 둔다 */
+  private unlock(section: number): void {
+    for (const d of this.doors) if (d.section === section && d.kind !== 'door') { d.locked = false; d.target = 100; d.rate = 3.5; }
     this.emit({ t: 'gate', section });
   }
 
   // ---------------------------------------------------------------- 플레이어
+  private muzzle(w: WeaponId, a: number): [number, number] {
+    const [fw, sd] = WEAPONS[w].muzzle, S = 4, p = this.p;
+    return [p.x + Math.cos(a) * fw * S - Math.sin(a) * sd * S, p.y + Math.sin(a) * fw * S + Math.cos(a) * sd * S];
+  }
+  /** 총구로 가는 선분(0.35/0.6/0.8/1.0 지점 + 16px 앞)이 장애물 안이면 막힌다 */
+  private gunBlockedNow(w: WeaponId, a: number): boolean {
+    const p = this.p, [mx, my] = this.muzzle(w, a);
+    for (const k of [0.35, 0.6, 0.8, 1.0]) { const ob = this.obstacleAt(p.x + (mx - p.x) * k, p.y + (my - p.y) * k); if (ob) return true; }
+    return !!this.obstacleAt(mx + Math.cos(a) * 16, my + Math.sin(a) * 16);
+  }
+  private wallAhead(a: number, d: number): boolean { const p = this.p; for (let k = 16; k <= d; k += 16) { const ob = this.obstacleAt(p.x + Math.cos(a) * k, p.y + Math.sin(a) * k); if (ob && ob.type === 'wall') return true; } return false; }
+
+  private startSeq(kind: Seqn['kind'], steps: Seq): void {
+    const p = this.p; p.seq = { kind, steps, i: 0, t: 0 }; this.seqEvent(steps[0][2]);
+  }
+  private seqEvent(ev?: string): void {
+    const p = this.p; if (!ev) return;
+    if (ev === 'casing') this.emit({ t: 'casing', x: p.x, y: p.y, ang: p.aim, left: false, weapon: p.weapon });
+    else if (ev === 'hit') this.meleeHit();
+    else if (ev === 'release') this.releaseBomb();
+  }
   private updatePlayer(inp: GInput): void {
     const p = this.p, o = this.opts;
-    let mx = inp.mx, my = inp.my; const m = Math.hypot(mx, my); if (m > 1) { mx /= m; my /= m; }
-    if (inp.roll && p.rollT <= 0 && p.rollCd <= 0) {
-      const l = Math.hypot(mx, my) || 0, dx = l > 0.1 ? mx / l : Math.cos(p.aim), dy = l > 0.1 ? my / l : Math.sin(p.aim);
-      p.rollT = GROUND.rollFrames; p.rdx = dx; p.rdy = dy; p.invuln = Math.max(p.invuln, GROUND.rollInvuln);
-      p.rollCd = Math.round(GROUND.rollCd * (o.pilot === 0 ? 0.8 : 1)); p.dashBonus = 0;
-      this.emit({ t: 'roll', x: p.x, y: p.y });
+    // 조준: 조준 입력 > (발사 중) 가장 가까운 적 > 이동 방향
+    const hasAim = Math.hypot(inp.ax, inp.ay) > 0.2, m = Math.hypot(inp.mx, inp.my);
+    if (p.seq?.kind !== 'roll') {
+      if (hasAim) { p.aim = Math.atan2(inp.ay, inp.ax); if (o.assist && !inp.aimDist) { const t = this.nearestInCone(p.aim, 0.2); if (t) p.aim = Math.atan2(t.y - p.y, t.x - p.x); } }
+      else if (inp.fire) { const t = this.nearestEnemy(); if (t) p.aim = Math.atan2(t.y - p.y, t.x - p.x); else if (m > 0.15) p.aim = Math.atan2(inp.my, inp.mx); }
+      else if (m > 0.15) p.aim = Math.atan2(inp.my, inp.mx);
     }
+    p.gunBlocked = this.gunBlockedNow(p.weapon, p.aim);
+    // 시퀀스 진행
+    if (p.seq) { const sq = p.seq; if (++sq.t >= sq.steps[sq.i][1]) { sq.i++; sq.t = 0; if (sq.i >= sq.steps.length) p.seq = null; else this.seqEvent(sq.steps[sq.i][2]); } }
+    const sq = p.seq, canCancel = !sq || sq.kind === 'fire';
+    // 구르기 / 근접 / 폭탄은 발사 시퀀스를 끊고 들어갈 수 있다
+    if (inp.roll && p.rollCd <= 0 && canCancel) {
+      p.rollAng = m > 0.15 ? Math.atan2(inp.my, inp.mx) : p.aim; p.rollCd = GROUND.rollCd; p.rollI = f(0.37); this.startSeq('roll', GROUND.rollSteps); this.emit({ t: 'roll', x: p.x, y: p.y, ang: p.rollAng });
+    } else if (inp.melee && canCancel && !this.wallAhead(p.aim, 85)) { this.startSeq('melee', GROUND.meleeSteps); this.emit({ t: 'swing', x: p.x, y: p.y, ang: p.aim }); this.noise(p.x, p.y, 260); }
+    else if (inp.bomb && canCancel && p.grenades > 0 && !this.wallAhead(p.aim, 64)) { this.bombDist = inp.aimDist ?? 300; this.startSeq('throw', GROUND.throwSteps); this.emit({ t: 'throw' }); }
+    // 이동
+    const sk = p.seq?.kind;
     p.moving = false;
-    if (p.rollT > 0) {
-      p.rollT--; this.move(p, p.rdx * GROUND.rollSpeed, p.rdy * GROUND.rollSpeed, GROUND.moveRadius, true);
-      if (p.rollT === 0) p.dashBonus = 40;   // 구르기 직후 첫 사격 강화 (대시-킬)
-    } else {
-      this.move(p, mx * GROUND.speed, my * GROUND.speed, GROUND.moveRadius, true);   // 이동 판정은 몸통 크기(탄 판정은 더 작은 p.r)
-      if (m > 0.1) { p.walk += 0.28; p.moving = true; }
+    if (sk === 'roll') { const sp = GROUND.rollSpeed[p.seq!.i]; this.move(p, Math.cos(p.rollAng) * sp, Math.sin(p.rollAng) * sp, GROUND.moveR, true); }
+    else if (m > 0.15) {
+      const W = WEAPONS[p.weapon], base = sk === 'fire' ? W.move : sk === 'melee' ? 150 / 60 : sk === 'throw' ? 130 / 60 : GROUND.speed, k = Math.min(1, m * (m > 1 ? 1 : 1.3));
+      this.move(p, (inp.mx / (m || 1)) * base * k, (inp.my / (m || 1)) * base * k, GROUND.moveR, true); p.moving = true; p.walk += 1;
     }
-    // 조준: 조준 입력이 있으면 그 방향, 없으면(발사 중) 가장 가까운 적 자동 조준, 둘 다 없으면 이동 방향
-    let aim = p.aim;
-    const hasAim = Math.hypot(inp.ax, inp.ay) > 0.2;
-    if (hasAim) {
-      aim = Math.atan2(inp.ay, inp.ax);
-      if (o.assist) { const t = this.nearestInCone(aim, 0.22); if (t) aim = Math.atan2(t.y - p.y, t.x - p.x); }
-    } else if (inp.fire) {
-      const t = this.nearestEnemy(); if (t) aim = Math.atan2(t.y - p.y, t.x - p.x); else if (m > 0.1) aim = Math.atan2(my, mx);
-    } else if (m > 0.1) aim = Math.atan2(my, mx);
-    p.aim = aim;
-    if (inp.fire && p.rollT <= 0 && p.fireCd <= 0) this.shoot();
-    if (inp.throwW && p.weapon !== 'pistol') this.throwWeapon();
-    if (inp.grenade && p.grenades > 0 && p.grenadeCd <= 0) {
-      p.grenades--; p.grenadeCd = GROUND.grenadeCd;
-      const dist = 170, tx = p.x + Math.cos(p.aim) * dist, ty = p.y + Math.sin(p.aim) * dist;
-      this.grenadeList.push({ x: p.x, y: p.y, sx: p.x, sy: p.y, tx, ty, t: 0, max: 40 });
+    // 사격
+    if (inp.fire && !p.gunBlocked && p.cd <= 0 && sk !== 'roll' && sk !== 'melee' && sk !== 'throw') {
+      const W = WEAPONS[p.weapon];
+      if (p.weapon === 'shotgun' ? !p.seq : true) this.fireWeapon(W);
     }
   }
-
-  private shoot(): void {
-    const p = this.p, o = this.opts, w = WEAPONS[p.weapon];
-    p.fireCd = Math.max(2, Math.round(w.cd / o.rateMult));
-    const bonus = p.dashBonus > 0 ? 1.5 : 1; if (p.dashBonus > 0) p.dashBonus = 0;
-    const pil = o.pilot === 1 ? 1.2 : 1, pierce = w.pierce + (o.pilot === 2 ? 1 : 0), spd = w.speed * (o.pilot === 2 ? 1.15 : 1);
-    for (let i = 0; i < w.pellets; i++) {
-      const a = p.aim + (w.pellets > 1 ? (i / (w.pellets - 1) - 0.5) * w.spread + (this.rng() - 0.5) * 0.08 : (this.rng() - 0.5) * w.spread * 2);
-      this.bullets.push({ x: p.x + Math.cos(p.aim) * 16, y: p.y + Math.sin(p.aim) * 16, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: p.weapon === 'rail' ? 5 : 3, dmg: w.dmg * o.dmgMult * bonus * pil, friendly: true, pierce, hit: [], life: 75, w: p.weapon });
+  private bombDist = 300;
+  private fireWeapon(W: WeaponDef): void {
+    const p = this.p, o = this.opts, [mx, my] = this.muzzle(p.weapon, p.aim);
+    const seq: Seq = p.weapon === 'smg' ? [[p.smgAlt++ % 2 ? 'shoot_b' : 'shoot_a', f(0.06)], ['aim', f(0.3)]] : W.seq;
+    this.startSeq('fire', seq);
+    p.cd = Math.max(2, Math.round(W.cd / o.rateMult)); p.kick = p.weapon === 'shotgun' ? 3 : 1.2; p.combatT = 600;
+    for (let i = 0; i < W.pellets; i++) {
+      const a = p.aim + (this.rng() * 2 - 1) * W.spread, sp = p.weapon === 'shotgun' ? W.speed * (0.9 + this.rng() * 0.2) : W.speed;
+      this.bullets.push({ x: mx, y: my, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, dmg: W.dmg * o.dmgMult * (o.pilot === 1 ? 1.15 : 1), friendly: true, w: p.weapon, life: W.life, dist: 0, pellet: W.pellets > 1, first: i === 0, pierce: W.pierce + (o.pilot === 2 ? 1 : 0), hit: [], dodged: false });
     }
-    p.kick = w.kick;
-    this.emit({ t: 'shot', x: p.x, y: p.y, weapon: p.weapon, ang: p.aim });
-    this.makeNoise(p.x, p.y, w.noise);
-    if (p.weapon !== 'pistol' && --p.ammo <= 0) this.throwWeapon();
+    this.emit({ t: 'shot', weapon: p.weapon, x: mx, y: my, ang: p.aim });
+    if (p.weapon === 'smg') this.emit({ t: 'casing', x: p.x, y: p.y, ang: p.aim, left: true, weapon: 'smg' }); else if (p.weapon !== 'shotgun' && p.weapon !== 'rail') this.emit({ t: 'casing', x: p.x, y: p.y, ang: p.aim, left: false, weapon: p.weapon });
+    this.noise(p.x, p.y, W.noise);
+    if (p.weapon !== 'pistol' && --p.ammo <= 0) { p.weapon = 'pistol'; p.ammo = Infinity; }
   }
-
-  /** 총을 던진다 (탄이 떨어졌을 때 자동 / 수동): 적에게 큰 피해 + 스턴 */
-  private throwWeapon(): void {
-    const p = this.p;
-    this.bullets.push({ x: p.x, y: p.y, vx: Math.cos(p.aim) * 8, vy: Math.sin(p.aim) * 8, r: 7, dmg: 9 * this.opts.dmgMult, friendly: true, pierce: 0, hit: [], life: 45, kind: 'throw' });
-    p.weapon = 'pistol'; p.ammo = Infinity; this.emit({ t: 'throw', x: p.x, y: p.y });
-  }
-
   private nearestEnemy(): GEnemy | null {
     let best: GEnemy | null = null, bd = 1e9;
-    for (const e of this.enemies) { const d = (e.x - this.p.x) ** 2 + (e.y - this.p.y) ** 2; if (d < bd && d < 520 * 520 && this.canSee(this.p.x, this.p.y, e.x, e.y)) { bd = d; best = e; } }
+    for (const e of this.enemies) { const d = (e.x - this.p.x) ** 2 + (e.y - this.p.y) ** 2; if (d < bd && d < 900 * 900 && this.los(this.p.x, this.p.y, e.x, e.y)) { bd = d; best = e; } }
     return best;
   }
   private nearestInCone(aim: number, cone: number): GEnemy | null {
     let best: GEnemy | null = null, bd = 1e9;
-    for (const e of this.enemies) {
-      let da = Math.atan2(e.y - this.p.y, e.x - this.p.x) - aim; da = Math.atan2(Math.sin(da), Math.cos(da));
-      const d = Math.hypot(e.x - this.p.x, e.y - this.p.y);
-      if (Math.abs(da) < cone && d < bd && d < 520 && this.canSee(this.p.x, this.p.y, e.x, e.y)) { bd = d; best = e; }
-    }
+    for (const e of this.enemies) { const da = Math.abs(norm(Math.atan2(e.y - this.p.y, e.x - this.p.x) - aim)), d = Math.hypot(e.x - this.p.x, e.y - this.p.y); if (da < cone && d < bd && d < 900 && this.los(this.p.x, this.p.y, e.x, e.y)) { bd = d; best = e; } }
     return best;
   }
 
-  private updateGrenades(): void {
-    for (let i = this.grenadeList.length - 1; i >= 0; i--) {
-      const g = this.grenadeList[i]; g.t++;
-      const k = g.t / g.max; g.x = g.sx + (g.tx - g.sx) * k; g.y = g.sy + (g.ty - g.sy) * k;
-      if (blocksBullet(tileAt(this.tiles, g.x, g.y))) { g.tx = g.sx + (g.tx - g.sx) * (k - 0.1); g.ty = g.sy + (g.ty - g.sy) * (k - 0.1); g.t = g.max; }   // 벽에 맞으면 그 자리에서 터진다
-      if (g.t >= g.max) { this.grenadeList.splice(i, 1); this.explode(g.tx, g.ty, 62, 6 * this.opts.dmgMult); this.makeNoise(g.tx, g.ty, 600); }
+  // ---------------------------------------------------------------- 근접 · 폭탄
+  private meleeHit(): void {
+    const p = this.p, sector = (x: number, y: number, rng: number, half: number): boolean => Math.hypot(x - p.x, y - p.y) < rng && Math.abs(norm(Math.atan2(y - p.y, x - p.x) - p.aim)) < half;
+    for (const e of this.enemies.slice()) if (sector(e.x, e.y, 165, 1.05) && this.los(p.x, p.y, e.x, e.y)) this.hitEnemy(e, 'melee', p.aim, 1, p.x, p.y);
+    for (const c of this.crates) if (!c.broken && sector(c.x, c.y, 135, 1.0)) this.hurtCrate(c, 2);
+    for (const d of this.doors) if (!d.broken && !d.locked && sector((d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2, 175, 1.1)) this.kickDoor(d);
+    for (const w of this.windows) if (!w.broken && sector((w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2, 175, 1.0)) this.breakWindow(w);
+  }
+  private kickDoor(d: GDoor): void {
+    const cx = (d.x0 + d.x1) / 2, cy = (d.y0 + d.y1) / 2;
+    this.emit({ t: 'doorKick', x: cx, y: cy }); this.noise(cx, cy, 450);
+    d.hp -= 3; if (d.hp <= 0) { this.breakDoor(d); } else this.pushDoor(d, this.p, GROUND.kickRate);
+    for (const e of this.enemies.slice()) if (e.kind !== 'dog' && e.kind !== 'heavy' && e.kind !== 'boss' && e.kind !== 'turret' && this.circleRect(e, 70, d)) this.hitEnemy(e, 'door', Math.atan2(e.y - this.p.y, e.x - this.p.x), 1, cx, cy);
+  }
+  private hurtDoor(d: GDoor, dmg = 1): void { d.hp -= dmg; this.emit({ t: 'doorHit', x: (d.x0 + d.x1) / 2, y: (d.y0 + d.y1) / 2 }); if (d.hp <= 0) this.breakDoor(d); }
+  private breakDoor(d: GDoor): void { if (d.broken) return; d.broken = true; this.emit({ t: 'doorBreak', x: (d.x0 + d.x1) / 2, y: (d.y0 + d.y1) / 2, o: d.o }); this.noise((d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2, 500); this.emit({ t: 'shake', v: 4 }); }
+  private breakWindow(w: GWindow): void { if (w.broken) return; w.broken = true; this.emit({ t: 'windowBreak', x: (w.x0 + w.x1) / 2, y: (w.y0 + w.y1) / 2, o: w.o }); this.noise((w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2, 500); }
+  private hurtCrate(c: GCrate, dmg = 1): void {
+    if (c.broken) return; c.hp -= dmg; c.hitT = 8; this.emit({ t: 'crateHit', x: c.x, y: c.y });
+    if (c.hp > 0) return;
+    c.broken = true; this.emit({ t: 'crateBreak', x: c.x, y: c.y, barrel: c.kind === 'barrel' });
+    if (c.kind === 'barrel') this.explode(c.x, c.y, true);   // 통: 폭발 (연쇄)
+  }
+  private releaseBomb(): void {
+    const p = this.p, a = p.aim, bx = p.x + Math.cos(a) * 12 * 4 - Math.sin(a) * 6 * 4, by = p.y + Math.sin(a) * 12 * 4 + Math.cos(a) * 6 * 4;
+    const dist = Math.max(150, Math.min(480, this.bombDist)), [tx, ty] = this.rayEnd(p.x, p.y, a, dist), tt = Math.hypot(tx - bx, ty - by);
+    p.grenades--; this.bombs.push({ x: bx, y: by, sx: bx, sy: by, tx, ty, t: 0, flight: f(0.55 + tt / 800), fuse: GROUND.bombFuse, bounce: 0 }); this.emit({ t: 'release', x: bx, y: by });
+  }
+  private updateBombs(): void {
+    for (let i = this.bombs.length - 1; i >= 0; i--) {
+      const b = this.bombs[i]; b.t++; const u = Math.min(1, b.t / b.flight); b.x = b.sx + (b.tx - b.sx) * u; b.y = b.sy + (b.ty - b.sy) * u;
+      if (b.t >= b.fuse) { this.bombs.splice(i, 1); this.explode(b.x, b.y, false); }
     }
   }
-
-  // ---------------------------------------------------------------- 이동·충돌
-  /** 원형 몸체를 타일·엄폐물과 부딪히며 이동 (isPlayer: 스윙 도어를 밀면 열림) */
-  private move(o: { x: number; y: number }, dx: number, dy: number, r: number, isPlayer = false): void {
-    o.x = Math.max(r, Math.min(WORLD_W - r, o.x + dx)); o.y = Math.max(r, Math.min(WORLD_H - r, o.y + dy));
-    const c0 = Math.floor((o.x - r) / TILE), c1 = Math.floor((o.x + r) / TILE), r0 = Math.floor((o.y - r) / TILE), r1 = Math.floor((o.y + r) / TILE);
-    for (let rr = r0; rr <= r1; rr++) for (let cc = c0; cc <= c1; cc++) {
-      if (cc < 0 || cc >= COLS || rr < 0 || rr >= ROWS) continue;
-      const t = this.tiles[rr * COLS + cc];
-      if (t === T.DOOR) { if ((this.doorT.get(rr * COLS + cc) ?? 0) < 10) this.openDoor(cc, rr, o, isPlayer); continue; }
-      if (blocksMove(t)) this.pushOut(o, r, cc * TILE + TILE / 2, rr * TILE + TILE / 2, TILE / 2, TILE / 2);
-    }
-    for (const c of this.cover) if (!c.dead) this.pushOut(o, r, c.x, c.y, c.w / 2, c.h / 2);
-  }
-  private pushOut(o: { x: number; y: number }, r: number, cx: number, cy: number, hx: number, hy: number): void {
-    const nx = Math.max(cx - hx, Math.min(o.x, cx + hx)), ny = Math.max(cy - hy, Math.min(o.y, cy + hy));
-    const ddx = o.x - nx, ddy = o.y - ny, d2 = ddx * ddx + ddy * ddy;
-    if (d2 >= r * r) return;
-    if (d2 > 1e-6) { const d = Math.sqrt(d2), push = r - d + 0.01; o.x += (ddx / d) * push; o.y += (ddy / d) * push; }
-    else {   // 중심이 사각형 안으로 파고든 경우: 가장 가까운 면 바깥으로 밀어낸다
-      const l = o.x - (cx - hx), rr = cx + hx - o.x, t = o.y - (cy - hy), bt = cy + hy - o.y, m = Math.min(l, rr, t, bt);
-      if (m === l) o.x = cx - hx - r - 0.01; else if (m === rr) o.x = cx + hx + r + 0.01; else if (m === t) o.y = cy - hy - r - 0.01; else o.y = cy + hy + r + 0.01;
-    }
-  }
-  /** 스윙 도어: 지나가면 열렸다 닫힌다. 플레이어가 박차고 들어오면 문 근처의 적이 기절한다 */
-  private openDoor(c: number, r: number, who: { x: number; y: number }, isPlayer: boolean): void {
-    const idx = r * COLS + c; this.doorT.set(idx, 26); this.emit({ t: 'door', c, r });
-    if (!isPlayer) return;
-    const cx = (c + 0.5) * TILE, cy = (r + 0.5) * TILE;
-    for (const e of this.enemies) {
-      if (e.kind === 'dog' || e.kind === 'heavy' || e.kind === 'boss' || e.kind === 'turret') continue;
-      if (Math.hypot(e.x - cx, e.y - cy) < 44 && (e.x - who.x) * (cx - who.x) + (e.y - who.y) * (cy - who.y) > -200) {
-        e.state = 'STUN'; e.t = GROUND.doorStun; e.aw = Math.max(e.aw, 1) as 1 | 2; e.styled = false;
-        this.emit({ t: 'doorbash', x: e.x, y: e.y }); this.score += 100;
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------- 소음·시야
-  /** 총소리: 반경 안의 경계 전 적이 소리 난 곳을 조사하러 온다 (벽 너머는 반경 절반) */
-  private makeNoise(x: number, y: number, radius: number): void {
-    for (const e of this.enemies) {
-      if (e.aw !== 0 || e.kind === 'drone') continue;
-      const d = Math.hypot(e.x - x, e.y - y), rad = (e.kind === 'dog' ? 1.4 : 1) * radius * (this.canSee(e.x, e.y, x, y) ? 1 : 0.55);
-      if (d < rad) { e.aw = 1; e.tx = x; e.ty = y; e.look = 0; this.emit({ t: 'alert', x: e.x, y: e.y }); }
-    }
-  }
-  /** 적이 플레이어를 볼 수 있는가: 시야각(전방 110°)·거리·벽 */
-  private sees(e: GEnemy): boolean {
-    const p = this.p, dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
-    const view = e.kind === 'sniper' ? 520 : e.kind === 'turret' ? 400 : GROUND.viewDist;
-    if (d > view) return false;
-    if (d > 70 && e.kind !== 'turret') { let da = Math.atan2(dy, dx) - e.ang; da = Math.atan2(Math.sin(da), Math.cos(da)); if (Math.abs(da) > GROUND.viewHalf) return false; }
-    return this.canSee(e.x, e.y, p.x, p.y);
-  }
-
-  // ---------------------------------------------------------------- 적
-  private enemyShot(e: GEnemy, ang: number, speed: number, dmg = 1, r = 3.5, kind: GBullet['kind'] = 'normal'): void {
-    e.fire = 6;   // 발사 프레임(총구 화염) 표시용
-    this.bullets.push({ x: e.x + Math.cos(ang) * (e.r * 0.8), y: e.y + Math.sin(ang) * (e.r * 0.8), vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, r, dmg, friendly: false, pierce: 0, hit: [], life: 240, kind, src: e.kind });
-  }
-  private angToPlayer(e: GEnemy): number { return Math.atan2(this.p.y - e.y, this.p.x - e.x); }
-
-  private updateEnemies(): void {
-    const p = this.p;
-    for (let i = this.enemies.length - 1; i >= 0; i--) {
-      const e = this.enemies[i];
-      if (!e) continue;
-      if (e.flash > 0) e.flash--;
-      if (e.fire > 0) e.fire--;
-      const dist = Math.hypot(p.x - e.x, p.y - e.y);
-      if (e.aw === 0 && dist > 900) continue;                     // 멀리 있는 경계 전 적은 쉰다
-      if (e.state === 'STUN') { if (--e.t <= 0) { e.state = 'IDLE'; e.cd = 40; } continue; }
-      if (e.kind === 'boss' && e.aw < 2) { if (this.section === 3 && (this.sees(e) || dist < 380)) e.aw = 2; else { e.ang = this.angToPlayer(e); continue; } }
-      if (e.aw < 2) {
-        if (this.sees(e)) {   // 발견: 잠깐 반응 지연 뒤 교전
-          if (++e.react >= GROUND.reactFrames) {
-            e.aw = 2; e.react = 0; this.emit({ t: 'alert', x: e.x, y: e.y });
-            for (const o of this.enemies) if (o !== e && o.aw === 0 && o.section === e.section && Math.hypot(o.x - e.x, o.y - e.y) < 160) { o.aw = 1; o.tx = p.x; o.ty = p.y; o.look = 0; }   // 비명: 가까운 동료도 달려온다
-          }
-          e.ang = this.angToPlayer(e);
-        } else {
-          e.react = Math.max(0, e.react - 1);
-          if (e.aw === 1) this.investigate(e); else this.idle(e);
-        }
-        continue;
-      }
-      this.combat(e, dist);
-    }
-  }
-
-  private idle(e: GEnemy): void {
-    if (e.patrol && e.patrol.length > 1) {   // 순찰: 경유점을 오간다
-      const [wx, wy] = e.patrol[e.pi], a = Math.atan2(wy - e.y, wx - e.x), x0 = e.x, y0 = e.y;
-      this.move(e, Math.cos(a) * 0.9, Math.sin(a) * 0.9, e.r); e.ang += (((a - e.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * 0.15;
-      if (Math.hypot(wx - e.x, wy - e.y) < 14 || (Math.hypot(e.x - x0, e.y - y0) < 0.2 && ++e.moved > 30)) { e.pi = (e.pi + 1) % e.patrol.length; e.moved = 0; }
-    } else if (e.kind !== 'turret') e.ang = e.home.ang + Math.sin((this.frame + e.id * 17) * 0.018) * 0.7;   // 제자리에서 두리번
-    else e.ang += 0.015;
-  }
-  private investigate(e: GEnemy): void {
-    const d = Math.hypot(e.tx - e.x, e.ty - e.y);
-    if (d > 26 && e.kind !== 'turret') {
-      if (e.kind === 'sniper') { e.ang = Math.atan2(e.ty - e.y, e.tx - e.x); return; }   // 저격수는 자리를 지키며 그쪽만 본다
-      const f = this.noiseFlow(e.tx, e.ty), x0 = e.x, y0 = e.y;
-      if (!this.stepFlow(e, f, e.kind === 'dog' ? 2.6 : 1.5, e.r)) e.look = 999;
-      if (Math.hypot(e.x - x0, e.y - y0) > 0.1) e.ang = Math.atan2(e.y - y0, e.x - x0);
-    } else if (++e.look > 120) { e.aw = 0; e.look = 0; }
-    else e.ang += 0.05;
-  }
-
-  /** 교전: 종류별 행동. 시야가 막히면 거리장을 따라 추격한다 */
-  private combat(e: GEnemy, dist: number): void {
-    const p = this.p, los = this.canSee(e.x, e.y, p.x, p.y), toP = this.angToPlayer(e);
-    const chase = (sp: number) => { if (los) { this.move(e, Math.cos(toP) * sp, Math.sin(toP) * sp, e.r); } else this.stepFlow(e, this.playerFlow(), sp, e.r); };
-    switch (e.kind) {
-      case 'rifle': {
-        e.ang = los ? toP : e.ang;
-        if (!los) { chase(1.5); break; }
-        const want = dist > 270 ? 1 : dist < 150 ? -1 : 0, sp = 1.25;
-        if (--e.t <= 0) { e.dir = -e.dir; e.t = 60 + Math.floor(this.rng() * 60); }
-        this.move(e, (Math.cos(toP) * want + Math.cos(toP + Math.PI / 2) * e.dir * 0.8) * sp, (Math.sin(toP) * want + Math.sin(toP + Math.PI / 2) * e.dir * 0.8) * sp, e.r);
-        if (e.burst > 0) { if (--e.cd <= 0) { this.enemyShot(e, toP + (this.rng() - 0.5) * 0.1, 3.4); e.burst--; e.cd = 7; if (e.burst === 0) e.cd = 120 + Math.floor(this.rng() * 60); } }
-        else if (--e.cd <= 0) { e.burst = 3; e.cd = 0; }
-        break;
-      }
-      case 'heavy': {
-        e.ang = los ? toP : e.ang;
-        if (!los || dist > 200) chase(0.95);
-        if (los && --e.cd <= 0) { for (let k = -2; k <= 2; k++) this.enemyShot(e, toP + k * 0.16, 3.1, 1, 4); e.cd = 85; }
-        break;
-      }
-      case 'dog': {
-        e.ang = toP; chase(3.1);
-        if (dist < e.r + p.r + 5 && --e.cd <= 0) { this.hurt(1, e.x, e.y, 'dog'); e.cd = 45; }
-        break;
-      }
-      case 'charger': {
-        if (e.state === 'IDLE') {
-          e.ang = toP; chase(1.6);
-          if (--e.cd <= 0 && los && dist < 330) { e.state = 'WIND'; e.t = 40; }
-        } else if (e.state === 'WIND') {
-          if (e.t > 12) { e.lx = p.x; e.ly = p.y; }
-          e.ang = Math.atan2(e.ly - e.y, e.lx - e.x);
-          if (--e.t <= 0) { e.state = 'DASH'; e.t = 30; }
-        } else if (e.state === 'DASH') {
-          const a = Math.atan2(e.ly - e.y, e.lx - e.x), x0 = e.x, y0 = e.y;
-          this.move(e, Math.cos(a) * 7.8, Math.sin(a) * 7.8, e.r);
-          if (Math.hypot(e.x - x0, e.y - y0) < 4) e.t = Math.min(e.t, 1);
-          if (!e.styled && Math.hypot(p.x - e.x, p.y - e.y) < e.r + p.r + 8) {
-            if (p.rollT > 0) { e.styled = true; this.styles++; this.score += 250; this.emit({ t: 'style', x: p.x, y: p.y }); this.emit({ t: 'slowmo', ms: 220, scale: 0.35 }); this.p.dashBonus = 60; }
-            else this.hurt(1, e.x, e.y, 'charger');
-          }
-          if (--e.t <= 0) { e.state = 'IDLE'; e.cd = 70 + Math.floor(this.rng() * 40); e.styled = false; }
-        }
-        break;
-      }
-      case 'sniper': {
-        if (!los) { chase(1.1); break; }
-        if (e.state === 'IDLE') {
-          e.ang = toP;
-          const want = dist < 260 ? -1 : 0;
-          this.move(e, Math.cos(toP) * want * 1.1, Math.sin(toP) * want * 1.1, e.r);
-          if (--e.cd <= 0) { e.state = 'WIND'; e.t = 75; }
-        } else {
-          if (e.t > 22) { e.lx = p.x; e.ly = p.y; }
-          e.ang = Math.atan2(e.ly - e.y, e.lx - e.x);
-          if (--e.t <= 0) { this.enemyShot(e, e.ang, 11, 1, 4, 'sniper'); e.state = 'IDLE'; e.cd = 150 + Math.floor(this.rng() * 40); }
-        }
-        break;
-      }
-      case 'turret': {
-        e.ang = los ? toP : e.ang + 0.02;
-        if (los && --e.cd <= 0) { for (let k = -1; k <= 1; k++) this.enemyShot(e, toP + k * 0.3, 2.9, 1, 4); e.cd = 100; }
-        break;
-      }
-      case 'drone': {
-        e.ang = toP; e.x += Math.cos(toP) * 2.35; e.y += Math.sin(toP) * 2.35;   // 비행: 벽에 걸리지 않는다
-        if (dist < e.r + p.r + 2) { this.hurt(1, e.x, e.y, 'drone'); this.emit({ t: 'boom', x: e.x, y: e.y, r: 28 }); this.enemies.splice(this.enemies.indexOf(e), 1); }
-        break;
-      }
-      case 'tank': {
-        e.ang = toP; chase(0.7);
-        if (los && --e.cd <= 0) { for (let k = -1; k <= 1; k++) this.enemyShot(e, toP + k * 0.18, 3.6, 1, 5); e.cd = 120; e.t++; if (e.t % 3 === 0) this.zone('tank', p.x + (this.rng() - 0.5) * 90, p.y + (this.rng() - 0.5) * 90, 44, 62); }
-        break;
-      }
-      case 'boss': this.updateBoss(e, toP); break;
-    }
-  }
-
-  private zone(src: GKind, x: number, y: number, r: number, t: number, dmg = 1): void {
-    this.zones.push({ x, y, r, t, max: t, dmg, foe: true, src });
-  }
-
-  private updateBoss(e: GEnemy, toP: number): void {
-    const p = this.p, hpK = e.hp / e.maxHp, phase = hpK > 0.66 ? 1 : hpK > 0.33 ? 2 : 3;
-    const X0 = 70, X1 = WORLD_W - 70, Y0 = 3 * TILE + 70, Y1 = 33 * TILE - 70;
-    if (phase > e.phase) {
-      e.phase = phase; e.state = 'IDLE'; e.cd = 60;
-      this.emit({ t: 'bossPhase', phase }); this.emit({ t: 'shake', v: 12 }); this.emit({ t: 'slowmo', ms: 500, scale: 0.3 });
-      if (phase >= 2) for (let k = 0; k < 4; k++) { const d = this.addEnemy('drone', X0 + k * 95, Y0 - 30); d.aw = 2; }
-      // 보급: 2페이즈에 SMG, 3페이즈에 체력 (플레이어 근처에 떨어진다)
-      const [sx, sy] = this.freeSpot(); this.pickups.push(phase === 2 ? { id: this.nextId++, kind: 'weapon', weapon: 'smg', ammo: WEAPONS.smg.ammo, x: sx, y: sy, t: 0, section: 3 } : { id: this.nextId++, kind: 'heart', x: sx, y: sy, t: 0, section: 3 });
-    }
-    e.ang = toP;
-    if (e.state === 'IDLE') {
-      const ty = Math.max(Y0, Math.min(p.y - 330, 12 * TILE)), dx = p.x - e.x;
-      e.x += Math.max(-0.9, Math.min(0.9, dx * 0.02)); e.y += (Math.max(Y0, Math.min(Y1, ty)) - e.y) * 0.03;
-      const rate = phase === 3 ? 7 : 9;
-      e.t++;
-      if (e.t % 120 < 40 && e.t % rate === 0) this.enemyShot(e, toP + (this.rng() - 0.5) * 0.22 + 0.2 * Math.sin(e.t * 0.1), 3.6, 1, 4);
-      if (--e.cd <= 0) {
-        for (let k = -2; k <= 2; k++) this.enemyShot(e, Math.PI / 2 + k * 0.4, 2.6, 1, 5);
-        e.cd = phase === 1 ? 130 : 110;
-        if (phase >= 3) for (let k = 0; k < 2; k++) this.zone('boss', p.x + (this.rng() - 0.5) * 140, p.y + (this.rng() - 0.5) * 140, 48, 70);
-        if (phase >= 2 && this.rng() < 0.5) { e.state = 'WIND'; e.t = 55; }
-      }
-    } else if (e.state === 'WIND') {
-      if (e.t > 14) { e.lx = p.x; e.ly = p.y; }
-      if (--e.t <= 0) { e.state = 'DASH'; e.t = 36; }
-    } else if (e.state === 'DASH') {
-      const a = Math.atan2(e.ly - e.y, e.lx - e.x), x0 = e.x, y0 = e.y;
-      e.x += Math.cos(a) * 8.5; e.y += Math.sin(a) * 8.5;
-      e.x = Math.max(X0, Math.min(X1, e.x)); e.y = Math.max(Y0, Math.min(Y1, e.y));
-      if (Math.hypot(p.x - e.x, p.y - e.y) < e.r + p.r - 10) { if (p.rollT > 0) { if (!e.styled) { e.styled = true; this.styles++; this.score += 500; this.emit({ t: 'style', x: p.x, y: p.y }); this.emit({ t: 'slowmo', ms: 260, scale: 0.35 }); } } else this.hurt(1, e.x, e.y, 'boss'); }
-      const stuck = Math.hypot(e.x - x0, e.y - y0) < 4;
-      if (--e.t <= 0 || stuck) { e.state = 'STUN'; e.t = 110; e.styled = false; this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'boom', x: e.x, y: e.y, r: 70 }); for (let k = 0; k < 8; k++) this.enemyShot(e, (k / 8) * Math.PI * 2 + 0.2, 2.4, 1, 4); }
-    }
-  }
-
-  /** 플레이어 근처의 비어 있는 보급 자리 */
-  private freeSpot(): [number, number] {
-    const p = this.p;
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * Math.PI * 2 + 0.7, d = 70 + (i % 3) * 25, x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
-      if (blocksMove(tileAt(this.tiles, x, y)) || this.cover.some(c => !c.dead && Math.abs(c.x - x) < c.w / 2 + 14 && Math.abs(c.y - y) < c.h / 2 + 14)) continue;
-      if (this.pickups.some(k => Math.hypot(k.x - x, k.y - y) < 40)) continue;
-      return [x, y];
-    }
-    return [p.x, p.y + 60];
+  /** 폭발: 시야가 있는 곳만 (유리창도 막는다) */
+  private explode(x: number, y: number, small: boolean): void {
+    const R = small ? 170 : 230;
+    this.emit({ t: 'boom', x, y, r: R }); this.emit({ t: 'shake', v: small ? 10 : 16 }); this.noise(x, y, small ? 900 : 1200);
+    for (const e of this.enemies.slice()) if (Math.hypot(e.x - x, e.y - y) < R && this.los(x, y, e.x, e.y, true)) this.hitEnemy(e, 'bomb', Math.atan2(e.y - y, e.x - x), small ? 0.6 : 1, x, y);
+    for (const d of this.doors) if (!d.broken && !d.locked && Math.hypot((d.x0 + d.x1) / 2 - x, (d.y0 + d.y1) / 2 - y) < 190 && this.los(x, y, (d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2, true)) this.breakDoor(d);
+    for (const w of this.windows) if (!w.broken && Math.hypot((w.x0 + w.x1) / 2 - x, (w.y0 + w.y1) / 2 - y) < 230 && this.los(x, y, (w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2, true)) this.breakWindow(w);
+    for (const c of this.crates) if (!c.broken && Math.hypot(c.x - x, c.y - y) < 170 && this.los(x, y, c.x, c.y, true)) this.hurtCrate(c, 9);
+    if (Math.hypot(this.p.x - x, this.p.y - y) < 150 && this.los(x, y, this.p.x, this.p.y, true)) this.hurt(1, x, y);
   }
 
   // ---------------------------------------------------------------- 탄
   private updateBullets(): void {
     const p = this.p;
     for (let i = this.bullets.length - 1; i >= 0; i--) {
-      const b = this.bullets[i];
-      const sp = Math.hypot(b.vx, b.vy), sub = sp > 9 ? Math.ceil(sp / 9) : 1;
-      let gone = false;
-      for (let s = 0; s < sub && !gone; s++) {
-        b.x += b.vx / sub; b.y += b.vy / sub;
-        const t = tileAt(this.tiles, b.x, b.y);
-        const openDoor = t === T.DOOR && (this.doorT.get(Math.floor(b.y / TILE) * COLS + Math.floor(b.x / TILE)) ?? 0) > 0;   // 열린(누가 서 있거나 지나가는) 문은 탄이 통과
-        if (blocksBullet(t) && !openDoor) { this.emit({ t: 'wallhit', x: b.x - b.vx / sub, y: b.y - b.vy / sub, ang: Math.atan2(b.vy, b.vx) }); gone = true; break; }
-        const c = this.blocked(b.x, b.y);
-        if (c) { if (c.kind === 'barrel') this.breakCover(c); if (!(b.friendly && b.pierce > 0 && c.kind === 'barrel')) { this.emit({ t: 'wallhit', x: b.x, y: b.y, ang: Math.atan2(b.vy, b.vx) }); gone = true; } break; }
+      const b = this.bullets[i]; let gone = false;
+      const sp = Math.hypot(b.vx, b.vy);
+      for (let s = 0; s < 3 && !gone; s++) {
+        b.x += b.vx / 3; b.y += b.vy / 3; b.dist += sp / 3;
+        const ob = this.obstacleAt(b.x, b.y);
+        if (ob) {
+          if (ob.type === 'wall') { this.emit({ t: 'wallhit', x: b.x - b.vx / 3, y: b.y - b.vy / 3, ang: Math.atan2(b.vy, b.vx) }); gone = true; }
+          else if (ob.type === 'door') { this.hurtDoor(ob.o as GDoor); gone = true; }
+          else if (ob.type === 'crate') { this.hurtCrate(ob.o as GCrate); this.emit({ t: 'wallhit', x: b.x, y: b.y, ang: Math.atan2(b.vy, b.vx) }); gone = true; }
+          else if (ob.type === 'window') { const w = ob.o as GWindow; if (!b.hit.includes(-w.id)) { b.hit.push(-w.id); w.hp--; this.emit({ t: 'windowHit', x: b.x, y: b.y }); if (w.hp <= 0) this.breakWindow(w); } }   // 유리창은 깨고 총알은 계속 날아간다
+          if (gone) break;
+        }
         if (b.friendly) {
           for (const e of this.enemies.slice()) {
             if (b.hit.includes(e.id)) continue;
-            if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 < (e.r + b.r) ** 2) {
-              this.damage(e, b.dmg * (e.state === 'STUN' ? 1.6 : 1), b.x, b.y, Math.atan2(b.vy, b.vx), b.w === 'shotgun');
-              if (b.kind === 'throw') { e.state = 'STUN'; e.t = Math.max(e.t, 70); this.emit({ t: 'boom', x: b.x, y: b.y, r: 34 }); }
-              b.hit.push(e.id);
-              if (b.pierce-- <= 0) { gone = true; break; }
+            if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 < (HIT_R[e.kind] + 3) ** 2) {
+              const mult = b.w === 'shotgun' ? Math.max(0.25, Math.min(1, 1.25 - b.dist / 380)) : 1;
+              this.hitEnemy(e, b.w, Math.atan2(b.vy, b.vx), mult, b.x, b.y, b.dmg / FEEL[b.w].dmg, b.first);
+              b.hit.push(e.id); if (b.pierce-- <= 0) { gone = true; break; }
             }
           }
-        } else if (p.invuln <= 0 && (p.x - b.x) ** 2 + (p.y - b.y) ** 2 < (p.r + b.r) ** 2) {
-          this.hurt(b.dmg, b.x, b.y, b.src); gone = true;
+        } else if ((p.x - b.x) ** 2 + (p.y - b.y) ** 2 < (GROUND.hitR + 3) ** 2) {
+          if (p.rollI > 0) { if (!b.dodged) { b.dodged = true; this.emit({ t: 'dodge', x: p.x, y: p.y }); this.score += 40; } }
+          else if (p.invuln <= 0) { this.hurt(1, b.x, b.y, b.src); gone = true; }
         }
       }
       if (gone || --b.life <= 0) this.bullets.splice(i, 1);
     }
   }
-  private blocked(x: number, y: number): GCover | null {
-    for (const c of this.cover) if (!c.dead && Math.abs(x - c.x) < c.w / 2 && Math.abs(y - c.y) < c.h / 2) return c;
-    return null;
-  }
 
-  private damage(e: GEnemy, dmg: number, x: number, y: number, ang: number, shotgun = false): void {
-    e.hp -= dmg; e.flash = 4;
-    if (e.aw < 2) { e.aw = 2; this.emit({ t: 'alert', x: e.x, y: e.y }); }
+  // ---------------------------------------------------------------- 적 피격 · 사망
+  /** mult: 샷건 거리 감쇠 / dmgScale: 아군 피해 배율(빌드 보정). first: 샷건은 한 번 발사당 한 번만 히트스톱 */
+  private hitEnemy(e: GEnemy, w: FeelKey, ang: number, mult: number, ix: number, iy: number, dmgScale = 1, first = true): void {
+    if (e.dying) return;
+    const F = FEEL[w], arm = ARMOR[e.kind]?.[w] ?? 1, dmg = F.dmg * dmgScale * mult * arm;
+    e.hp -= dmg; e.hitT = F.flash; this.alertEnemy(e);
+    const boss = e.kind === 'boss', turret = e.kind === 'turret';
+    if (!boss && !turret) { e.hitPose = F.pose; e.stunT = Math.max(e.stunT, Math.round(F.stun * mult)); e.vx += Math.cos(ang) * F.knock * mult / (e.kind === 'heavy' ? 2.5 : 1); e.vy += Math.sin(ang) * F.knock * mult / (e.kind === 'heavy' ? 2.5 : 1); const vm = Math.hypot(e.vx, e.vy); if (vm > 1000) { e.vx *= 1000 / vm; e.vy *= 1000 / vm; } e.aimT = 0; e.windT = 0; }
     const kill = e.hp <= 0;
-    this.emit({ t: 'hit', x, y, dmg, kill, kind: e.kind, ang });
-    if (!kill && shotgun && e.kind !== 'boss' && e.kind !== 'tank' && e.kind !== 'turret') this.move(e, Math.cos(ang) * 4, Math.sin(ang) * 4, e.r);   // 샷건 넉백
-    if (kill) this.killEnemy(e, ang);
+    this.emit({ t: 'hit', x: ix, y: iy, ang, w, kill, kind: e.kind, dmg, armor: arm < 1 });
+    if (!kill) { if (first && F.stop) this.emit({ t: 'hitstop', frames: F.stop }); if (F.shake) this.emit({ t: 'shake', v: F.shake }); }
+    for (const o of this.enemies) if (o !== e && o.state === 'idle' && o.section === e.section && Math.hypot(o.x - e.x, o.y - e.y) < GROUND.allyAlert && kill) this.alertEnemy(o);
+    if (kill) this.killEnemy(e, w, ang);
   }
-
-  private killEnemy(e: GEnemy, ang: number): void {
+  private killEnemy(e: GEnemy, w: FeelKey, ang: number): void {
     const i = this.enemies.indexOf(e); if (i < 0) return;
-    this.enemies.splice(i, 1); this.kills++;
+    this.enemies.splice(i, 1); this.kills++; e.dying = true; e.w = w; e.fallT = 0;
     this.combo++; this.comboT = GROUND.comboFrames; this.maxCombo = Math.max(this.maxCombo, this.combo);
     const mult = 1 + 0.2 * Math.min(this.combo - 1, 10), pts = Math.round(ENEMY_DEF[e.kind].pts * mult);
     this.score += pts;
-    this.emit({ t: 'kill', x: e.x, y: e.y, kind: e.kind, pts, combo: this.combo, ang });
-    if (e.kind === 'tank' || e.kind === 'boss') { this.emit({ t: 'boom', x: e.x, y: e.y, r: e.r * 2.2 }); this.emit({ t: 'shake', v: 14 }); this.emit({ t: 'hitstop', frames: 8 }); }
-    else if (e.kind !== 'drone') this.emit({ t: 'hitstop', frames: 2 });
-    if (e.kind !== 'drone' && e.kind !== 'turret' && e.kind !== 'tank') {   // 시체는 총알 방향으로 미끄러지며 바닥에 남는다
-      const k = e.kind === 'boss' ? 0 : 5 + this.rng() * 2.5;
-      this.corpses.push({ id: this.nextId++, kind: e.kind, x: e.x, y: e.y, a: ang + (this.rng() - 0.5) * 0.6, vx: Math.cos(ang) * k, vy: Math.sin(ang) * k, section: e.section });
-    }
-    const dr = DROPS[e.kind];   // 무기를 떨군다: 바닥에서 주워 쓸 수 있다
-    if (dr && this.rng() < dr.p) {
-      const ammo = Math.ceil(WEAPONS[dr.w].ammo * (0.35 + this.rng() * 0.3));
-      this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: dr.w, ammo, x: e.x, y: e.y, t: 0, section: e.section, dropped: true });
-      this.emit({ t: 'drop', x: e.x, y: e.y, weapon: dr.w });
-    }
-    if (e.kind === 'boss') {
-      this.enemies = this.enemies.filter(b => b.kind !== 'drone');
-      for (const b of this.bullets) if (!b.friendly) b.life = 1;
-    }
+    const D = FEEL[w];
+    e.deathAng = ang + (this.rng() - 0.5) * 0.5; const fd = Math.cos(e.ang - ang);
+    e.fallF = fd > 0.35 ? true : fd < -0.35 ? false : this.rng() < 0.5;   // 등 뒤에서 맞으면 앞으로 엎어짐
+    const boss = e.kind === 'boss';
+    if (!boss) { e.vx = Math.cos(ang) * D.dKnock * (e.kind === 'heavy' ? 0.4 : 1); e.vy = Math.sin(ang) * D.dKnock * (e.kind === 'heavy' ? 0.4 : 1); } else { e.vx = 0; e.vy = 0; }
+    this.emit({ t: 'kill', x: e.x, y: e.y, ang, w, kind: e.kind, pts, combo: this.combo });
+    this.emit({ t: 'hitstop', frames: boss ? 12 : D.dStop }); this.emit({ t: 'shake', v: boss ? 16 : D.dShake }); if (D.dSlow || boss) this.emit({ t: 'slowmo', ms: boss ? 900 : D.dSlow, scale: boss ? 0.25 : 0.4 });
+    const dr = DROPS[e.kind];
+    if (dr && this.rng() < dr.p) { const ammo = Math.ceil(WEAPONS[dr.w].ammo * (0.35 + this.rng() * 0.3)); this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: dr.w, ammo, x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: dr.w }); }
+    if (boss) { this.enemies = this.enemies.filter(b => b.kind !== 'drone'); for (const b of this.bullets) if (!b.friendly) b.life = 1; }
+    this.dying.push(e);
   }
-  private updateCorpses(): void {
-    for (const c of this.corpses) {
-      if (Math.abs(c.vx) + Math.abs(c.vy) < 0.15) { c.vx = 0; c.vy = 0; continue; }
-      const nx = c.x + c.vx, ny = c.y + c.vy;
-      if (blocksMove(tileAt(this.tiles, nx, ny))) { c.vx = 0; c.vy = 0; continue; }
-      c.x = nx; c.y = ny; c.vx *= 0.86; c.vy *= 0.86;
+  private updateDying(): void {
+    for (let i = this.dying.length - 1; i >= 0; i--) {
+      const e = this.dying[i]; e.fallT++;
+      const sp = Math.hypot(e.vx, e.vy);
+      if (sp > 0.5) {
+        const nx = e.x + e.vx / 60, ny = e.y + e.vy / 60;
+        if (!this.obstacleAt(nx, e.y)) e.x = nx; else e.vx = 0;
+        if (!this.obstacleAt(e.x, ny)) e.y = ny; else e.vy = 0;
+        const k = Math.exp(-5 / 60); e.vx *= k; e.vy *= k;
+        if (sp > 40) { e.smearD += sp / 60; if (e.smearD > 16) { e.smearD = 0; this.emit({ t: 'smear', x: e.x, y: e.y }); } }
+      }
+      if (e.fallT < 54 && e.fallT % 4 === 0) this.emit({ t: 'pool', x: e.x, y: e.y, r: 8 + (FEEL[e.w].dPool - 8) * Math.min(1, e.fallT / 54) });
+      if (e.fallT > 69 && sp < 14) { this.emit({ t: 'stamp', x: e.x, y: e.y, ang: e.deathAng, fallF: e.fallF, kind: e.kind }); this.dying.splice(i, 1); }
     }
   }
 
-  private hurt(dmg: number, x: number, y: number, by?: GKind): void {
-    const p = this.p; if (p.invuln > 0 || (this.state as string) === 'DEAD') return;
-    p.hp -= dmg; p.invuln = GROUND.hurtInvuln; this.combo = 0; this.comboT = 0;
-    this.emit({ t: 'hurt', x, y, by }); this.emit({ t: 'shake', v: 9 }); this.emit({ t: 'hitstop', frames: 4 });
+  // ---------------------------------------------------------------- 플레이어 피해
+  hurt(dmg: number, x: number, y: number, by?: GKind): void {
+    const p = this.p; if (p.invuln > 0 || p.rollI > 0 || (this.state as string) === 'DEAD') return;
+    p.hp -= dmg; p.invuln = GROUND.hurtInvuln; p.hitFlash = 18; this.combo = 0; this.comboT = 0;
+    this.emit({ t: 'hurt', x, y, by }); this.emit({ t: 'shake', v: 8 }); this.emit({ t: 'hitstop', frames: 4 });
   }
 
-  // ---------------------------------------------------------------- 폭발/구역/엄폐물/아이템
-  private explode(x: number, y: number, r: number, dmg: number): void {
-    this.emit({ t: 'boom', x, y, r }); this.emit({ t: 'shake', v: Math.min(12, 4 + r / 12) });
-    if (dmg > 0) for (const e of this.enemies.slice()) if (Math.hypot(e.x - x, e.y - y) < r + e.r) this.damage(e, dmg, e.x, e.y, Math.atan2(e.y - y, e.x - x));
-    for (const c of this.cover) if (!c.dead && c.kind === 'barrel' && Math.hypot(c.x - x, c.y - y) < r + 8) this.breakCover(c);
+  // ---------------------------------------------------------------- 적 AI
+  private enemyShoot(e: GEnemy, ang: number, speed = GROUND.enemyBulletSpeed, acc = 0.1, kind: GBullet['kind'] = 'normal'): void {
+    const mx = e.x + Math.cos(ang) * 56, my = e.y + Math.sin(ang) * 56 + 0;
+    if (this.obstacleAt(mx, my) || this.obstacleAt(e.x + Math.cos(ang) * 36, e.y + Math.sin(ang) * 36)) return;   // 총구가 장애물 안이면 쏘지 않는다
+    const a = ang + (this.rng() * 2 - 1) * acc;
+    this.bullets.push({ x: mx, y: my, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, dmg: 1, friendly: false, w: 'rifle', life: GROUND.enemyBulletLife, dist: 0, pellet: false, first: false, pierce: 0, hit: [], dodged: false, src: e.kind, kind });
+    e.shotT = f(0.1); e.fire = 6;
   }
-  private breakCover(c: GCover): void {
-    if (c.dead || c.kind !== 'barrel') return;
-    c.dead = true; this.emit({ t: 'coverBreak', x: c.x, y: c.y });
-    this.emit({ t: 'boom', x: c.x, y: c.y, r: 70 }); this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'hitstop', frames: 3 });
-    this.makeNoise(c.x, c.y, 500);
-    for (const e of this.enemies.slice()) if (Math.hypot(e.x - c.x, e.y - c.y) < 70 + e.r) this.damage(e, 8, e.x, e.y, Math.atan2(e.y - c.y, e.x - c.x));
-    if (Math.hypot(this.p.x - c.x, this.p.y - c.y) < 62) this.hurt(1, c.x, c.y);
-    for (const o of this.cover) if (!o.dead && o.kind === 'barrel' && Math.hypot(o.x - c.x, o.y - c.y) < 90) this.breakCover(o);
+  private sees(e: GEnemy): boolean {
+    const p = this.p, dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
+    const view = e.kind === 'sniper' ? 900 : e.kind === 'turret' ? 700 : GROUND.viewDist;
+    if (!this.los(e.x, e.y, p.x, p.y)) return false;
+    if (d < GROUND.nearSee) return true;
+    return d < view && Math.abs(norm(Math.atan2(dy, dx) - e.ang)) < GROUND.viewHalf;
   }
-  private updateZones(): void {
-    for (let i = this.zones.length - 1; i >= 0; i--) {
-      const z = this.zones[i];
-      if (--z.t > 0) continue;
-      this.zones.splice(i, 1);
-      this.emit({ t: 'boom', x: z.x, y: z.y, r: z.r }); this.emit({ t: 'shake', v: 6 });
-      if (Math.hypot(this.p.x - z.x, this.p.y - z.y) < z.r) this.hurt(z.dmg, z.x, z.y, z.src);
-      for (const c of this.cover) if (!c.dead && c.kind === 'barrel' && Math.hypot(c.x - z.x, c.y - z.y) < z.r + 8) this.breakCover(c);
+  private updateEnemies(): void {
+    const p = this.p;
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i]; if (!e) continue;
+      if (e.hitT > 0) e.hitT--; if (e.shotT > 0) e.shotT--; if (e.hitPose > 0) e.hitPose--; if (e.fire > 0) e.fire--; if (e.alertT > 0) e.alertT--;
+      const dist = Math.hypot(p.x - e.x, p.y - e.y);
+      if (e.state === 'idle' && dist > 1300) continue;
+      // 넉백은 덮어쓰기 속도 (exp(-8t) 감속)
+      const vs = Math.hypot(e.vx, e.vy);
+      if (vs > 1) { const nx = e.x + e.vx / 60, ny = e.y + e.vy / 60; const r = BODY_R[e.kind]; const o = { x: nx, y: ny }; this.move(o, 0, 0, r); e.x = o.x; e.y = o.y; const k = Math.exp(-8 / 60); e.vx *= k; e.vy *= k; }
+      const px0 = e.x, py0 = e.y;
+      if (e.stunT > 0) { e.stunT--; e.moving = false; continue; }
+      if (e.state === 'idle') {
+        if (e.kind === 'turret') e.ang = e.base + Math.sin((this.frame + e.id * 31) * 0.02) * 1.2;
+        else if (e.patrol && e.patrol.length > 1 && e.kind !== 'sniper') { const [wx, wy] = e.patrol[e.pi], a = Math.atan2(wy - e.y, wx - e.x), o = { x: e.x, y: e.y }; this.move(o, Math.cos(a) * 0.9, Math.sin(a) * 0.9, BODY_R[e.kind], false); e.x = o.x; e.y = o.y; e.ang += norm(a - e.ang) * 0.15; if (Math.hypot(wx - e.x, wy - e.y) < 28 || (Math.hypot(e.x - px0, e.y - py0) < 0.2 && ++e.moved > 30)) { e.pi = (e.pi + 1) % e.patrol.length; e.moved = 0; } }
+        else e.ang = e.base + 0.35 * Math.sin((this.frame / 60 + e.look) * 2.29);
+        if (e.kind === 'boss') { if (this.section === 3 && (this.sees(e) || dist < 700)) this.alertEnemy(e); else { e.ang = Math.atan2(p.y - e.y, p.x - e.x); continue; } }
+        else if (e.kind !== 'drone' && this.sees(e)) this.alertEnemy(e);
+        e.moving = Math.hypot(e.x - px0, e.y - py0) > 0.3; if (e.moving) e.walk++;
+        continue;
+      }
+      this.combat(e, dist);
+      e.moving = Math.hypot(e.x - px0, e.y - py0) > 0.3; if (e.moving) e.walk++;
     }
   }
-  /** 아이템: 체력은 닿으면, 무기는 (권총/빈 총일 때) 닿으면 줍고 그 외에는 줍기 입력 */
+  private chase(e: GEnemy, sp: number, los: boolean, toP: number): void {
+    const r = BODY_R[e.kind];
+    if (los) this.move(e, Math.cos(toP) * sp, Math.sin(toP) * sp, r, true); else this.stepFlow(e, this.playerFlow(), sp, r, true);
+  }
+  private combat(e: GEnemy, dist: number): void {
+    const p = this.p, los = this.los(e.x, e.y, p.x, p.y), toP = Math.atan2(p.y - e.y, p.x - e.x), D = ENEMY_DEF[e.kind];
+    switch (e.kind) {
+      case 'rifle': case 'heavy': case 'sniper': {
+        const range = e.kind === 'sniper' ? 880 : 380, hold = e.kind === 'sniper' ? 520 : 240;
+        if (los) e.ang = toP;
+        if (e.aimT > 0) { if (los) e.ang = toP; if (--e.aimT === 0) { if (e.kind === 'heavy') { for (let k = -2; k <= 2; k++) this.enemyShoot(e, toP + k * 0.16, GROUND.enemyBulletSpeed * 0.85, 0.04); } else if (e.kind === 'sniper') this.enemyShoot(e, e.ang, 24, 0.01, 'sniper'); else this.enemyShoot(e, toP); e.cd = f(1.3) + Math.floor(this.rng() * f(1.1)) + (e.kind === 'heavy' ? 50 : 0); if (e.kind === 'sniper') e.cd += 90; } break; }
+        if (los && dist <= range && e.cd <= 0) { e.aimT = e.kind === 'sniper' ? f(1.0) : e.kind === 'heavy' ? f(0.6) : f(0.45); break; }
+        if (e.cd > 0) e.cd--;
+        if (!los || dist > hold) this.chase(e, D.speed, los, toP);
+        break;
+      }
+      case 'charger': {
+        if (e.windT > 0) { if (e.windT > 12) { e.lx = p.x; e.ly = p.y; } e.ang = Math.atan2(e.ly - e.y, e.lx - e.x); if (--e.windT === 0) e.dashT = f(0.45); break; }
+        if (e.dashT > 0) {
+          e.dashT--; const a = Math.atan2(e.ly - e.y, e.lx - e.x), x0 = e.x, y0 = e.y; this.move(e, Math.cos(a) * 11, Math.sin(a) * 11, BODY_R[e.kind], true);
+          if (Math.hypot(e.x - x0, e.y - y0) < 3) e.dashT = Math.min(e.dashT, 1);
+          if (!e.styled && Math.hypot(p.x - e.x, p.y - e.y) < BODY_R.charger + GROUND.hitR) { if (p.rollI > 0) { e.styled = true; this.styles++; this.score += 250; this.emit({ t: 'style', x: p.x, y: p.y }); this.emit({ t: 'slowmo', ms: 220, scale: 0.35 }); } else this.hurt(1, e.x, e.y, 'charger'); }
+          if (e.dashT === 0) { e.stunT = f(0.7); e.styled = false; e.cd = f(1.2); }
+          break;
+        }
+        e.ang = los ? toP : e.ang; if (e.cd > 0) e.cd--;
+        this.chase(e, D.speed * 1.5, los, toP);
+        if (los && dist < 460 && e.cd <= 0) e.windT = f(0.6);
+        break;
+      }
+      case 'dog': {
+        e.ang = los ? toP : e.ang; this.chase(e, D.speed, los, toP);
+        if (e.cd > 0) e.cd--;
+        if (dist < 78 && e.cd <= 0) { this.hurt(1, e.x, e.y, 'dog'); e.cd = 40; e.shotT = 8; }
+        break;
+      }
+      case 'turret': {
+        if (los && dist < 760) { e.ang = toP; if (--e.cd <= 0) { for (let k = -1; k <= 1; k++) this.enemyShoot(e, toP + k * 0.22, GROUND.enemyBulletSpeed * 0.8, 0.03); e.cd = f(2.4); } } else e.ang += 0.02;
+        break;
+      }
+      case 'drone': {
+        e.ang = toP; const o = { x: e.x + Math.cos(toP) * D.speed, y: e.y + Math.sin(toP) * D.speed }; e.x = o.x; e.y = o.y;   // 비행: 벽에 걸리지 않는다
+        if (dist < BODY_R.drone + GROUND.hitR) { this.hurt(1, e.x, e.y, 'drone'); this.emit({ t: 'boom', x: e.x, y: e.y, r: 70 }); this.enemies.splice(this.enemies.indexOf(e), 1); }
+        break;
+      }
+      case 'boss': this.updateBoss(e, toP); break;
+    }
+  }
+  private updateBoss(e: GEnemy, toP: number): void {
+    const p = this.p, hpK = e.hp / e.maxHp, phase = hpK > 0.66 ? 1 : hpK > 0.33 ? 2 : 3;
+    const X0 = 150, X1 = WORLD_W - 150, Y0 = 4 * TILE, Y1 = 32 * TILE;
+    if (phase > e.phase) {
+      e.phase = phase; e.windT = 0; e.dashT = 0; e.cd = 60;
+      this.emit({ t: 'bossPhase', phase }); this.emit({ t: 'shake', v: 12 }); this.emit({ t: 'slowmo', ms: 500, scale: 0.3 });
+      if (phase >= 2) for (let k = 0; k < 4; k++) { const d = this.addEnemy('drone', X0 + k * 230, Y0 - 100); d.state = 'alert'; }
+      const [sx, sy] = this.freeSpot(); this.pickups.push(phase === 2 ? { id: this.nextId++, kind: 'weapon', weapon: 'smg', ammo: WEAPONS.smg.ammo, x: sx, y: sy, t: 0, section: 3 } : { id: this.nextId++, kind: 'heart', x: sx, y: sy, t: 0, section: 3 });
+    }
+    e.ang = toP;
+    if (e.windT > 0) { if (e.windT > 14) { e.lx = p.x; e.ly = p.y; } if (--e.windT === 0) e.dashT = 36; return; }
+    if (e.dashT > 0) {
+      const a = Math.atan2(e.ly - e.y, e.lx - e.x), x0 = e.x, y0 = e.y; e.x += Math.cos(a) * 20; e.y += Math.sin(a) * 20; e.x = Math.max(X0, Math.min(X1, e.x)); e.y = Math.max(Y0, Math.min(Y1, e.y));
+      if (Math.hypot(p.x - e.x, p.y - e.y) < BODY_R.boss + GROUND.hitR - 20) { if (p.rollI > 0) { if (!e.styled) { e.styled = true; this.styles++; this.score += 500; this.emit({ t: 'style', x: p.x, y: p.y }); this.emit({ t: 'slowmo', ms: 260, scale: 0.35 }); } } else this.hurt(1, e.x, e.y, 'boss'); }
+      const stuck = Math.hypot(e.x - x0, e.y - y0) < 4;
+      if (--e.dashT <= 0 || stuck) { e.dashT = 0; e.stunT = 110; e.styled = false; this.emit({ t: 'shake', v: 10 }); this.emit({ t: 'boom', x: e.x, y: e.y, r: 170 }); for (let k = 0; k < 8; k++) this.enemyShoot(e, (k / 8) * Math.PI * 2 + 0.2, GROUND.enemyBulletSpeed * 0.55, 0); }
+      return;
+    }
+    // 평소: 플레이어 위쪽을 따라다니며 가틀링 + 어깨 포 부채꼴
+    const ty = Math.max(Y0, Math.min(p.y - 800, 12 * TILE)), dx = p.x - e.x;
+    e.x += Math.max(-1.4, Math.min(1.4, dx * 0.02)); e.y += (Math.max(Y0, Math.min(Y1, ty)) - e.y) * 0.03;
+    const rate = phase === 3 ? 8 : 10; e.burst++;
+    if (e.burst % 150 < 30 && e.burst % rate === 0) this.enemyShoot(e, toP + 0.2 * Math.sin(e.burst * 0.1), GROUND.enemyBulletSpeed * 0.75, 0.08);
+    if (--e.cd <= 0) {
+      for (let k = -2; k <= 2; k++) this.enemyShoot(e, Math.PI / 2 + k * 0.4, GROUND.enemyBulletSpeed * 0.55, 0);
+      e.cd = phase === 1 ? 170 : 140;
+      if (phase >= 3) for (let k = 0; k < 2; k++) this.emit({ t: 'boom', x: p.x + (this.rng() - 0.5) * 300, y: p.y + (this.rng() - 0.5) * 300, r: 110 });
+      if (phase >= 2 && this.rng() < 0.4) e.windT = 60;
+    }
+  }
+  private freeSpot(): [number, number] {
+    const p = this.p;
+    for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2 + 0.7, d = 150 + (i % 3) * 50, x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d; if (this.obstacleAt(x, y) || this.pickups.some(k => Math.hypot(k.x - x, k.y - y) < 80)) continue; return [x, y]; }
+    return [p.x, p.y + 120];
+  }
+
+  // ---------------------------------------------------------------- 아이템
   private updatePickups(inp: GInput): void {
     const p = this.p;
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const k = this.pickups[i]; k.t++;
-      if (Math.hypot(p.x - k.x, p.y - k.y) > 24) continue;
+      if (Math.hypot(p.x - k.x, p.y - k.y) > 54) continue;
       if (k.kind === 'heart') { if (p.hp >= p.maxHp) continue; p.hp = Math.min(p.maxHp, p.hp + 2); this.emit({ t: 'pickup', what: 'heart', x: k.x, y: k.y }); this.pickups.splice(i, 1); continue; }
       if (p.pickCd > 0) continue;
       const free = p.weapon === 'pistol' || p.ammo <= 0;
       if (!free && !inp.pickup) continue;
-      if (!free && p.weapon !== 'pistol') {   // 들고 있던 총은 그 자리에 떨어진다 (남은 탄 그대로)
-        this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: p.weapon, ammo: p.ammo, x: k.x, y: k.y, t: 0, section: k.section, dropped: true });
-      }
-      p.weapon = k.weapon!; p.ammo = k.ammo ?? WEAPONS[p.weapon].ammo; p.pickCd = 30;
+      if (!free) this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: p.weapon, ammo: p.ammo, x: k.x, y: k.y, t: 0, section: k.section, dropped: true });
+      p.weapon = k.weapon!; p.ammo = k.ammo ?? WEAPONS[p.weapon].ammo; p.pickCd = 30; p.seq = null;
       this.emit({ t: 'pickup', what: 'weapon', x: k.x, y: k.y }); this.pickups.splice(i, 1);
     }
   }
-  /** 가까이에 줍을 수 있는 무기가 있는가 (모바일 버튼 표시용) */
-  nearWeapon(): GPickup | null { return this.pickups.find(k => k.kind === 'weapon' && Math.hypot(this.p.x - k.x, this.p.y - k.y) < 30) ?? null; }
+  nearWeapon(): GPickup | null { return this.pickups.find(k => k.kind === 'weapon' && Math.hypot(this.p.x - k.x, this.p.y - k.y) < 60) ?? null; }
 
-  /** 결과: 본편으로 돌아갈 때 쓰는 보상 정산 */
   result(): { win: boolean; score: number; kills: number; rooms: number; maxCombo: number; styles: number; hpLeft: number } {
     return { win: this.state === 'WIN', score: this.score, kills: this.kills, rooms: this.reached + (this.state === 'WIN' ? 1 : 0), maxCombo: this.maxCombo, styles: this.styles, hpLeft: this.p.hp };
   }
