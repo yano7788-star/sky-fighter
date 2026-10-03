@@ -11,7 +11,7 @@ for (let s = 1; s <= seeds; s++) {
   let revives = 0;
   while (g.frame < 60 * 400) {
     g.step(groundBot(g, skill)); for (const e of g.drain()) if (e.t === 'hurt') hurtBy[e.by ?? '?'] = (hurtBy[e.by ?? '?'] ?? 0) + 1;
-    if ((g.state as string) === 'DEAD') { roomDeaths[g.room]++; if (revives++ >= 1) break; g.revive(); }   // 목숨 1개로 이어하기
+    if ((g.state as string) === 'DEAD') { roomDeaths[g.section]++; if (revives++ >= 1) break; g.revive(); }   // 목숨 1개로 이어하기
     if ((g.state as string) === 'WIN') break;
   }
   if ((g.state as string) === 'WIN') { win++; hpSum += g.p.hp; tSum += g.time / 60; } else if ((g.state as string) === 'DEAD') dead++; else timeout++;
