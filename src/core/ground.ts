@@ -150,6 +150,15 @@ export class GroundSim {
     return e;
   }
 
+  /** 테스트용: 지정 구역에서 시작 — 아래 구역은 정리된 것으로 처리하고 플레이어를 그 구역 입구로 옮긴다 */
+  debugStart(section: number, weapon: WeaponId): void {
+    for (let s = 0; s < Math.min(section, 3); s++) { this.enemies = this.enemies.filter(e => e.section !== s); this.pickups = this.pickups.filter(k => k.section !== s); this.cleared[s] = true; this.openGates(s); }
+    const def = SECTIONS[section];
+    this.p.x = section === 0 ? LEVEL.start.x : 9 * TILE; this.p.y = section === 0 ? LEVEL.start.y : (def.r1 - 1) * TILE + TILE / 2; this.reached = section;
+    this.p.weapon = weapon; this.p.ammo = WEAPONS[weapon].ammo; this.p.invuln = 60;
+    this.emit({ t: 'section', n: section, name: def.name });
+  }
+
   /** 사망 후 이어하기: 지금 구역을 처음부터 다시 (이미 정리한 구역은 그대로) */
   revive(): void {
     const s = this.section, def = SECTIONS[s];

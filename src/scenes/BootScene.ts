@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { H, W } from '../core/config';
+import { isGroundTest, startGroundTest } from '../groundtest';
 import { textStyle } from '../render/hud';
 import { R, buildStaticTextures } from '../render/textures';
 
@@ -42,6 +43,7 @@ export class BootScene extends Phaser.Scene {
     buildStaticTextures(this);
     for (const name of [...GROUND_PNG, 'p3_armed']) this.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);   // 픽셀 아트: 보간 없이
     if (!this.anims.exists('explosion')) this.anims.create({ key: 'explosion', frames: this.anims.generateFrameNumbers('explosion', { start: 0, end: 12 }), frameRate: 28, repeat: 0 });
+    if (isGroundTest()) { startGroundTest(this); return; }   // ?groundtest: 지상전 테스트 페이지
     this.scene.start('TitleScene');
   }
 }

@@ -7,6 +7,7 @@ import { Fx } from '../render/fx';
 import { textStyle } from '../render/hud';
 import { R } from '../render/textures';
 import { audio } from '../systems/audio';
+import type { GroundTest } from '../groundtest';
 
 const CUTS = ['cut_shotdown', 'cut_landing', 'cut_takeoff'];
 const ENEMY_TEX: Record<GKind, string> = { rifle: 'g_rifle', charger: 'g_charger', sniper: 'g_sniper', turret: 'g_turret', drone: 'g_drone', tank: 'g_tank', boss: 'g_boss', heavy: 'g_charger', dog: 'g_rifle' };
@@ -82,8 +83,10 @@ export class GroundScene extends Phaser.Scene {
 
   constructor() { super('GroundScene'); }
 
-  init(data: { sim: Sim }): void {
-    this.sim = data.sim; this.stage = 'INTRO'; this.finished = false; this.paused = false; this.quitArmed = false; this.keys.clear();
+  private test: GroundTest | null = null;   // 테스트 페이지(?groundtest) 옵션
+
+  init(data: { sim: Sim; test?: GroundTest }): void {
+    this.sim = data.sim; this.test = data.test ?? null; this.stage = 'INTRO'; this.finished = false; this.paused = false; this.quitArmed = false; this.keys.clear();
     this.coverImgs = new Map(); this.enemyImgs = new Map(); this.pickupImgs = new Map(); this.corpseImgs = new Map();
     this.acc = 0; this.hitStop = 0; this.shake = 0; this.slowUntil = 0; this.slowScale = 1; this.deadTimer = 0; this.bannerT = 0; this.pixel = null; this.caps = [];
     this.puffs = []; this.casings = []; this.traces = []; this.muzzleT = 0; this.camY = WORLD_H - H; this.decalDirty = 0;
@@ -97,7 +100,8 @@ export class GroundScene extends Phaser.Scene {
 
   create(): void {
     const seed = (Math.floor(this.sim.score) * 31 + this.sim.frame) >>> 0;
-    this.g = new GroundSim(this.sim.groundOpts(seed));
+    this.g = new GroundSim({ ...this.sim.groundOpts(seed), ...(this.test ? { pilot: this.test.pilot } : {}) });
+    if (this.test && (this.test.section > 0 || this.test.weapon !== 'pistol')) this.g.debugStart(this.test.section, this.test.weapon);
     this.cameras.main.setBackgroundColor('#000000');
     this.root = this.add.container(0, 0).setScale(R);
     this.world = this.add.container(0, 0);
@@ -113,7 +117,8 @@ export class GroundScene extends Phaser.Scene {
     this.root.add(this.redFlash);
     this.bindInput();
     this.world.setVisible(false); this.ui.setVisible(false);
-    this.runIntro();
+    if (this.test?.skipIntro) { this.world.setVisible(true); this.ui.setVisible(true); this.veil.setAlpha(0); this.stage = 'PLAY'; this.tutorialT = 60 * 6; for (let sct = 0; sct < this.test.section; sct++) this.redrawGate(sct); }
+    else this.runIntro();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { audio.resume(); });
   }
 
@@ -350,6 +355,7 @@ export class GroundScene extends Phaser.Scene {
 
   /** 지상전을 끝내고 본편으로 돌아간다 (win=false: 포기/실패 → 게임오버) */
   private finish(win: boolean): void {
+    if (this.test) { this.scene.restart({ sim: this.sim, test: this.test }); return; }   // 테스트 페이지: 끝나면 같은 설정으로 다시
     if (this.finished) return; this.finished = true; this.stage = 'END';
     this.clearPixel(); this.cameras.main.setZoom(1);
     const r = this.g.result();
@@ -388,6 +394,7 @@ export class GroundScene extends Phaser.Scene {
 
   private tick(): void {
     const g = this.g;
+    if (this.test?.god) { g.p.invuln = 99999; g.p.hp = g.p.maxHp; }   // 무적 (깜박임 방지로 피격 연출만 남는다)
     g.step(this.buildInput());
     this.fx.tick(); this.tickParticles();
     if (this.tutorialT > 0) this.tutorialT--;
@@ -622,7 +629,7 @@ export class GroundScene extends Phaser.Scene {
     if (p.rollT > 0) { const k = 1 - p.rollT / 18; rot = k * Math.PI * 2 * (p.rdx >= 0 ? 1 : -1); sc *= 0.88; img.setFrame(0 * 9 + 3); }
     const recoil = p.kick * 0.6, bob = p.moving && p.rollT <= 0 ? Math.abs(Math.sin(p.walk)) * -1.5 : 0;
     img.setPosition(Math.round(p.x - Math.cos(p.aim) * recoil), Math.round(p.y - Math.sin(p.aim) * recoil + bob)).setRotation(rot).setScale(sc);
-    img.setAlpha(p.invuln > 0 && p.rollT <= 0 && Math.floor(t / 70) % 2 === 0 ? 0.35 : 1);
+    img.setAlpha(p.invuln > 0 && p.invuln < 1000 && p.rollT <= 0 && Math.floor(t / 70) % 2 === 0 ? 0.35 : 1);
     this.shadowG.fillStyle(0x000000, 0.34).fillEllipse(p.x, p.y + 17, 24, 9);
     if (p.rollT > 0) { this.ovG.lineStyle(1, 0xffffff, 0.35); this.ovG.strokeCircle(p.x, p.y, 14); }
     // 샷건·레일은 시트의 총구 화염보다 큰 화염을 코드로 덧그린다 (SMG·권총은 시트 프레임의 화염을 그대로 쓴다)
