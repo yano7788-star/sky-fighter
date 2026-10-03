@@ -1,10 +1,10 @@
 import { store } from './storage';
 
-export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak';
+export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak' | 'gPistol' | 'gShotgun' | 'gSmg' | 'gRail' | 'gRoll' | 'gHurt' | 'gEnemyShot' | 'gHit' | 'gKill' | 'gStyle' | 'gThrow';
 export type BgmName = 'normal' | 'solar' | 'boss';
 
 const BASE = import.meta.env.BASE_URL;
-const THROTTLE_MS: Partial<Record<SfxName, number>> = { bossHit: 60, laserHit: 90, bossHeavy: 80, bossBreak: 200 };   // 연사 무기의 피격음은 간격을 둬서 뭉개지지 않게
+const THROTTLE_MS: Partial<Record<SfxName, number>> = { bossHit: 60, laserHit: 90, bossHeavy: 80, bossBreak: 200, gSmg: 28, gEnemyShot: 70, gHit: 45, gKill: 60 };   // 연사 무기의 피격음은 간격을 둬서 뭉개지지 않게
 const BGM_TRACKS: Record<BgmName, { src: string; vol: number; loopEnd: number }> = {
   normal: { src: `${BASE}assets/audio/under_heavy_fire.mp3`, vol: 0.25, loopEnd: 175.3 },   // loopEnd: 끝부분 무음 구간 건너뛰기
   solar:  { src: `${BASE}assets/audio/target_solar_core.mp3`, vol: 0.26, loopEnd: 0 },    // 후반(4·5스테이지) 일반 전투곡
@@ -125,6 +125,18 @@ class AudioSystem {
         this.duck(260, 0.45);
         break;
       }
+      // ---- 지상전 효과음 (합성): 총마다 소리 성격을 달리하고 피치를 살짝 비튼다
+      case 'gPistol': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'square', 900 * pr, 240, 0.06, 0.09, t); this.noise(ctx, 0.05, 0.16, 4200, t); break; }
+      case 'gShotgun': { this.noise(ctx, 0.16, 0.42, 3200, t); this.layer(ctx, 'sine', 150, 46, 0.22, 0.4, t); this.layer(ctx, 'sawtooth', 520, 120, 0.1, 0.12, t); break; }
+      case 'gSmg': { const pr = 0.92 + Math.random() * 0.16; this.layer(ctx, 'square', 760 * pr, 280, 0.04, 0.06, t); this.noise(ctx, 0.03, 0.1, 5000, t); break; }
+      case 'gRail': { this.layer(ctx, 'sawtooth', 2000, 220, 0.3, 0.18, t); this.layer(ctx, 'sine', 100, 38, 0.35, 0.45, t); this.noise(ctx, 0.2, 0.2, 6000, t); this.duck(200, 0.5); break; }
+      case 'gRoll': { this.noise(ctx, 0.14, 0.16, 1400, t); this.layer(ctx, 'sine', 260, 120, 0.12, 0.06, t); break; }
+      case 'gHurt': { this.layer(ctx, 'sawtooth', 240, 70, 0.28, 0.3, t); this.noise(ctx, 0.18, 0.3, 1800, t); this.duck(260, 0.5); break; }
+      case 'gEnemyShot': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'square', 420 * pr, 190, 0.05, 0.04, t); break; }
+      case 'gHit': { const pr = 0.9 + Math.random() * 0.2; this.layer(ctx, 'triangle', 520 * pr, 190, 0.06, 0.1, t); this.noise(ctx, 0.04, 0.08, 3000, t); break; }
+      case 'gKill': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'sine', 160 * pr, 55, 0.14, 0.3, t); this.layer(ctx, 'square', 1000 * pr, 400, 0.05, 0.05, t); break; }
+      case 'gStyle': { this.layer(ctx, 'sine', 600, 1500, 0.18, 0.16, t); this.layer(ctx, 'triangle', 900, 2000, 0.22, 0.1, t + 0.04); break; }
+      case 'gThrow': { this.layer(ctx, 'triangle', 300, 600, 0.12, 0.1, t); this.noise(ctx, 0.1, 0.1, 2400, t); break; }
       case 'heal':    osc.type = 'sine';     f.setValueAtTime(300, t); exp(800, 0.25);  g.setValueAtTime(0.2, t);  g.exponentialRampToValueAtTime(0.01, t + 0.25); osc.start(t); osc.stop(t + 0.25); break;
     }
   }

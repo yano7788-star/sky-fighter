@@ -10,6 +10,12 @@ const IMAGES = [
   'overlay_clouds', 'gem', 'drone', 'item_P', 'item_M', 'item_E', 'item_B', 'item_G', 'item_L',
 ];
 
+// 지상전 픽셀 아트 (PNG 팔레트 이미지, NEAREST 필터로 그린다) — tools/process-ground.cjs
+export const GROUND_PNG = [
+  'g_ace_f', 'g_ace_b', 'g_sis1_f', 'g_sis1_b', 'g_sis2_f', 'g_sis2_b', 'g_rifle', 'g_charger', 'g_sniper', 'g_turret', 'g_drone', 'g_tank', 'g_boss', 'g_floor', 'g_wall',
+  'p_barrier', 'p_stack', 'p_crate', 'p_crates2', 'p_door', 'p_door2', 'p_dooropen', 'p_barrel', 'p_weapon', 'p_weapon2', 'p_pad',
+];
+
 /** 이미지 로딩 + 공용 텍스처 생성. 로딩 진행 바를 보여준다. */
 export class BootScene extends Phaser.Scene {
   constructor() { super('BootScene'); }
@@ -25,11 +31,13 @@ export class BootScene extends Phaser.Scene {
 
     this.load.setPath('assets/img/');
     for (const name of IMAGES) this.load.image(name, `${name}.webp?v=${__BUILD__}`);
+    for (const name of GROUND_PNG) this.load.image(name, `${name}.png?v=${__BUILD__}`);
     this.load.spritesheet('explosion', `explosion.webp?v=${__BUILD__}`, { frameWidth: 128, frameHeight: 128 });   // 13프레임 폭발 스프라이트
   }
 
   create(): void {
     buildStaticTextures(this);
+    for (const name of GROUND_PNG) this.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);   // 픽셀 아트: 보간 없이
     if (!this.anims.exists('explosion')) this.anims.create({ key: 'explosion', frames: this.anims.generateFrameNumbers('explosion', { start: 0, end: 12 }), frameRate: 28, repeat: 0 });
     this.scene.start('TitleScene');
   }

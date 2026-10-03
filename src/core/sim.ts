@@ -1,5 +1,6 @@
 import { FUSION_IDS, type RunStats } from './achievements';
 import { ROUTES, offerRoutes, type RouteId } from './routes';
+import { GROUND, type GroundOpts } from './ground';
 import { CARDS, hasFusion, hasRelic, offerRelics, type FusionId, newBuild, offerCards, statsOf, xpNeeded, type Build, type BuildStats, type CardId } from './build';
 import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config';
 import {
@@ -82,7 +83,10 @@ export class Sim {
   hazards: Hazard[] = [];
   route: RouteId | null = null;        // 이번 스테이지의 항로 (스테이지 사이에 고른다)
   get routeDef() { return this.route ? ROUTES[this.route] : null; }
-  hordeWarn = 0;                       // 인해전술 예고 남은 프레임 (HUD 경고 표시)
+  hordeWarn = 0;
+  // 지상전(강하): 3스테이지 보스 격파 후 씬이 GroundSim 을 돌린다. 씬이 켜기 전(groundEnabled=false)에는 건너뛴다 (테스트·시뮬레이션)
+  groundEnabled = false; groundRequest = false; groundActive = false; groundReturn = false; private groundOffered = false;
+  groundResult: { win: boolean; score: number; rooms: number } | null = null;                       // 인해전술 예고 남은 프레임 (HUD 경고 표시)
   private hordeKind: HordeKind = 'wall';
   private hordeDone: boolean[] = [];
   run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0, hypers: 0 };
@@ -205,7 +209,34 @@ export class Sim {
     this.emit({ t: 'ring', x: p.x, y: p.y, color: CARDS[id].color, max: 90 });
     this.emit({ t: 'sfx', name: 'item' });
     this.pending = null;
+    if (this.groundReturn) { this.groundReturn = false; this.beginNextStage(); return; }   // 지상전 보상 유물을 고른 뒤 다음 스테이지로
     this.checkLevelUp();   // 경험치가 남아 연속 레벨업이면 바로 다음 카드
+  }
+
+  // ---------------------------------------------------------------------
+  // 지상전 연동 (씬이 호출)
+  // ---------------------------------------------------------------------
+  /** 지상전에 넘길 옵션: 현재 빌드의 화력·연사·체력을 반영 */
+  groundOpts(seed: number): GroundOpts {
+    const st = this.stats, pilot = this.meta.pilot === 'sister1' ? 1 : this.meta.pilot === 'sister2' ? 2 : 0;
+    return { seed, pilot, dmgMult: Math.min(2, st.dmgMult), rateMult: Math.min(1.8, st.rateMult), maxHp: GROUND.hp + (st.maxEnergyBonus > 0 ? 1 : 0), grenades: 2 + (this.hasRelic('r_bombpack') ? 1 : 0), assist: true };
+  }
+  startGround(): void { this.groundRequest = false; this.groundActive = true; }
+  /** 지상전 중 사망 시 목숨 하나로 이어하기. 없으면 false → 본편 게임오버 */
+  useGroundLife(): boolean { if (this.lives > 0) { this.lives--; return true; } return false; }
+  groundFail(): void {
+    this.groundActive = false; this.state = 'GAMEOVER';
+    this.emit({ t: 'gameover' }); this.emit({ t: 'vibrate', pattern: [120, 60, 220] });
+  }
+  /** 지상전 클리어: 점수·체력 회복·유물 보상을 반영하고 다음 스테이지로 이어간다 */
+  finishGround(r: { score: number; rooms: number }): void {
+    this.groundActive = false; this.groundResult = { win: true, score: r.score, rooms: r.rooms };
+    this.score += r.score;
+    const p = this.player; p.energy = Math.min(p.maxEnergy, p.energy + p.maxEnergy * 0.4); p.invincible = Math.max(p.invincible, 200);
+    this.enemyBullets.length = 0; this.vacuum = 0;
+    const offer = offerRelics(this.build, this.rng);
+    if (offer.length) { this.pending = offer; this.groundReturn = true; this.emit({ t: 'sfx', name: 'item' }); }
+    else this.beginNextStage();
   }
 
   // ---------------------------------------------------------------------
@@ -214,6 +245,7 @@ export class Sim {
   step(inp: SimInput): void {
     if (this.state !== 'PLAYING') return;
     if (this.pending) return;                                   // 카드 선택 중에는 정지
+    if (this.groundRequest || this.groundActive) return;        // 지상전 진행 중에는 본편 정지
     if (this.ult.phase === 'CUTIN' || this.ult.phase === 'FALL') { this.stepUltCinematic(); return; }
 
     this.frame++;
@@ -548,6 +580,7 @@ export class Sim {
       case 'CLEAR':
         if (--this.phaseTimer <= 0) {
           if (this.bossTier >= MAX_TIER && !this.endless) { this.state = 'GAMECLEAR'; this.emit({ t: 'gameclear' }); }
+          else if (this.groundEnabled && !this.groundOffered && this.stageTier === 3) { this.groundOffered = true; this.groundRequest = true; this.enemyBullets.length = 0; }   // 3스테이지 보스 직후: 강하
           else this.beginNextStage();
         }
         break;
@@ -572,7 +605,7 @@ export class Sim {
     this.stageFrames = 0; this.hordeDone = []; this.hordeWarn = 0;
     this.stagePhase = 'INTRO'; this.phaseTimer = PHASE_FRAMES.INTRO;
     this.midDone = false; this.stageHits = 0; this.stageRank = null;
-    this.route = null;
+    this.route = null; this.groundOffered = false;
     this.pending = offerRoutes(this.rng);   // 다음 스테이지로 가는 항로 선택 (안전 1 + 위험 1)
     for (const c of [this.comp.cat, this.comp.dog]) { c.used = false; c.pity = 0; }   // 동료는 스테이지마다 다시 사용 가능
   }

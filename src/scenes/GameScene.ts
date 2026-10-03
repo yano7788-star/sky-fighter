@@ -146,6 +146,26 @@ export class GameScene extends Phaser.Scene {
 
     this.setupInput();
     this.resetRun();
+    this.events.on(Phaser.Scenes.Events.RESUME, () => this.onGroundBack());
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off(Phaser.Scenes.Events.RESUME));
+  }
+
+  // ------------------------------------------------------------------ 지상전(강하)
+  /** 3스테이지 보스 직후: 본편을 멈추고 GroundScene 을 위에 띄운다 (빌드·점수·유물은 그대로 이어진다) */
+  private startGround(): void {
+    this.sim.startGround();
+    this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
+    this.scene.pause();
+    this.scene.launch('GroundScene', { sim: this.sim });
+  }
+  /** 지상전에서 돌아왔을 때: 줌아웃 + 번쩍임으로 이륙 */
+  private onGroundBack(): void {
+    this.acc = 0; this.hitStop = 0; this.keys.clear();
+    const cam = this.cameras.main;
+    cam.setZoom(2.4); cam.flash(520, 255, 255, 255);
+    this.tweens.add({ targets: cam, zoom: 1, duration: 800, ease: 'Cubic.easeOut' });
+    this.fx.ring(this.sim.player.x, this.sim.player.y, '#7dd3fc', 140);
+    audio.resume();
   }
 
   // ------------------------------------------------------------------ 초기화 / 재시작
@@ -153,6 +173,7 @@ export class GameScene extends Phaser.Scene {
   private newSim(): void {
     const m = loadMeta();
     this.sim = new Sim(this.daily ? this.daily.seed : (Math.random() * 0xffffffff) >>> 0, metaParams(m.levels, m.pilots.selected, this.mutatorId));
+    this.sim.groundEnabled = true;   // 3스테이지 보스 직후 지상전(강하) 진입 허용 (헤드리스 시뮬레이션은 꺼 둔다)
     if (this.playerImg) this.applySkin(pilotOf(m.pilots.selected).skin);
   }
 
@@ -350,6 +371,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const s = this.sim;
+    if (s.groundRequest) { this.startGround(); return; }
     if (s.pending) {   // 레벨업 카드 선택 중: 시뮬레이션 정지, 오버레이 표시
       if (this.shownPending !== s.pending) { this.shownPending = s.pending; this.levelup.show(s.pending, s.build); this.activeId = null; this.firing = false; }
       this.fx.tick();

@@ -241,9 +241,16 @@ Top-down view of a huge sci-fi hangar guardian walker mech, facing downward, wit
 ```
 
 ### 8-5. 전환 컷 3장 (각각 따로, 16:9 또는 9:16 세로) — 배경 있음(크로마키 아님)
-1. `cut_shotdown.png`: 불꽃에 휩싸인 전투기에서 조종사가 탈출하는 순간, 구름 위 하늘, 역동적인 시네마틱.
-2. `cut_landing.png`: 구름을 뚫고 지상 군사 기지에 착지하는 조종사의 뒷모습, 아래로 내려다보는 시점.
-3. `cut_takeoff.png`: 격납고에서 새 기체에 올라타 시동을 거는 조종사, 시네마틱.
-(공통 문구: `cinematic sci-fi game cutscene illustration, semi-realistic, dramatic lighting, vertical 9:16, no text, no watermark`)
+첨부 이미지: 3장 모두 지상 파일럿 시트(8-1 결과) 첨부 + 1·3번은 플레이어 전투기 이미지(`public/assets/img/player_*.webp` 중 하나)도 같이 첨부.
+```
+(1) cut_shotdown.png
+Match the attached references exactly: the pilot's armor, colors and proportions from the character sheet, and the fighter jet design from the plane image. Cinematic sci-fi game cutscene illustration: the fighter jet is engulfed in flames and smoke, breaking apart in the sky above the clouds, while the pilot is ejected in the moment of escape, seen from the side in a dynamic dramatic composition, sparks and debris flying, golden-hour light breaking through the clouds. Semi-realistic detailed style, dramatic lighting, vertical 9:16, no text, no watermark.
+
+(2) cut_landing.png
+Match the attached character sheet exactly (same pilot armor, colors and proportions). Cinematic sci-fi game cutscene illustration: the pilot seen from behind, parachute canopy overhead, descending through a break in the clouds toward a sprawling enemy military base far below, high-angle view looking down over the pilot's shoulder at the base with hangars, searchlights and small patrolling soldiers. Semi-realistic detailed style, dramatic lighting, vertical 9:16, no text, no watermark.
+
+(3) cut_takeoff.png
+Match the attached references exactly: the pilot from the character sheet and the fighter jet design from the plane image. Cinematic sci-fi game cutscene illustration: inside a dim enemy hangar, the pilot climbs into the cockpit of a captured fighter jet and starts the engines, canopy opening, glowing engine intakes, alarm lights flashing red, hangar door beginning to open in the background with bright light pouring in. Semi-realistic detailed style, dramatic lighting, vertical 9:16, no text, no watermark.
+```
 
 **우선순위**: 8-1 → 8-2 → 8-3 → 8-4 → 8-5. 8-1~8-3까지 있으면 지상전 코어(M3)를 바로 붙일 수 있습니다. 받으면 `assets-src/incoming/` 에 넣고 "에셋 넣었어"라고 알려 주세요(자르기·크로마키·연결은 제가 처리).
