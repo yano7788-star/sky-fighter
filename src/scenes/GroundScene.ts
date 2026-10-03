@@ -15,7 +15,8 @@ const SKIN = ['ace', 'sis1', 'sis2'];
 const BLOOD: Record<GKind, number> = { rifle: 0x8b1a1a, charger: 0x8b1a1a, sniper: 0x8b1a1a, heavy: 0x8b1a1a, dog: 0x8b1a1a, turret: 0x20262e, drone: 0x20262e, tank: 0x20262e, boss: 0x20262e };
 const SPARK: Record<GKind, string> = { rifle: '#fca5a5', charger: '#fca5a5', sniper: '#fca5a5', heavy: '#fca5a5', dog: '#fca5a5', turret: '#fde68a', drone: '#fde68a', tank: '#fde68a', boss: '#fde68a' };
 /** 픽셀 아트 표시 배율 (판정은 그대로, 눈에 잘 띄게 키운다). 보스는 원본 크기가 이미 크다 */
-const K = { player: 1.3, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
+const AIM_OFF_SMG = 0.5;   // SMG 프레임에서 총구가 가리키는 각도(0=오른쪽): 시트의 총은 오른쪽 아래로 비스듬하다
+const K = { player: 1.35, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
 const HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
 const CAM_FOLLOW_Y = 520;   // 플레이어가 화면 아래쪽 1/3에 오도록 (위가 진행 방향)
 
@@ -135,35 +136,42 @@ export class GroundScene extends Phaser.Scene {
     this.world.add([tileImg, this.decals, this.shadowG, this.corpseLayer, this.pickupLayer, this.coverLayer, this.doorG, this.actorLayer, this.playerImg, this.bulletG, this.ovG, fxLayer]);
   }
 
+  /** 아틀라스(8×4, 칸 96px)에서 한 칸의 (sx,sy,sw,sh) 영역을 (x,y) 25×25 에 그린다 */
+  private atlas(cell: number, ox: number, oy: number, ow: number, oh: number, x: number, y: number, w = TILE, h = TILE): void {
+    const src = this.textures.get('t2_atlas').getSourceImage() as HTMLImageElement;
+    this.tileCtx.drawImage(src, (cell % 8) * 96 + ox, Math.floor(cell / 8) * 96 + oy, ow, oh, x, y, w, h);
+  }
+
   /** 타일 한 칸을 캔버스에 그린다 (벽·유리·잠긴 문·바닥). 스윙 도어 판은 매 프레임 따로 그린다 */
   private drawTile(c: number, r: number): void {
     const ctx = this.tileCtx, t = this.g.tiles[r * COLS + c], x = c * TILE, y = r * TILE, sec = SECTIONS[r < 34 ? 3 : r < 68 ? 2 : r < 102 ? 1 : 0];
-    const h = ((c * 73856093) ^ (r * 19349663)) >>> 0, v = (h % 9) - 4;
+    const h = ((c * 73856093) ^ (r * 19349663)) >>> 0;
     const floor = () => {
-      if (sec.floor === 'roof') { ctx.fillStyle = `rgb(${92 + v},${97 + v},${104 + v})`; ctx.fillRect(x, y, TILE, TILE); ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(x, y, TILE, 1); ctx.fillRect(x, y, 1, TILE); if (h % 7 === 0) { ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fillRect(x + 4, y + 6, 9, 2); } if (h % 11 === 0) { ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(x + 8, y + 12, 6, 5); } }
-      else if (sec.floor === 'indoor') { const dark = (c + r) % 2 === 0; ctx.fillStyle = dark ? `rgb(${48 + v},${56 + v},${68 + v})` : `rgb(${57 + v},${66 + v},${79 + v})`; ctx.fillRect(x, y, TILE, TILE); ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x, y + TILE - 1, TILE, 1); ctx.fillRect(x + TILE - 1, y, 1, TILE); if (h % 13 === 0) { ctx.fillStyle = 'rgba(255,255,255,.05)'; ctx.fillRect(x + 3, y + 3, 7, 1); } }
-      else { const src = this.textures.get('g_floor').getSourceImage() as HTMLImageElement, s = src.width, sx = ((c * 13) % 6) * 24, sy = ((r * 13) % 6) * 24; ctx.drawImage(src, Math.min(sx, s - 26), Math.min(sy, s - 26), 26, 26, x, y, TILE, TILE); }
-      if (r > 0 && this.g.tiles[(r - 1) * COLS + c] === T.WALL) { ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.fillRect(x, y, TILE, 6); }   // 벽 아래 그림자
+      const base = sec.floor === 'roof' ? [0, 1, 2] : sec.floor === 'indoor' ? [8, 9, 10] : [16, 17, 18], bh = (((c >> 2) * 2654435761) ^ ((r >> 2) * 40503)) >>> 0, vi = bh % 20 < 14 ? 0 : bh % 20 < 19 ? 1 : 2;
+      this.atlas(base[vi], (c % 4) * 24, (r % 4) * 24, 24, 24, x, y);   // 4×4 타일 덩어리마다 변형을 골라 이어 붙인다
+      ctx.fillStyle = sec.floor === 'hangar' ? 'rgba(8,12,20,.14)' : 'rgba(8,12,20,.24)'; ctx.fillRect(x, y, TILE, TILE);   // 바닥을 살짝 눌러 캐릭터·적이 돋보이게
+      if (r > 0 && this.g.tiles[(r - 1) * COLS + c] === T.WALL) { ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.fillRect(x, y, TILE, 6); }
     };
     switch (t) {
       case T.WALL: {
-        ctx.fillStyle = '#242c38'; ctx.fillRect(x, y, TILE, TILE);
+        this.atlas(sec.floor === 'hangar' ? 20 : 13, (c % 4) * 24, (r % 4) * 24, 24, 24, x, y); ctx.fillStyle = 'rgba(8,12,20,.25)'; ctx.fillRect(x, y, TILE, TILE);
         const below = r + 1 < ROWS && this.g.tiles[(r + 1) * COLS + c] !== T.WALL, above = r > 0 && this.g.tiles[(r - 1) * COLS + c] !== T.WALL;
         if (above) { ctx.fillStyle = '#3d495c'; ctx.fillRect(x, y, TILE, 3); }
         if (below) { ctx.fillStyle = '#12161d'; ctx.fillRect(x, y + TILE - 7, TILE, 7); ctx.fillStyle = '#323d4d'; ctx.fillRect(x, y + TILE - 7, TILE, 1); }
         if (h % 5 === 0) { ctx.fillStyle = 'rgba(255,255,255,.04)'; ctx.fillRect(x + 4, y + 8, 12, 2); }
         break;
       }
-      case T.LOW: { floor(); ctx.fillStyle = '#7c838f'; ctx.fillRect(x, y + 6, TILE, 13); ctx.fillStyle = '#a3abb8'; ctx.fillRect(x, y + 6, TILE, 3); ctx.fillStyle = '#4f5662'; ctx.fillRect(x, y + 16, TILE, 3); break; }
-      case T.GLASS: { floor(); ctx.fillStyle = 'rgba(120,200,230,.28)'; ctx.fillRect(x, y, TILE, TILE); ctx.strokeStyle = 'rgba(210,240,255,.85)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1); ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(x + 4, y + 3, 2, 12); ctx.fillRect(x + 9, y + 8, 2, 8); break; }
-      case T.GATE: { floor(); ctx.fillStyle = '#4a1f24'; ctx.fillRect(x, y, TILE, TILE); ctx.fillStyle = '#7a2d34'; for (let i = 0; i < 4; i++) ctx.fillRect(x + 1, y + 2 + i * 6, TILE - 2, 3); ctx.fillStyle = '#ff4d4d'; ctx.fillRect(x + 10, y + 10, 5, 5); ctx.strokeStyle = '#a03a42'; ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1); break; }
-      case T.EXIT: { floor(); ctx.fillStyle = '#5a5320'; ctx.fillRect(x, y, TILE, TILE); ctx.fillStyle = '#e6c829'; for (let i = -1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(x + i * 8, y + TILE); ctx.lineTo(x + i * 8 + 5, y + TILE); ctx.lineTo(x + i * 8 + 5 + TILE, y); ctx.lineTo(x + i * 8 + TILE, y); ctx.fill(); } ctx.strokeStyle = '#1a1710'; ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1); break; }
+      case T.LOW: { floor(); this.atlas(3, 0, 0, 96, 96, x, y); break; }
+      case T.GLASS: { floor(); this.atlas(25, 0, 0, 96, 96, x, y); break; }
+      case T.GATE: { floor(); { const top = this.g.tiles[(r - 1) * COLS + c] === T.GATE ? r - 1 : r, left = this.g.tiles[r * COLS + c - 1] === T.GATE ? c - 1 : c; this.atlas(28, (c - left) * 48, (r - top) * 48, 48, 48, x, y); } break; }
+      case T.EXIT: { floor(); { const top = this.g.tiles[(r - 1) * COLS + c] === T.EXIT ? r - 1 : r, left = this.g.tiles[r * COLS + c - 1] === T.EXIT ? c - 1 : c; this.atlas(21, (c - left) * 48, (r - top) * 48, 48, 48, x, y); } break; }
       default: floor(); if (t === T.DOOR) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x, y, TILE, TILE); }
     }
   }
   private redrawGate(section: number): void {
     const r0 = SECTIONS[section].r0;
     for (let r = r0 - 1; r <= r0 + 2; r++) for (let c = 7; c <= 10; c++) if (r >= 0) this.drawTile(c, r);
+    if (section < 3) this.atlas(29, 0, 0, 96, 96, 8 * TILE, r0 * TILE, 2 * TILE, 2 * TILE);   // 열린 보안문
     this.tileTex.refresh();
   }
 
@@ -504,9 +512,10 @@ export class GroundScene extends Phaser.Scene {
     // 시체: 바닥에 남아 있다 (쓰러진 방향으로 눕는다)
     for (const c of g.corpses) {
       let img = this.corpseImgs.get(c.id);
-      if (!img) { img = this.add.image(c.x, c.y, c.kind === 'boss' ? 'b2_dmg2' : ENEMY_TEX[c.kind]).setTint(0x5a3636); this.corpseLayer.add(img); this.corpseImgs.set(c.id, img); }
+      if (!img) { img = this.add.image(c.x, c.y, c.kind === 'boss' ? 'b2_dmg2' : 'p2_corpse').setTint(c.kind === 'boss' ? 0x777777 : c.kind === 'dog' ? 0xb08a5a : 0xcc7a6a); this.corpseLayer.add(img); this.corpseImgs.set(c.id, img); }
       const ks = (c.kind === 'boss' ? K.boss : c.kind === 'heavy' ? K.heavy : c.kind === 'dog' ? K.dog : K.enemy);
-      img.setVisible(this.onScreen(c.y)).setPosition(px(c.x), px(c.y)).setRotation(c.a + (c.kind === 'sniper' ? 0 : -Math.PI / 2)).setScale(ks * 0.95, ks * 0.62).setAlpha(0.92);
+      if (c.kind === 'boss') img.setVisible(this.onScreen(c.y)).setPosition(px(c.x), px(c.y)).setScale(1).setAlpha(0.92);
+      else img.setVisible(this.onScreen(c.y)).setPosition(px(c.x), px(c.y)).setRotation(c.a - Math.PI / 2).setScale(ks * 0.9 * (c.kind === 'dog' ? 0.7 : 1)).setAlpha(0.95);
     }
     // 문 (스윙 도어 판): 열린 방향은 플레이어 반대쪽
     for (let r = Math.max(0, Math.floor(this.camY / TILE) - 1); r < Math.min(ROWS, Math.floor((this.camY + H) / TILE) + 2); r++) for (let c = 0; c < COLS; c++) {
@@ -601,23 +610,21 @@ export class GroundScene extends Phaser.Scene {
 
   private renderPlayer(t: number): void {
     const g = this.g, p = g.p, img = this.playerImg;
-    const face = Math.sin(p.aim) < -0.25 ? 'b' : 'f';
-    img.setTexture(`g_${SKIN[g.opts.pilot]}_${face}`);
-    const moving = p.moving ? Math.sin(p.walk) : 0, dir = Math.cos(p.aim) >= 0 ? 1 : -1;
-    img.setFlipX(dir > 0);   // 임시 에셋: 총이 왼쪽에 있는 앞/뒤 스프라이트 (v2 우향 시트가 오면 조준각 회전으로 교체)
-    let rot = 0, sx = 1, sy = 1;
-    if (p.rollT > 0) { const k = 1 - p.rollT / 18; rot = k * Math.PI * 2 * (p.rdx >= 0 ? 1 : -1); sx = sy = 0.88; }
-    else { rot = moving * 0.05; sy = 1 + Math.abs(moving) * 0.03; }
-    sx *= K.player; sy *= K.player;
-    const recoil = p.kick * 0.5;
-    img.setPosition(Math.round(p.x - Math.cos(p.aim) * recoil), Math.round(p.y + (p.rollT > 0 ? 0 : -Math.abs(moving) * 1.2) - Math.sin(p.aim) * recoil)).setRotation(rot).setScale(sx, sy);
+    // 정탑다운 도트: 시트는 아래를 보는 몸 + 총구가 비스듬(SMG) / 정면(권총) → 총구가 조준각을 향하도록 회전한다
+    const pistol = p.weapon === 'pistol', firing = this.muzzleT > 0, off = pistol ? Math.PI / 2 : AIM_OFF_SMG;
+    const wf = p.moving ? Math.floor(p.walk * 0.9) % 4 : 1, key = pistol ? (firing ? 'p2_pistol1' : 'p2_pistol0') : firing ? `p2_fire${Math.floor(this.time.now / 45) % 2}` : `p2_walk${wf}`;
+    img.setTexture(key).setOrigin(0.5, 0.46).setFlipX(false);
+    let rot = p.aim - off, sx = K.player, sy = K.player;
+    if (p.rollT > 0) { const k = 1 - p.rollT / 18; rot += k * Math.PI * 2 * (p.rdx >= 0 ? 1 : -1); sx = sy = K.player * 0.88; }
+    const recoil = p.kick * 0.6, bob = p.moving && p.rollT <= 0 ? Math.sin(p.walk * 2) * 0.8 : 0;
+    img.setPosition(Math.round(p.x - Math.cos(p.aim) * recoil), Math.round(p.y - Math.sin(p.aim) * recoil + bob)).setRotation(rot).setScale(sx, sy);
     img.setAlpha(p.invuln > 0 && p.rollT <= 0 && Math.floor(t / 70) % 2 === 0 ? 0.35 : 1);
     this.shadowG.fillStyle(0x000000, 0.32).fillEllipse(p.x + 2, p.y + 14, 22, 8);
     if (p.rollT > 0) { this.ovG.lineStyle(1, 0xffffff, 0.35); this.ovG.strokeCircle(p.x, p.y, 14); }
     // 총구 화염: 무기별 모양 (권총 작게 / SMG 번갈아 뾰족하게 / 샷건 크게 / 레일 청색)
     if (this.muzzleT > 0) {
       this.muzzleT--;
-      const a = p.aim, mx = p.x + Math.cos(a) * 24, my = p.y + Math.sin(a) * 24, w = this.muzzleW, big = w === 'shotgun' ? 17 : w === 'rail' ? 14 : w === 'smg' ? 9 + Math.random() * 4 : 8;
+      const a = p.aim, mx = p.x + Math.cos(a) * 31, my = p.y + Math.sin(a) * 31, w = this.muzzleW, big = w === 'shotgun' ? 17 : w === 'rail' ? 14 : w === 'smg' ? 9 + Math.random() * 4 : 8;
       const col = w === 'rail' ? 0x7dd3fc : w === 'shotgun' ? 0xffb347 : 0xffe27a, spikes = w === 'shotgun' ? 7 : w === 'smg' ? 5 : 4;
       this.ovG.fillStyle(col, 0.95); this.ovG.beginPath(); this.ovG.moveTo(mx, my);
       for (let i = 0; i <= spikes; i++) { const aa = a + (i / spikes - 0.5) * (w === 'shotgun' ? 1.5 : 1.0), rr = i % 2 === 0 ? big : big * 0.45; this.ovG.lineTo(mx + Math.cos(aa) * rr, my + Math.sin(aa) * rr); }

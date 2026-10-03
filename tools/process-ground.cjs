@@ -91,8 +91,45 @@ async function gridSheet(file, cols, rows, items, inset = 14) {
   }
 }
 
+/** 같은 캐릭터의 여러 프레임: 칸마다 글자(상단)·워터마크를 지우고, 모든 프레임이 공통 영역(합집합 bbox)으로 잘려 머리 위치가 어긋나지 않게 저장한다 */
+async function frameGroup(file, cols, rows, cells, eraseTopFrac, targetH, inset = 6) {
+  const img = await loadKeyed(file), cw = Math.floor(img.w / cols), ch = Math.floor(img.h / rows), frames = [];
+  for (const [idx, name] of cells) {
+    const cx = (idx % cols) * cw + inset, cy = Math.floor(idx / cols) * ch + inset, sw = cw - 2 * inset, sh = ch - 2 * inset, top = Math.floor(sh * eraseTopFrac);
+    const buf = Buffer.alloc(sw * sh * 4);
+    for (let y = top; y < sh; y++) for (let x = 0; x < sw; x++) { const si = ((cy + y) * img.w + cx + x) * 4, di = (y * sw + x) * 4; buf[di] = img.data[si]; buf[di + 1] = img.data[si + 1]; buf[di + 2] = img.data[si + 2]; buf[di + 3] = img.data[si + 3]; }
+    const { label, comps } = components({ data: buf, w: sw, h: sh }), big = Math.max(...comps.map(c => c.area)), main = merge(comps.filter(c => c.area > big * 0.1), 10).sort((p, q) => q.area - p.area)[0];
+    for (let i = 0; i < sw * sh; i++) if (!main.ids.includes(label[i])) buf[i * 4 + 3] = 0;   // 주 덩어리(캐릭터) 외 전부 투명: 글자·워터마크·탄피
+    frames.push({ name, buf, sw, sh, bb: main });
+  }
+  const u = frames.reduce((a2, f) => ({ x0: Math.min(a2.x0, f.bb.minX), y0: Math.min(a2.y0, f.bb.minY), x1: Math.max(a2.x1, f.bb.maxX), y1: Math.max(a2.y1, f.bb.maxY) }), { x0: 1e9, y0: 1e9, x1: 0, y1: 0 });
+  const uw = u.x1 - u.x0 + 1, uh = u.y1 - u.y0 + 1, k = targetH / uh, tw = Math.round(uw * k), th = Math.round(uh * k);
+  for (const f of frames) {
+    const crop = Buffer.alloc(uw * uh * 4);
+    for (let y = 0; y < uh; y++) for (let x = 0; x < uw; x++) { const si = ((u.y0 + y) * f.sw + u.x0 + x) * 4, di = (y * uw + x) * 4; crop[di] = f.buf[si]; crop[di + 1] = f.buf[si + 1]; crop[di + 2] = f.buf[si + 2]; crop[di + 3] = f.buf[si + 3]; }
+    const { data: small } = await sharp(crop, { raw: { width: uw, height: uh, channels: 4 } }).resize(tw, th, { kernel: 'cubic' }).raw().toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < tw * th; i++) small[i * 4 + 3] = small[i * 4 + 3] >= 128 ? 255 : 0;
+    const out = path.join(OUT, f.name + '.png');
+    await sharp(small, { raw: { width: tw, height: th, channels: 4 } }).png({ palette: true, colors: 32, dither: 0, effort: 10 }).toFile(out);
+    console.log(f.name.padEnd(12), tw + 'x' + th, (fs.statSync(out).size / 1024).toFixed(1) + 'KB');
+  }
+}
+
+/** 타일셋(8×4): 칸마다 96px 로 줄여 한 장의 아틀라스로 묶는다 (t2_atlas.png, 칸 번호 = 행*8+열) */
+async function tileAtlas(file) {
+  const m = await sharp(path.join(IN, file)).metadata(), cw = Math.floor(m.width / 8), ch = Math.floor(m.height / 4), cells = [];
+  for (let i = 0; i < 32; i++) cells.push({ input: await sharp(path.join(IN, file)).extract({ left: (i % 8) * cw + 3, top: Math.floor(i / 8) * ch + 3, width: cw - 6, height: ch - 6 }).resize(96, 96, { kernel: 'cubic' }).png().toBuffer(), left: (i % 8) * 96, top: Math.floor(i / 8) * 96 });
+  const out = path.join(OUT, 't2_atlas.png');
+  await sharp({ create: { width: 768, height: 384, channels: 3, background: '#000' } }).composite(cells).png({ palette: true, colors: 64, dither: 0, effort: 10 }).toFile(out);
+  console.log('t2_atlas', (fs.statSync(out).size / 1024).toFixed(0) + 'KB');
+}
+
 async function main() {
   if (process.argv[2] === 'v2') {
+    await frameGroup('ground2_pilot_sis2_topdown.webp', 4, 2, [[0, 'p2_walk0'], [1, 'p2_walk1'], [2, 'p2_walk2'], [3, 'p2_walk3'], [4, 'p2_fire0'], [5, 'p2_fire1']], 0.14, 58);
+    await frameGroup('ground2_pilot_sis2_topdown.webp', 4, 2, [[6, 'p2_corpse']], 0.14, 52);
+    await frameGroup('ground2_pilot_sis2_pistol.png', 2, 1, [[0, 'p2_pistol0'], [1, 'p2_pistol1']], 0.2, 58);
+    await tileAtlas('ground2_tiles.png');
     await gridSheet('ground2_items.png', 4, 2, [[0, 'i_pistol', 30], [1, 'i_smg', 40], [2, 'i_shotgun', 52], [3, 'i_rail', 54], [4, 'i_grenade', 16], [5, 'i_medkit', 24], [6, 'i_ammo', 24], [7, 'i_crate', 34]]);
     await gridSheet('ground2_boss.png', 3, 2, [[0, 'b2_0', 190], [3, 'b2_1', 190], [1, 'b2_2', 190], [2, 'b2_dmg1', 190], [5, 'b2_dmg2', 190]], 10);
     return;
