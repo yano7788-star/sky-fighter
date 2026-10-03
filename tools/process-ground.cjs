@@ -171,7 +171,57 @@ async function dirSheet(file, out, cols, rows, targetH) {
   console.log(out, 'frame', fw + 'x' + fh, (fs.statSync(outFile).size / 1024).toFixed(1) + 'KB');
 }
 
+/** 정탑다운 4방향 시트(방향별 열 묶음 × IDLE/WALK/RUN/SHOOT 행): 총이 바라보는 방향으로 곧게 뻗어 있다 → p4_top.png (칸 S×S, 프레임 = 방향*10+동작, 동작 0 idle / 1-3 walk / 4-6 run / 7-9 shoot).
+ *  방향 순서: 0 아래, 1 왼쪽, 2 위, 3 오른쪽. 각 프레임은 '머리 쪽 가장자리'를 기준으로 몸통 중심(pivot)이 칸 중앙에 오게 맞춰 회전 중심이 어긋나지 않는다. */
+async function topSheet(file, out, scale) {
+  const { data, info } = await sharp(path.join(IN, file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const w = info.width, h = info.height, keep = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) { const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2]; keep[i] = (r > 222 && g > 222 && b > 222) ? 0 : 1; }
+  for (let pass = 0; pass < 2; pass++) { const del = []; for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; if (!keep[i]) continue; const p = i * 4; if (Math.min(data[p], data[p + 1], data[p + 2]) < 170) continue; if (!keep[i - 1] || !keep[i + 1] || !keep[i - w] || !keep[i + w]) del.push(i); } for (const i of del) keep[i] = 0; }
+  const lab = new Int32Array(w * h), comps = [], st = [];
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (!keep[s0] || lab[s0]) continue;
+    const c = { id: comps.length + 1, a: 0, x0: w, y0: h, x1: 0, y1: 0 }; comps.push(c); lab[s0] = c.id; st.push(s0);
+    while (st.length) { const p = st.pop(), x = p % w, y = (p / w) | 0; c.a++; if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const q = ny * w + nx; if (keep[q] && !lab[q]) { lab[q] = c.id; st.push(q); } } }
+  }
+  const isLabel = c => c.y1 < 130 || (c.x1 < 225 && c.a > 600);
+  const big = comps.filter(c => c.a > 1500 && !isLabel(c)), small = comps.filter(c => c.a >= 3 && c.a <= 1500 && !isLabel(c) && c.y0 > 120 && c.x0 > 225);
+  const dirOf = c => { const cx = (c.x0 + c.x1) / 2; return cx < 620 ? 0 : cx < 1060 ? 1 : cx < 1480 ? 2 : 3; }, rowOf = c => { const cy = (c.y0 + c.y1) / 2; return cy < 360 ? 0 : cy < 625 ? 1 : cy < 900 ? 2 : 3; };
+  const groups = new Map();
+  for (const c of big) { const k = dirOf(c) * 4 + rowOf(c); (groups.get(k) ?? groups.set(k, []).get(k)).push({ ...c, ids: [c.id] }); }
+  for (const g of groups.values()) g.sort((p, q) => p.x0 - q.x0);
+  for (const c of small) {   // 총구 화염·탄피·불꽃은 가장 가까운 캐릭터 프레임에 붙인다
+    let best = null, bd = 190; for (const g of groups.values()) for (const f of g) { const dx = Math.max(f.x0 - c.x1, 0, c.x0 - f.x1), dy = Math.max(f.y0 - c.y1, 0, c.y0 - f.y1), d = Math.hypot(dx, dy); if (d < bd) { bd = d; best = f; } }
+    if (best) best.ids.push(c.id);
+  }
+  const S = 160, ox = 70, oy = 62, PIV = [62, 70, 62, 70];   // 머리쪽 가장자리에서 몸통 중심까지(원본 px)
+  const half = Math.round(S / scale / 2), sheet = Buffer.alloc(S * 10 * S * 4 * 4), tips = [[], [], [], []];
+  void ox; void oy;
+  const want = (d, r) => (r === 0 ? 1 : r === 3 ? (d === 1 ? 2 : 3) : 3);
+  for (let d = 0; d < 4; d++) for (let r = 0; r < 4; r++) {
+    const g = groups.get(d * 4 + r) ?? []; if (g.length < 1) throw new Error('missing group ' + d + ',' + r + ' ' + g.length);
+    for (let i = 0; i < want(d, r); i++) {
+      const f = g[Math.min(i, g.length - 1)], col = r === 0 ? 0 : r === 1 ? 1 + i : r === 2 ? 4 + i : 7 + i;
+      // pivot: 방향별 머리쪽 가장자리 기준 (아래: 위쪽 / 위: 아래쪽 / 왼쪽: 오른쪽 / 오른쪽: 왼쪽)
+      const cx = (f.x0 + f.x1) / 2, cy = (f.y0 + f.y1) / 2, px = d === 0 || d === 2 ? cx : d === 1 ? f.x1 - PIV[d] : f.x0 + PIV[d], py = d === 1 || d === 3 ? cy : d === 0 ? f.y0 + PIV[d] : f.y1 - PIV[d];
+      const win = half * 2, buf = Buffer.alloc(win * win * 4), ids = new Set(f.ids);
+      for (let y = 0; y < win; y++) for (let x = 0; x < win; x++) { const sx = Math.round(px - half + x), sy = Math.round(py - half + y); if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue; const si = sy * w + sx; if (!ids.has(lab[si])) continue; const p = si * 4, q = (y * win + x) * 4; buf[q] = data[p]; buf[q + 1] = data[p + 1]; buf[q + 2] = data[p + 2]; buf[q + 3] = 255; }
+      const { data: small2 } = await sharp(buf, { raw: { width: win, height: win, channels: 4 } }).resize(S, S, { kernel: 'cubic' }).raw().toBuffer({ resolveWithObject: true });
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const si = (y * S + x) * 4, di = ((d * S + y) * S * 10 + col * S + x) * 4; sheet[di] = small2[si]; sheet[di + 1] = small2[si + 1]; sheet[di + 2] = small2[si + 2]; sheet[di + 3] = small2[si + 3] >= 128 ? 255 : 0; }
+      if (r === 0) tips[d].push(d === 0 ? (f.y1 - py) * scale : d === 2 ? (py - f.y0) * scale : d === 1 ? (px - f.x0) * scale : (f.x1 - px) * scale);   // 가만히 있을 때 총구까지의 거리
+    }
+    if (r === 3 && d === 1 && g.length === 2) { /* 왼쪽 사격은 2프레임: 마지막 프레임을 복제 */
+      const col = 9; for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const si = ((d * S + y) * S * 10 + 8 * S + x) * 4, di = ((d * S + y) * S * 10 + col * S + x) * 4; sheet[di] = sheet[si]; sheet[di + 1] = sheet[si + 1]; sheet[di + 2] = sheet[si + 2]; sheet[di + 3] = sheet[si + 3]; }
+    }
+  }
+  const outFile = path.join(OUT, out + '.png');
+  await sharp(sheet, { raw: { width: S * 10, height: S * 4, channels: 4 } }).png({ palette: true, colors: 48, dither: 0, effort: 10 }).toFile(outFile);
+  console.log(out, 'cell', S, (fs.statSync(outFile).size / 1024).toFixed(1) + 'KB', 'idle tip dist (px)', tips.map(t => Math.round(t[0])).join(','));
+}
+
 async function main() {
+  if (process.argv[2] === 'v4') { await topSheet('ground2_topdown_dirs.webp', 'p4_top', 0.5); return; }
   if (process.argv[2] === 'v3') { await dirSheet('ground2_dir_armed.jpg', 'p3_armed', 9, 4, 72); return; }
   if (process.argv[2] === 'v2') {
     await frameGroup('ground2_pilot_sis2_topdown.webp', 4, 2, [[0, 'p2_walk0'], [1, 'p2_walk1'], [2, 'p2_walk2'], [3, 'p2_walk3'], [4, 'p2_fire0'], [5, 'p2_fire1']], 0.14, 58);

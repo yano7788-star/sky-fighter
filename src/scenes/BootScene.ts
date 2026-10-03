@@ -35,13 +35,13 @@ export class BootScene extends Phaser.Scene {
     this.load.setPath('assets/img/');
     for (const name of IMAGES) this.load.image(name, `${name}.webp?v=${__BUILD__}`);
     for (const name of GROUND_PNG) this.load.image(name, `${name}.png?v=${__BUILD__}`);
-    this.load.spritesheet('p3_armed', `p3_armed.png?v=${__BUILD__}`, { frameWidth: 48, frameHeight: 72 });   // 4방향 × 9동작 (방향*9+동작)
+    this.load.spritesheet('p4_top', `p4_top.png?v=${__BUILD__}`, { frameWidth: 160, frameHeight: 160 });   // 정탑다운 4방향(아래·왼·위·오른쪽) × 10동작 (방향*10+동작)
     this.load.spritesheet('explosion', `explosion.webp?v=${__BUILD__}`, { frameWidth: 128, frameHeight: 128 });   // 13프레임 폭발 스프라이트
   }
 
   create(): void {
     buildStaticTextures(this);
-    for (const name of [...GROUND_PNG, 'p3_armed']) this.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);   // 픽셀 아트: 보간 없이
+    for (const name of [...GROUND_PNG, 'p4_top']) this.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);   // 픽셀 아트: 보간 없이
     if (!this.anims.exists('explosion')) this.anims.create({ key: 'explosion', frames: this.anims.generateFrameNumbers('explosion', { start: 0, end: 12 }), frameRate: 28, repeat: 0 });
     if (isGroundTest()) { startGroundTest(this); return; }   // ?groundtest: 지상전 테스트 페이지
     this.scene.start('TitleScene');

@@ -16,7 +16,9 @@ const SKIN = ['ace', 'sis1', 'sis2'];
 const BLOOD: Record<GKind, number> = { rifle: 0x8b1a1a, charger: 0x8b1a1a, sniper: 0x8b1a1a, heavy: 0x8b1a1a, dog: 0x8b1a1a, turret: 0x20262e, drone: 0x20262e, tank: 0x20262e, boss: 0x20262e };
 const SPARK: Record<GKind, string> = { rifle: '#fca5a5', charger: '#fca5a5', sniper: '#fca5a5', heavy: '#fca5a5', dog: '#fca5a5', turret: '#fde68a', drone: '#fde68a', tank: '#fde68a', boss: '#fde68a' };
 /** 픽셀 아트 표시 배율 (판정은 그대로, 눈에 잘 띄게 키운다). 보스는 원본 크기가 이미 크다 */
-const K = { player: 1.3, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
+const TIP_D = [53, 44, 54, 46];   // 시트 방향별(아래·왼·위·오른쪽) 몸통 중심 → 총구 거리(px)
+const DIR_ANG = [Math.PI / 2, Math.PI, -Math.PI / 2, 0];   // 각 방향 프레임이 바라보는 각도
+const K = { player: 1.2, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
 const HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
 const CAM_FOLLOW_Y = 520;   // 플레이어가 화면 아래쪽 1/3에 오도록 (위가 진행 방향)
 
@@ -427,10 +429,10 @@ export class GroundScene extends Phaser.Scene {
       case 'shot': {
         audio.sfx(e.weapon === 'pistol' ? 'gPistol' : e.weapon === 'shotgun' ? 'gShotgun' : e.weapon === 'smg' ? 'gSmg' : 'gRail');
         this.shake = Math.max(this.shake, WEAPONS[e.weapon].kick * (e.weapon === 'shotgun' ? 1.5 : 1)); this.muzzleT = e.weapon === 'smg' ? 2 : 3; this.muzzleW = e.weapon; this.lastShotAt = this.time.now;
-        const a = e.ang, tp = this.tip(this.dirOf(a)), mx = e.x + tp[0], my = e.y + tp[1];
+        const a = e.ang, tp = this.tip(a), mx = e.x + tp[0], my = e.y + tp[1];
         this.smoke(mx, my, e.weapon === 'shotgun' ? 4 : 1, 0.8, e.weapon === 'shotgun' ? 6 : 3);
         // 탄피: 총의 오른쪽으로 튄다
-        if (this.casings.length < 60 && e.weapon !== 'rail') { const side = a + Math.PI / 2 + (Math.random() - 0.5) * 0.9, sp = 2 + Math.random() * 2.5; this.casings.push({ x: e.x + this.tip(this.dirOf(a))[0] * 0.5, y: e.y + this.tip(this.dirOf(a))[1] * 0.5, vx: Math.cos(side) * sp, vy: Math.sin(side) * sp, life: 14 + Math.random() * 10, rot: 0 }); }
+        if (this.casings.length < 60 && e.weapon !== 'rail') { const side = a + Math.PI / 2 + (Math.random() - 0.5) * 0.9, sp = 2 + Math.random() * 2.5; this.casings.push({ x: e.x + this.tip(a)[0] * 0.6, y: e.y + this.tip(a)[1] * 0.6, vx: Math.cos(side) * sp, vy: Math.sin(side) * sp, life: 14 + Math.random() * 10, rot: 0 }); }
         if (e.weapon === 'rail') { let ex = e.x, ey = e.y; for (let i = 0; i < 90; i++) { ex += Math.cos(a) * 9; ey += Math.sin(a) * 9; if (blocksSight(tileAt(g.tiles, ex, ey)) && tileAt(g.tiles, ex, ey) !== T.DOOR) break; } this.traces.push({ x0: mx, y0: my, x1: ex, y1: ey, life: 8 }); }
         break;
       }
@@ -614,28 +616,28 @@ export class GroundScene extends Phaser.Scene {
     this.ovG.beginPath(); this.ovG.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) this.ovG.lineTo(pts[i], pts[i + 1]); this.ovG.closePath(); this.ovG.fillPath();
   }
 
-  /** 조준 각도 → 스프라이트 방향 (0 아래, 1 위, 2 왼쪽, 3 오른쪽): 가로/세로 중 더 큰 축 */
-  private dirOf(a: number): number { const c = Math.cos(a), s2 = Math.sin(a); return Math.abs(c) > Math.abs(s2) ? (c < 0 ? 2 : 3) : (s2 < 0 ? 1 : 0); }
-  /** 총구 위치(스프라이트 중심 기준 px): 방향별로 총이 다른 곳에 있다 */
-  private tip(dir: number): [number, number] { return dir === 0 ? [20, -3] : dir === 1 ? [5, -38] : dir === 2 ? [-24, -3] : [24, -3]; }
+  /** 조준 각도에 가장 가까운 시트 방향 (0 아래, 1 왼쪽, 2 위, 3 오른쪽)과 그 방향의 기준 각도 */
+  private dirOf(a: number): number { const c = Math.cos(a), s2 = Math.sin(a); return Math.abs(c) > Math.abs(s2) ? (c < 0 ? 1 : 3) : (s2 < 0 ? 2 : 0); }
+  /** 총구 위치: 몸통 중심에서 조준 방향으로 (방향별 총 길이가 조금씩 다르다) */
+  private tip(a: number): [number, number] { const d = TIP_D[this.dirOf(a)] * K.player; return [Math.cos(a) * d, Math.sin(a) * d]; }
 
   private renderPlayer(t: number): void {
     const g = this.g, p = g.p, img = this.playerImg;
-    // 4방향 도트(건전식): 조준 각도의 가장 가까운 방향 프레임을 쓴다. 이동 중이면 달리기 프레임, 사격 중이면 사격 프레임(총구 화염 포함)
-    const dir = this.dirOf(p.aim), firing = this.muzzleT > 0 || (p.fireCd > 0 && p.fireCd > 2 && this.time.now - this.lastShotAt < 90);
-    const wk = [5, 4, 6, 4][Math.floor(p.walk * 0.9) % 4], col = firing ? 7 + (Math.floor(this.time.now / 50) % 2) : p.moving ? wk : 3;
-    img.setTexture('p3_armed', dir * 9 + col).setOrigin(0.5, 0.62).setFlipX(false);
-    let rot = 0, sc = K.player;
-    if (p.rollT > 0) { const k = 1 - p.rollT / 18; rot = k * Math.PI * 2 * (p.rdx >= 0 ? 1 : -1); sc *= 0.88; img.setFrame(0 * 9 + 3); }
-    const recoil = p.kick * 0.6, bob = p.moving && p.rollT <= 0 ? Math.abs(Math.sin(p.walk)) * -1.5 : 0;
-    img.setPosition(Math.round(p.x - Math.cos(p.aim) * recoil), Math.round(p.y - Math.sin(p.aim) * recoil + bob)).setRotation(rot).setScale(sc);
+    // 정탑다운 도트: 총이 바라보는 방향으로 곧게 뻗은 4방향 프레임 + 조준각과의 나머지(≤45°)만큼 몸통 중심으로 회전
+    const dir = this.dirOf(p.aim), firing = this.muzzleT > 0 || this.time.now - this.lastShotAt < 90;
+    const col = firing ? 7 + (Math.floor(this.time.now / 50) % 3) : p.moving ? [4, 5, 6, 5][Math.floor(p.walk * 0.9) % 4] : 0;
+    let rot = Math.atan2(Math.sin(p.aim - DIR_ANG[dir]), Math.cos(p.aim - DIR_ANG[dir])), sc = K.player;
+    if (p.rollT > 0) { const k = 1 - p.rollT / 18; rot += k * Math.PI * 2 * (p.rdx >= 0 ? 1 : -1); sc *= 0.88; }
+    img.setTexture('p4_top', dir * 10 + (p.rollT > 0 ? 0 : col)).setOrigin(0.5, 0.5).setFlipX(false);
+    const recoil = p.kick * 0.6;
+    img.setPosition(Math.round(p.x - Math.cos(p.aim) * recoil), Math.round(p.y - Math.sin(p.aim) * recoil)).setRotation(rot).setScale(sc);
     img.setAlpha(p.invuln > 0 && p.invuln < 1000 && p.rollT <= 0 && Math.floor(t / 70) % 2 === 0 ? 0.35 : 1);
-    this.shadowG.fillStyle(0x000000, 0.34).fillEllipse(p.x, p.y + 17, 24, 9);
+    this.shadowG.fillStyle(0x000000, 0.3).fillEllipse(p.x + 3, p.y + 7, 28, 14);
     if (p.rollT > 0) { this.ovG.lineStyle(1, 0xffffff, 0.35); this.ovG.strokeCircle(p.x, p.y, 14); }
     // 샷건·레일은 시트의 총구 화염보다 큰 화염을 코드로 덧그린다 (SMG·권총은 시트 프레임의 화염을 그대로 쓴다)
     if (this.muzzleT > 0 && (this.muzzleW === 'shotgun' || this.muzzleW === 'rail')) {
       this.muzzleT--;
-      const [tx, ty] = this.tip(dir), a = p.aim, mx = p.x + tx * K.player, my = p.y + ty * K.player, w = this.muzzleW, big = w === 'shotgun' ? 17 : 14;
+      const [tx, ty] = this.tip(p.aim), a = p.aim, mx = p.x + tx, my = p.y + ty, w = this.muzzleW, big = w === 'shotgun' ? 17 : 14;
       const col2 = w === 'rail' ? 0x7dd3fc : 0xffb347, spikes = w === 'shotgun' ? 7 : 4;
       this.ovG.fillStyle(col2, 0.95); this.ovG.beginPath(); this.ovG.moveTo(mx, my);
       for (let k = 0; k <= spikes; k++) { const aa = a + (k / spikes - 0.5) * (w === 'shotgun' ? 1.5 : 1.0), rr = k % 2 === 0 ? big : big * 0.45; this.ovG.lineTo(mx + Math.cos(aa) * rr, my + Math.sin(aa) * rr); }
