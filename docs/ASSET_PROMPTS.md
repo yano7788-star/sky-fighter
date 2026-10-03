@@ -241,9 +241,27 @@ Top-down view of a huge sci-fi hangar guardian walker mech, facing downward, wit
 ```
 
 ### 8-5. 전환 컷 3장 (각각 따로, 16:9 또는 9:16 세로) — 배경 있음(크로마키 아님)
-1. `cut_shotdown.png`: 불꽃에 휩싸인 전투기에서 조종사가 탈출하는 순간, 구름 위 하늘, 역동적인 시네마틱.
-2. `cut_landing.png`: 구름을 뚫고 지상 군사 기지에 착지하는 조종사의 뒷모습, 아래로 내려다보는 시점.
-3. `cut_takeoff.png`: 격납고에서 새 기체에 올라타 시동을 거는 조종사, 시네마틱.
-(공통 문구: `cinematic sci-fi game cutscene illustration, semi-realistic, dramatic lighting, vertical 9:16, no text, no watermark`)
+첨부 이미지: 3장 모두 지상 파일럿 시트(8-1 결과) 첨부 + 1·3번은 플레이어 전투기 이미지(`public/assets/img/player_*.webp` 중 하나)도 같이 첨부.
+```
+(1) cut_shotdown.png
+Match the attached references exactly: the pilot's armor, colors and proportions from the character sheet, and the fighter jet design from the plane image. Cinematic sci-fi game cutscene illustration: the fighter jet is engulfed in flames and smoke, breaking apart in the sky above the clouds, while the pilot is ejected in the moment of escape, seen from the side in a dynamic dramatic composition, sparks and debris flying, golden-hour light breaking through the clouds. Semi-realistic detailed style, dramatic lighting, vertical 9:16, no text, no watermark.
+
+(2) cut_landing.png
+Match the attached character sheet exactly (same pilot armor, colors and proportions). Cinematic sci-fi game cutscene illustration: the pilot seen from behind, parachute canopy overhead, descending through a break in the clouds toward a sprawling enemy military base far below, high-angle view looking down over the pilot's shoulder at the base with hangars, searchlights and small patrolling soldiers. Semi-realistic detailed style, dramatic lighting, vertical 9:16, no text, no watermark.
+
+(3) cut_takeoff.png
+Match the attached references exactly: the pilot from the character sheet and the fighter jet design from the plane image. Cinematic sci-fi game cutscene illustration: inside a dim enemy hangar, the pilot climbs into the cockpit of a captured fighter jet and starts the engines, canopy opening, glowing engine intakes, alarm lights flashing red, hangar door beginning to open in the background with bright light pouring in. Semi-realistic detailed style, dramatic lighting, vertical 9:16, no text, no watermark.
+```
 
 **우선순위**: 8-1 → 8-2 → 8-3 → 8-4 → 8-5. 8-1~8-3까지 있으면 지상전 코어(M3)를 바로 붙일 수 있습니다. 받으면 `assets-src/incoming/` 에 넣고 "에셋 넣었어"라고 알려 주세요(자르기·크로마키·연결은 제가 처리).
+
+---
+
+## 9. 지상전 v2 도트 에셋 (핫라인 마이애미식 스크롤 맵)
+공통: 모든 캐릭터·적은 **오른쪽(3시) 방향 정탑다운 도트**, 초록(#00FF00) 단색 배경, 글자·워터마크·총구 화염·탄피·연기 없음(효과는 코드). 코드가 조준 방향으로 회전시킨다. 저장명: `assets-src/incoming/ground2_*.png`.
+- **A 파일럿 3명** (`ground2_pilot_sis2/sis1/ace.png`): 4×2 = 걷기 4 / 사격 반동 A·B / 시체 / 권총 자세. 첨부: 도트 SMG 시트(스타일) + `ground_pilots_sheet1.png`(인물). 도트 시트 속 인물 = 동생(긴 흑발·은색 헤어핀·주황 코어).
+- **B 적 4장** (`ground2_enemies1~4.png`): 1 보병·돌격병 / 2 저격수·헤비 / 3 경비견·드론 / 4 포탑·장갑차. 각 4×2 (걷기 2 / 사격 / 시체).
+- **C 보스** (`ground2_boss.png`): 4×1 (대기·왼발·오른발·손상).
+- **D 바닥 아이템** (`ground2_items.png`): 4×2 (권총·SMG·샷건·레일 / 수류탄·구급상자·탄약·무기 상자).
+- **E 타일셋(선택)** (`ground2_tiles.png`): 8×4. 없으면 코드로 도트 타일을 그린다.
+프롬프트 본문은 채팅 기록 참조 (공통 블록 [COMMON RULES] 포함).

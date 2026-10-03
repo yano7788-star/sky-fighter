@@ -3,6 +3,7 @@ import { H, W } from './core/config';
 import { R } from './render/textures';
 import { BootScene } from './scenes/BootScene';
 import { GameScene } from './scenes/GameScene';
+import { GroundScene } from './scenes/GroundScene';
 import { HangarScene } from './scenes/HangarScene';
 import { MutatorScene } from './scenes/MutatorScene';
 import { PilotScene } from './scenes/PilotScene';
@@ -21,7 +22,7 @@ const game = new Phaser.Game({
   audio: { noAudio: true },                       // 오디오는 src/systems/audio.ts가 직접 관리
   input: { gamepad: true, activePointers: 3 },
   render: { antialias: true, roundPixels: false },
-  scene: [BootScene, TitleScene, MutatorScene, GameScene, HangarScene, PilotScene, AchievementScene, MissionScene],
+  scene: [BootScene, TitleScene, MutatorScene, GameScene, GroundScene, HangarScene, PilotScene, AchievementScene, MissionScene],
 });
 
 // 개발 중 브라우저 콘솔에서 상태를 확인할 수 있게 노출 (빌드에는 포함되지 않음)

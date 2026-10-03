@@ -1,6 +1,6 @@
 {
   "name": "sky-fighter",
-  "version": "2.1.0",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,8 @@
     "preview": "vite preview --port 5181",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "sim": "tsx tools/sim-run.ts"
+    "sim": "tsx tools/sim-run.ts",
+    "ground": "tsx tools/ground-sim.ts"
   },
   "dependencies": {
     "phaser": "3.90.0"
