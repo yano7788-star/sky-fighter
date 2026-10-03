@@ -1,115 +1,163 @@
 import { describe, expect, it } from 'vitest';
-import { GROUND, GroundSim, NO_INPUT, SECTION_COUNT, WEAPONS, type GBullet } from '../src/core/ground';
+import { FEEL, GROUND, GroundSim, NO_INPUT, SECTION_COUNT, WEAPONS, type GBullet, type GEnemy } from '../src/core/ground';
 import { groundBot } from '../src/core/groundbot';
-import { COLS, T, TILE, WORLD_H, tileAt } from '../src/core/groundmap';
+import { COLS, TILE, WORLD_H } from '../src/core/groundmap';
 import { Sim } from '../src/core/sim';
 import { metaParams } from '../src/core/meta';
 import type { SimInput } from '../src/core/types';
 
 const idle = (s: Sim): SimInput => ({ targetX: s.player.x, targetY: s.player.y, fire: false, bomb: false });
-/** 시험용: 구역의 적·엄폐물을 비워 단순한 방을 만든다 */
-const clean = (g: GroundSim) => { g.enemies.length = 0; g.cover.length = 0; g.pickups.length = 0; };
-const bullet = (g: GroundSim, o: Partial<GBullet>) => g.bullets.push({ x: g.p.x, y: g.p.y, vx: 0, vy: 0, r: 4, dmg: 1, friendly: false, pierce: 0, hit: [], life: 60, ...o });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const add = (g: GroundSim, kind: string, x: number, y: number, ang = 0) => (g as any).addEnemy(kind, x, y, ang);
+type Priv = { addEnemy: (k: string, x: number, y: number, a?: number) => GEnemy };
+/** 시험용: 구역을 비운 빈 공간을 만든다 (적·아이템·상자 제거) */
+const clean = (g: GroundSim) => { g.enemies.length = 0; g.pickups.length = 0; for (const c of g.crates) c.broken = true; for (const w of g.windows) w.broken = true; };
+const add = (g: GroundSim, kind: string, x: number, y: number, ang = 0) => (g as unknown as Priv).addEnemy(kind, x, y, ang);
+const bullet = (g: GroundSim, o: Partial<GBullet>) => g.bullets.push({ x: g.p.x, y: g.p.y, vx: 0, vy: 0, dmg: 1, friendly: false, w: 'rifle', life: 200, dist: 0, pellet: false, first: true, pierce: 0, hit: [], dodged: false, ...o });
+const run = (g: GroundSim, n: number, inp = NO_INPUT) => { for (let i = 0; i < n; i++) g.step(inp); };
+const doorAt = (g: GroundSim, c: number, r: number) => g.doors.find(d => d.c === c && d.r === r)!;
 
-describe('지상전 코어', () => {
-  it('시작: 옥상, 권총, 체력 가득, 구역 4개', () => {
+describe('지상전 코어 (MVP 이식)', () => {
+  it('시작: 옥상, 권총, 체력 가득, 구역 4개, 월드 타일 64', () => {
     const g = new GroundSim({ seed: 1 });
-    expect(g.section).toBe(0); expect(g.p.weapon).toBe('pistol'); expect(g.p.hp).toBe(GROUND.hp); expect(SECTION_COUNT).toBe(4);
+    expect(g.section).toBe(0); expect(g.p.weapon).toBe('pistol'); expect(g.p.hp).toBe(GROUND.hp); expect(SECTION_COUNT).toBe(4); expect(TILE).toBe(64);
     expect(g.enemies.length).toBeGreaterThan(20); expect(g.p.y).toBeLessThan(WORLD_H);
   });
   it('같은 시드·같은 입력이면 결과가 같다', () => {
-    const run = () => { const g = new GroundSim({ seed: 9 }); for (let i = 0; i < 2500; i++) { g.step(groundBot(g, 0.7)); g.drain(); } return [g.score, g.kills, g.p.hp, g.p.x.toFixed(2), g.enemies.length].join('|'); };
-    expect(run()).toBe(run());
+    const go = () => { const g = new GroundSim({ seed: 9 }); for (let i = 0; i < 2500; i++) { g.step(groundBot(g, 0.7)); g.drain(); } return [g.score, g.kills, g.p.hp, g.p.x.toFixed(2), g.enemies.length].join('|'); };
+    expect(go()).toBe(go());
   });
-  it('구르기: 무적 프레임 동안 탄에 맞지 않고, 쿨다운이 있다', () => {
-    const g = new GroundSim({ seed: 2 }); clean(g);
+  it('맵 검증: 스폰·무기가 벽/상자 칸 안에 있지 않다', () => {
+    const g = new GroundSim({ seed: 1 }), crate = new Set(g.crates.map(c => Math.floor(c.x / TILE) + ',' + Math.floor(c.y / TILE)));
+    for (const e of g.enemies) { const c = Math.floor(e.x / TILE), r = Math.floor(e.y / TILE); expect(g.tiles[r * COLS + c]).toBe(0); expect(crate.has(c + ',' + r)).toBe(false); }
+    for (const k of g.pickups) { const c = Math.floor(k.x / TILE), r = Math.floor(k.y / TILE); expect(g.tiles[r * COLS + c]).toBe(0); expect(crate.has(c + ',' + r)).toBe(false); }
+  });
+  it('구르기: 앞 구간 무적(탄이 통과·회피 표시), 쿨다운 동안 재입력 무시, 끝나면 정상 피격', () => {
+    const g = new GroundSim({ seed: 2 }); clean(g); g.p.invuln = 0;
     g.step({ ...NO_INPUT, mx: 1, roll: true });
-    expect(g.p.rollT).toBeGreaterThan(0); expect(g.p.invuln).toBeGreaterThanOrEqual(GROUND.rollInvuln - 1);
-    bullet(g, {}); const hp = g.p.hp; g.step(NO_INPUT); expect(g.p.hp).toBe(hp);
+    expect(g.p.seq?.kind).toBe('roll'); expect(g.p.rollI).toBeGreaterThan(15);
+    bullet(g, { x: g.p.x, y: g.p.y }); const hp = g.p.hp; g.step(NO_INPUT);
+    expect(g.p.hp).toBe(hp); expect(g.drain().some(e => e.t === 'dodge')).toBe(true);
     const cd = g.p.rollCd; g.step({ ...NO_INPUT, roll: true }); expect(g.p.rollCd).toBeLessThanOrEqual(cd);
+    run(g, 40); expect(g.p.seq).toBeNull(); bullet(g, { x: g.p.x, y: g.p.y }); g.step(NO_INPUT); expect(g.p.hp).toBe(hp - 1);
+  });
+  it('구르기는 발사를 끊고, 근접 중에는 못 끊는다', () => {
+    const g = new GroundSim({ seed: 2 }); clean(g); g.p.weapon = 'shotgun'; g.p.ammo = 5;
+    g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(g.p.seq?.kind).toBe('fire');
+    g.step({ ...NO_INPUT, roll: true }); expect(g.p.seq?.kind).toBe('roll');
+    const h = new GroundSim({ seed: 2 }); clean(h); h.step({ ...NO_INPUT, melee: true, ax: 0, ay: -1 }); expect(h.p.seq?.kind).toBe('melee');
+    h.step({ ...NO_INPUT, roll: true }); expect(h.p.seq?.kind).toBe('melee');
   });
   it('피격: 체력이 줄고 무적 시간이 생긴다', () => {
     const g = new GroundSim({ seed: 2 }); clean(g); g.p.invuln = 0;
     bullet(g, {}); g.step(NO_INPUT); expect(g.p.hp).toBe(GROUND.hp - 1); expect(g.p.invuln).toBeGreaterThan(30);
   });
-  it('엄폐물과 벽은 탄을 막고, 유리는 탄이 통과한다', () => {
+  it('벽은 파괴되지 않고 총알을 막는다', () => {
     const g = new GroundSim({ seed: 2 }); clean(g); g.p.invuln = 0;
-    g.cover.push({ id: 99, kind: 'crate', x: g.p.x, y: g.p.y - 100, w: 42, h: 31, hp: 999, dead: false, section: 0 });
-    bullet(g, { x: g.p.x, y: g.p.y - 160, vy: 3 });   // 위에서 아래로 → 상자에 막힘
-    for (let i = 0; i < 80; i++) g.step(NO_INPUT);
-    expect(g.p.hp).toBe(GROUND.hp);
-    // 유리: 위쪽 타일을 유리로 바꾸면 탄이 지나간다 / 벽이면 막힌다
-    const c = Math.floor(g.p.x / TILE), r = Math.floor(g.p.y / TILE) - 3; g.tiles[r * COLS + c] = T.GLASS; g.cover.length = 0;
-    bullet(g, { x: g.p.x, y: g.p.y - 140, vy: 4 }); g.p.invuln = 0;
-    for (let i = 0; i < 60; i++) g.step(NO_INPUT);
-    expect(g.p.hp).toBe(GROUND.hp - 1);
-    g.tiles[r * COLS + c] = T.WALL; g.p.invuln = 0; g.p.hp = GROUND.hp; bullet(g, { x: g.p.x, y: g.p.y - 140, vy: 4 });
-    for (let i = 0; i < 60; i++) g.step(NO_INPUT);
-    expect(g.p.hp).toBe(GROUND.hp);
+    const wall = { x: 3 * TILE + 10, y: 102.5 * TILE };   // 옥상 계단실 벽
+    expect(g.obstacleAt(wall.x, wall.y)?.type).toBe('wall');
+    bullet(g, { x: wall.x, y: wall.y + 150, vy: -12, friendly: true, w: 'pistol', life: 60 }); run(g, 30); expect(g.bullets.length).toBe(0); expect(g.obstacleAt(wall.x, wall.y)?.type).toBe('wall');
   });
-  it('벽/엄폐물에 끼어도 밖으로 밀려난다 (이동 버그 회귀)', () => {
-    const g = new GroundSim({ seed: 2 }); clean(g);
-    g.cover.push({ id: 99, kind: 'barrier', x: g.p.x, y: g.p.y - 60, w: 78, h: 26, hp: 999, dead: false, section: 0 });
-    g.p.y -= 58; g.step(NO_INPUT); g.step({ ...NO_INPUT, mx: 1 });
-    const c = g.cover[0]; expect(Math.abs(g.p.x - c.x) >= c.w / 2 || Math.abs(g.p.y - c.y) >= c.h / 2).toBe(true);
-    for (let i = 0; i < 300; i++) g.step({ ...NO_INPUT, mx: -1 });
-    expect(tileAt(g.tiles, g.p.x, g.p.y)).not.toBe(T.WALL);
+  it('상자: 총알 3발에 부서지고 막던 칸이 열린다 / 폭발 통은 연쇄 폭발', () => {
+    const g = new GroundSim({ seed: 3 }); g.enemies.length = 0;
+    const c = g.crates.find(x => x.kind === 'crate' && x.section === 0)!; expect(g.obstacleAt(c.x, c.y)?.type).toBe('crate');
+    for (let i = 0; i < 3; i++) bullet(g, { x: c.x, y: c.y + 20, vy: -8, friendly: true, w: 'pistol' }), g.step(NO_INPUT);
+    expect(c.broken).toBe(true); expect(g.obstacleAt(c.x, c.y)).toBeNull();
+    const b1 = g.crates.find(x => x.kind === 'barrel' && x.section === 0)!;
+    bullet(g, { x: b1.x, y: b1.y + 20, vy: -8, friendly: true, w: 'pistol' }); g.step(NO_INPUT); expect(b1.broken).toBe(true);
   });
-  it('폭발 드럼통: 맞으면 터져 주변 적에게 피해, 연쇄 폭발', () => {
-    const g = new GroundSim({ seed: 4 }); clean(g);
-    const y = g.p.y - 200;
-    g.cover.push({ id: 90, kind: 'barrel', x: 200, y, w: 18, h: 28, hp: 1, dead: false, section: 0 }, { id: 91, kind: 'barrel', x: 240, y, w: 18, h: 28, hp: 1, dead: false, section: 0 });
-    add(g, 'heavy', 220, y); const e = g.enemies[0]; const hp0 = e.hp;
-    bullet(g, { x: 200, y, friendly: true, r: 3 }); g.step(NO_INPUT);
-    expect(g.cover.every(c => c.dead)).toBe(true); expect(e.hp).toBeLessThan(hp0);
+  it('유리창: 총알 2발에 깨지고 총알은 계속 날아간다 / 시야는 막지 않는다', () => {
+    const g = new GroundSim({ seed: 3 }); g.enemies.length = 0;
+    const w = g.windows[0], cx = (w.x0 + w.x1) / 2, cy = (w.y0 + w.y1) / 2;
+    expect(g.obstacleAt(cx, cy)?.type).toBe('window'); expect(g.los(cx - 120, cy, cx + 120, cy)).toBe(true); expect(g.los(cx - 120, cy, cx + 120, cy, true)).toBe(false);
+    for (let i = 0; i < 2; i++) { bullet(g, { x: cx - 40, y: cy, vx: 14, friendly: true, w: 'pistol', life: 40 }); g.step(NO_INPUT); }
+    run(g, 6); expect(w.broken).toBe(true); expect(g.obstacleAt(cx, cy)).toBeNull();
   });
-  it('무기: 탄이 떨어지면 권총으로 돌아가고 던진 총이 날아간다', () => {
-    const g = new GroundSim({ seed: 5 }); clean(g); g.p.weapon = 'shotgun'; g.p.ammo = 1; g.p.invuln = 99999;
-    g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 });
-    expect(g.p.weapon).toBe('pistol'); expect(g.bullets.some(b => b.kind === 'throw')).toBe(true); expect(WEAPONS.shotgun.pellets).toBeGreaterThan(1);
+  it('문: 몸으로 밀면 반대쪽으로 열려 통과된다 / 닫힌 문은 시야·총알을 막는다 / 근접으로 걷어차면 빨리 열린다', () => {
+    const g = new GroundSim({ seed: 3 }); clean(g);
+    const d = doorAt(g, 6, 74); expect(d.kind).toBe('door');
+    g.p.x = (d.c + 1.8) * TILE; g.p.y = (d.r + 1) * TILE;   // 문 오른쪽(복도)에서 왼쪽 방으로
+    expect(g.obstacleAt((d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2)?.type).toBe('door'); expect(g.los(g.p.x, g.p.y, d.x0 - 100, g.p.y)).toBe(false);
+    run(g, 60, { ...NO_INPUT, mx: -1 });
+    expect(Math.abs(d.phi)).toBeGreaterThan(45); expect(g.p.x).toBeLessThan(d.x0);
+    const k = doorAt(g, 11, 76); expect(k.kind).toBe('door'); g.p.x = (k.c - 1) * TILE + 20; g.p.y = (k.r + 1) * TILE; g.p.aim = 0;
+    g.step({ ...NO_INPUT, melee: true, ax: 1, ay: 0 }); run(g, 12); expect(Math.abs(k.phi)).toBeGreaterThan(30);
   });
-  it('소음: 총을 쏘면 근처 경계 전 적이 조사하러 오고, 샷건은 더 멀리 들린다', () => {
-    const g = new GroundSim({ seed: 6 }); clean(g);
-    add(g, 'rifle', g.p.x + 280, g.p.y); const e = g.enemies[0]; e.ang = 0;
-    g.p.weapon = 'pistol'; g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 });
-    expect(e.aw).toBe(0);   // 권총 소음(230) 밖
-    g.p.weapon = 'shotgun'; g.p.ammo = 5; g.p.fireCd = 0; g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 });
-    expect(e.aw).toBeGreaterThanOrEqual(1);
+  it('문은 12발에 부서져 통로가 영구히 열린다', () => {
+    const g = new GroundSim({ seed: 3 }); g.enemies.length = 0;
+    const d = doorAt(g, 6, 74); const cx = (d.x0 + d.x1) / 2, cy = (d.y0 + d.y1) / 2;
+    for (let i = 0; i < 12; i++) { bullet(g, { x: cx + 60, y: cy, vx: -12, friendly: true, w: 'pistol', life: 20 }); g.step(NO_INPUT); }
+    run(g, 6); expect(d.broken).toBe(true); expect(g.obstacleAt(cx, cy)).toBeNull();
   });
-  it('시야: 플레이어를 향한 적은 보고 교전하고, 등을 돌린 적은 보지 못한다', () => {
-    const g = new GroundSim({ seed: 6 }); clean(g);
-    add(g, 'rifle', g.p.x - 150, g.p.y); add(g, 'rifle', g.p.x + 150, g.p.y);   // 첫째는 플레이어 왼쪽, 둘째는 오른쪽
-    const [left, right] = g.enemies;
-    for (let i = 0; i < 30; i++) { left.ang = 0; left.home.ang = 0; right.ang = 0; right.home.ang = 0; g.step(NO_INPUT); }   // 둘 다 오른쪽(0)을 본다 → 왼쪽 적은 플레이어를 보고, 오른쪽 적은 플레이어가 등 뒤
-    expect(left.aw).toBe(2); expect(right.aw).toBe(0);
-  });
-  it('스윙 도어: 박차고 지나가면 문 근처 적이 기절한다', () => {
-    const g = new GroundSim({ seed: 7 }); clean(g);
-    const c = 6, r = 68 + 6;   // 1층 왼쪽 문
-    expect(g.tiles[r * COLS + c]).toBe(T.DOOR);
-    g.p.x = (c + 1.5) * TILE; g.p.y = (r + 0.5) * TILE;
-    add(g, 'rifle', (c - 0.4) * TILE, (r + 0.5) * TILE); const e = g.enemies[0];
-    for (let i = 0; i < 20; i++) g.step({ ...NO_INPUT, mx: -1 });
-    expect(e.state === 'STUN' || e.aw >= 1).toBe(true); expect(g.score).toBeGreaterThanOrEqual(100);
-  });
-  it('구역을 모두 정리하면 위층 문이 열리고 체력 아이템이 나온다', () => {
-    const g = new GroundSim({ seed: 8 });
+  it('잠긴 문(층 이동)은 구역을 정리하기 전에는 열리지 않는다', () => {
+    const g = new GroundSim({ seed: 8 }); const gate = g.doors.find(d => d.kind === 'gate' && d.section === 0)!;
+    expect(gate.locked).toBe(true); expect(g.obstacleAt((gate.x0 + gate.x1) / 2, (gate.y0 + gate.y1) / 2)?.type).toBe('door');
     g.enemies = g.enemies.filter(e => e.section !== 0); g.step(NO_INPUT);
-    expect(g.cleared[0]).toBe(true); expect(g.tiles[102 * COLS + 8]).toBe(T.FLOOR); expect(g.pickups.some(k => k.kind === 'heart' && k.section === 0)).toBe(true);
-    expect(g.cleared[1]).toBe(false); expect(g.tiles[68 * COLS + 8]).toBe(T.GATE);
+    expect(g.cleared[0]).toBe(true); expect(gate.locked).toBe(false); run(g, 80); expect(Math.abs(gate.phi)).toBeGreaterThan(45);
+    expect(g.pickups.some(k => k.kind === 'heart' && k.section === 0)).toBe(true);
   });
-  it('적이 무기를 떨구고 시체가 남는다. 권총일 때는 닿으면 줍고, 다른 총을 들었으면 줍기 입력이 필요하다', () => {
-    const g = new GroundSim({ seed: 10 }); clean(g);
-    for (let i = 0; i < 40; i++) { add(g, 'heavy', g.p.x, g.p.y - 120 - i); const e = g.enemies[g.enemies.length - 1]; (g as unknown as { damage: (e: unknown, d: number, x: number, y: number, a: number) => void }).damage(e, 99, e.x, e.y, 0); }
-    expect(g.corpses.length).toBe(40); expect(g.pickups.filter(k => k.dropped).length).toBeGreaterThan(10);
+  it('총 겹침 방지: 벽에 바짝 붙어 벽을 겨누면 총이 막혀 발사되지 않는다', () => {
+    const g = new GroundSim({ seed: 2 }); clean(g); g.p.weapon = 'smg'; g.p.ammo = 90;
+    g.p.x = 5 * TILE; g.p.y = 104 * TILE + 40;   // 계단실 벽 바로 아래
+    g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(g.p.gunBlocked).toBe(true); expect(g.bullets.length).toBe(0);
+    g.p.y += 160; g.p.cd = 0; g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(g.p.gunBlocked).toBe(false); expect(g.bullets.length).toBeGreaterThan(0);
+  });
+  it('근접·폭탄은 정면에 벽이 있으면 시작하지 않는다', () => {
+    const g = new GroundSim({ seed: 2 }); clean(g); g.p.x = 5 * TILE; g.p.y = 104 * TILE + 60;
+    g.step({ ...NO_INPUT, melee: true, ax: 0, ay: -1 }); expect(g.p.seq).toBeNull();
+    g.step({ ...NO_INPUT, bomb: true, ax: 0, ay: -1 }); expect(g.p.seq).toBeNull();
+  });
+  it('무기 4+1종: 시퀀스·탄 수·샷건 거리 감쇠', () => {
+    const g = new GroundSim({ seed: 5 }); clean(g); g.p.weapon = 'shotgun'; g.p.ammo = 5;
+    g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(g.bullets.length).toBe(6); expect(g.p.ammo).toBe(4);
+    const h = new GroundSim({ seed: 5 }); clean(h); h.p.weapon = 'rail'; h.p.ammo = 3; h.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(h.bullets[0].dmg).toBe(WEAPONS.rail.dmg);
+    const near = new GroundSim({ seed: 5 }), far = new GroundSim({ seed: 5 });
+    for (const [s, d] of [[near, 100], [far, 700]] as [GroundSim, number][]) { clean(s); s.p.x = 9 * TILE; s.p.y = 120 * TILE; const e = add(s, 'heavy', s.p.x, s.p.y - d - 80, 90); const hp0 = e.hp; s.p.weapon = 'shotgun'; s.p.ammo = 5; run(s, 40, { ...NO_INPUT, fire: true, ax: 0, ay: -1 }); (e as unknown as { d: number }).d = hp0 - e.hp; }
+    expect(near.enemies[0].hp).toBeLessThan(far.enemies[0].hp);
+  });
+  it('사살 수: 권총 2방(체력 60) / 근접 2방 / 총알은 피격 효과표대로', () => {
+    expect(Math.ceil(60 / FEEL.pistol.dmg)).toBe(2); expect(Math.ceil(60 / FEEL.melee.dmg)).toBe(2);
+    const g = new GroundSim({ seed: 5 }); clean(g); g.p.x = 9 * TILE; g.p.y = 120 * TILE; const e = add(g, 'rifle', g.p.x, g.p.y - 300, 90);
+    for (let i = 0; i < 2; i++) { g.p.cd = 0; g.p.seq = null; g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); run(g, 20); }
+    expect(g.enemies.includes(e)).toBe(false); expect(g.dying.includes(e) || g.drain().some(v => v.t === 'kill')).toBe(true);
+  });
+  it('소음: 총을 쏘면 같은 구역의 경계 전 적이 즉시 경계한다 (샷건 800 > 권총 600)', () => {
+    const g = new GroundSim({ seed: 6 }); clean(g); g.p.x = 9 * TILE; g.p.y = 120 * TILE;
+    const e = add(g, 'rifle', g.p.x, g.p.y - 700, 90); e.ang = 90; e.base = 0;
+    g.p.weapon = 'pistol'; g.step({ ...NO_INPUT, fire: true, ax: 0, ay: 1 }); expect(e.state).toBe('idle');
+    g.p.weapon = 'shotgun'; g.p.ammo = 5; g.p.cd = 0; g.p.seq = null; g.step({ ...NO_INPUT, fire: true, ax: 0, ay: 1 }); expect(e.state).toBe('alert');
+  });
+  it('시야: 정면 시야각 안에서 보이면 경계하고, 등 뒤나 벽 너머는 보지 못한다', () => {
+    const g = new GroundSim({ seed: 6 }); clean(g); g.p.x = 9 * TILE; g.p.y = 120 * TILE;
+    const front = add(g, 'rifle', g.p.x - 300, g.p.y, 0), back = add(g, 'rifle', g.p.x + 300, g.p.y, 0);   // 둘 다 오른쪽(0)을 본다: front 는 플레이어를 보고, back 은 등을 돌림
+    front.base = 0; back.base = 0; run(g, 5);
+    expect(front.state).toBe('alert'); expect(back.state).toBe('idle');
+  });
+  it('쓰러지는 방향: 등 뒤에서 맞으면 앞으로 엎어지고, 정면에서 맞으면 뒤로 쓰러진다', () => {
+    const g = new GroundSim({ seed: 7 }); clean(g); g.p.x = 9 * TILE; g.p.y = 120 * TILE;
+    const kill = (facing: number): boolean => { const e = add(g, 'rifle', g.p.x, g.p.y - 300, facing); e.ang = facing; e.base = facing; e.hp = 1; bullet(g, { x: e.x, y: e.y + 80, vy: -14, friendly: true, w: 'pistol', life: 20 }); run(g, 8); return g.dying[g.dying.length - 1].fallF; };
+    expect(kill(-Math.PI / 2)).toBe(true);    // 총알(위로)과 같은 방향을 보고 있었다 = 등 뒤
+    expect(kill(Math.PI / 2)).toBe(false);    // 총알을 마주 보고 있었다 = 정면
+  });
+  it('시체는 총알 방향으로 미끄러지다 멈추면 바닥 데칼로 합성(stamp)되고 사라진다', () => {
+    const g = new GroundSim({ seed: 7 }); clean(g); g.p.x = 9 * TILE; g.p.y = 120 * TILE;
+    const e = add(g, 'rifle', g.p.x, g.p.y - 300, 90); e.hp = 1; bullet(g, { x: e.x, y: e.y + 80, vy: -14, friendly: true, w: 'shotgun', life: 20 }); run(g, 8);
+    expect(g.dying.length).toBe(1); const y0 = g.dying[0].y; run(g, 10); expect(g.dying[0].y).toBeLessThan(y0 - 5);
+    const evs: string[] = []; for (let i = 0; i < 120; i++) { g.step(NO_INPUT); for (const v of g.drain()) evs.push(v.t); }
+    expect(evs).toContain('stamp'); expect(g.dying.length).toBe(0);
+  });
+  it('폭탄: 시야가 있는 적을 죽이고 벽 너머의 적은 죽이지 않는다', () => {
+    const g = new GroundSim({ seed: 8 }); clean(g); g.p.x = 9 * TILE; g.p.y = 120 * TILE;
+    const open = add(g, 'rifle', g.p.x + 320, g.p.y - 60, 0), beyond = add(g, 'rifle', g.p.x, 101.5 * TILE, 0);   // 계단실 벽 너머
+    g.p.hp = 99; g.p.maxHp = 99; g.p.invuln = 99999;
+    g.step({ ...NO_INPUT, bomb: true, ax: 1, ay: 0.001 }); run(g, 150);
+    expect(g.enemies.includes(open)).toBe(false); expect(g.enemies.includes(beyond)).toBe(true);
+  });
+  it('적이 무기를 떨구고, 권총일 때는 닿으면 줍고 다른 총을 들었으면 줍기 입력이 필요하다', () => {
+    const g = new GroundSim({ seed: 10 }); clean(g); g.p.x = 9 * TILE; g.p.y = 120 * TILE;
     g.pickups = [{ id: 7, kind: 'weapon', weapon: 'shotgun', ammo: 7, x: g.p.x, y: g.p.y, t: 0, section: 0 }];
     g.step(NO_INPUT); expect(g.p.weapon).toBe('shotgun'); expect(g.p.ammo).toBe(7);
     g.pickups = [{ id: 8, kind: 'weapon', weapon: 'smg', ammo: 50, x: g.p.x, y: g.p.y, t: 0, section: 0 }]; g.p.pickCd = 0;
-    g.step(NO_INPUT); expect(g.p.weapon).toBe('shotgun');   // 입력 없으면 안 줍는다
-    g.step({ ...NO_INPUT, pickup: true }); expect(g.p.weapon).toBe('smg');
-    expect(g.pickups.some(k => k.weapon === 'shotgun' && k.dropped)).toBe(true);   // 들고 있던 총은 바닥에 떨어진다
+    g.step(NO_INPUT); expect(g.p.weapon).toBe('shotgun');
+    g.step({ ...NO_INPUT, pickup: true }); expect(g.p.weapon).toBe('smg'); expect(g.pickups.some(k => k.weapon === 'shotgun' && k.dropped)).toBe(true);
   });
   it('봇이 맵을 끝까지 돌파한다 (여러 시드 중 일부는 클리어)', () => {
     let wins = 0, maxSec = 0;
