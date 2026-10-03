@@ -18,7 +18,9 @@ const SPARK: Record<GKind, string> = { rifle: '#fca5a5', charger: '#fca5a5', sni
 /** 픽셀 아트 표시 배율 (판정은 그대로, 눈에 잘 띄게 키운다). 보스는 원본 크기가 이미 크다 */
 const TIP_D = [58, 51, 60, 55];   // 시트 방향별(아래·왼·위·오른쪽) 몸통 중심 → 총구 거리(px)
 const DIR_ANG = [Math.PI / 2, Math.PI, -Math.PI / 2, 0];   // 각 방향 프레임이 바라보는 각도
-const K = { player: 1.2, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
+const K = { player: 0.8, cover: 1.3, enemy: 1.3, tank: 1.15, boss: 1.0, heavy: 1.6, dog: 0.95 };
+/** 사람형 적은 플레이어와 같은 몸(p4_top)을 색만 달리해 쓴다: 변형 번호(시트 블록)와 표시 배율 */
+const HUMAN: Partial<Record<GKind, { v: number; k: number }>> = { rifle: { v: 1, k: 0.8 }, charger: { v: 2, k: 0.86 }, sniper: { v: 3, k: 0.8 }, heavy: { v: 4, k: 1.1 }, dog: { v: 5, k: 0.58 } };
 const HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
 const CAM_FOLLOW_Y = 520;   // 플레이어가 화면 아래쪽 1/3에 오도록 (위가 진행 방향)
 
@@ -139,7 +141,7 @@ export class GroundScene extends Phaser.Scene {
     this.playerImg = this.add.image(0, 0, `g_${SKIN[this.g.opts.pilot]}_b`);
     const fxLayer = this.add.container(0, 0);
     this.fx = new Fx(this, fxLayer);
-    this.world.add([tileImg, this.decals, this.shadowG, this.corpseLayer, this.pickupLayer, this.coverLayer, this.doorG, this.actorLayer, this.playerImg, this.bulletG, this.ovG, fxLayer]);
+    this.world.add([tileImg, this.decals, this.shadowG, this.corpseLayer, this.pickupLayer, this.doorG, this.actorLayer, this.playerImg, this.coverLayer, this.bulletG, this.ovG, fxLayer]);
   }
 
   /** 아틀라스(8×4, 칸 96px)에서 한 칸의 (sx,sy,sw,sh) 영역을 (x,y) 25×25 에 그린다 */
@@ -521,9 +523,8 @@ export class GroundScene extends Phaser.Scene {
     for (const c of g.corpses) {
       let img = this.corpseImgs.get(c.id);
       if (!img) { img = this.add.image(c.x, c.y, c.kind === 'boss' ? 'b2_dmg2' : 'p2_corpse').setTint(c.kind === 'boss' ? 0x777777 : c.kind === 'dog' ? 0xb08a5a : 0xcc7a6a); this.corpseLayer.add(img); this.corpseImgs.set(c.id, img); }
-      const ks = (c.kind === 'boss' ? K.boss : c.kind === 'heavy' ? K.heavy : c.kind === 'dog' ? K.dog : K.enemy);
       if (c.kind === 'boss') img.setVisible(this.onScreen(c.y)).setPosition(px(c.x), px(c.y)).setScale(1).setAlpha(0.92);
-      else img.setVisible(this.onScreen(c.y)).setPosition(px(c.x), px(c.y)).setRotation(c.a - Math.PI / 2).setScale(ks * 0.78 * (c.kind === 'dog' ? 0.7 : 1)).setAlpha(0.95);
+      else img.setVisible(this.onScreen(c.y)).setPosition(px(c.x), px(c.y)).setRotation(c.a - Math.PI / 2).setScale(c.kind === 'heavy' ? 0.95 : c.kind === 'dog' ? 0.5 : 0.7).setAlpha(0.95);
     }
     // 문 (스윙 도어 판): 열린 방향은 플레이어 반대쪽
     for (let r = Math.max(0, Math.floor(this.camY / TILE) - 1); r < Math.min(ROWS, Math.floor((this.camY + H) / TILE) + 2); r++) for (let c = 0; c < COLS; c++) {
@@ -550,18 +551,22 @@ export class GroundScene extends Phaser.Scene {
     for (const e of g.enemies) {
       live.add(e.id);
       let img = this.enemyImgs.get(e.id);
-      if (!img) { img = this.add.image(e.x, e.y, ENEMY_TEX[e.kind]); this.actorLayer.add(img); this.enemyImgs.set(e.id, img); }
+      const hm = HUMAN[e.kind];
+      if (!img) { img = hm ? this.add.image(e.x, e.y, 'p4_top', hm.v * 40) : this.add.image(e.x, e.y, ENEMY_TEX[e.kind]); this.actorLayer.add(img); this.enemyImgs.set(e.id, img); }
       const vis = this.onScreen(e.y, 120); img.setVisible(vis);
       if (!vis) continue;
       const ks = e.kind === 'boss' ? K.boss : e.kind === 'tank' ? K.tank : e.kind === 'heavy' ? K.heavy : e.kind === 'dog' ? K.dog : K.enemy, bob = e.kind === 'drone' ? Math.sin(t * 0.012 + e.id) * 2 : 0;
       if (e.kind === 'boss') img.setTexture(this.bossFrame(e));
-      img.setPosition(px(e.x), px(e.y + bob)).setRotation(this.spriteRot(e)).setScale(ks, e.kind === 'dog' ? ks * 0.7 : ks);
+      if (hm) {   // 플레이어와 같은 4방향 몸: 이동하면 대기+걷기 4프레임, 발사 중이면 사격 프레임, 시선 방향으로 회전
+        const st = (img.getData('mv') as { x: number; y: number; ph: number } | undefined) ?? { x: e.x, y: e.y, ph: 0 }, moved = Math.hypot(e.x - st.x, e.y - st.y) > 0.25;
+        st.ph += moved ? (e.kind === 'dog' ? 0.34 : 0.2) : 0; st.x = e.x; st.y = e.y; img.setData('mv', st);
+        const d = this.dirOf(e.ang), col = e.fire > 0 ? 7 + (Math.floor(t / 50) % 3) : moved ? Math.floor(st.ph) % 4 : 0;
+        img.setTexture('p4_top', hm.v * 40 + d * 10 + col).setOrigin(0.5, 0.5).setPosition(px(e.x), px(e.y)).setRotation(Math.atan2(Math.sin(e.ang - DIR_ANG[d]), Math.cos(e.ang - DIR_ANG[d]))).setScale(hm.k);
+      } else img.setPosition(px(e.x), px(e.y + bob)).setRotation(this.spriteRot(e)).setScale(ks);
       if (e.flash > 0) img.setTintFill(0xffffff);
       else if (e.state === 'STUN') img.setTint(0xffcc66);
-      else if (e.kind === 'heavy') img.setTint(0x9aa7b8);
-      else if (e.kind === 'dog') img.setTint(0xb08a5a);
       else img.clearTint();
-      this.shadowG.fillStyle(0x000000, 0.3).fillEllipse(e.x + 2, e.y + e.r * 0.8, e.r * 1.7, e.r * 0.7);
+      if (hm) this.shadowG.fillStyle(0x000000, 0.3).fillEllipse(e.x + 3, e.y + 6, e.r * 2, e.r * 1.1); else this.shadowG.fillStyle(0x000000, 0.3).fillEllipse(e.x + 2, e.y + e.r * 0.8, e.r * 1.7, e.r * 0.7);
       // 시야 부채꼴: 경계 전 적의 시야를 벽에 막히는 만큼만 보여 준다 (은신 플레이용)
       if (e.aw < 2 && e.kind !== 'drone' && e.kind !== 'turret') this.drawCone(e);
       if (e.state === 'WIND') {

@@ -1,5 +1,5 @@
 import { createRng, type Rng } from './rng';
-import { COLS, ROWS, SECTIONS, T, TILE, WORLD_H, WORLD_W, blocksBullet, blocksMove, blocksSight, buildLevel, flowField, rayBlocked, sectionOfRow, tileAt, type Level } from './groundmap';
+import { COLS, ROWS, SECTIONS, T, TILE, WORLD_H, WORLD_W, blocksBullet, blocksMove, blocksSight, buildLevel, flowField, sectionOfRow, tileAt, type Level } from './groundmap';
 
 /**
  * 지상전 「강하」 규칙 (순수 TS, Phaser 무관). 한 틱 = 1/60초.
@@ -22,7 +22,7 @@ export const WEAPONS: Record<WeaponId, { name: string; dmg: number; cd: number; 
 export const GROUND = {
   hp: 4, speed: 3.1, radius: 8,
   rollFrames: 18, rollInvuln: 24, rollSpeed: 8.2, rollCd: 66,
-  hurtInvuln: 60, comboFrames: 150, grenadeCd: 40,
+  hurtInvuln: 60, moveRadius: 11, comboFrames: 150, grenadeCd: 40,
   viewDist: 330, viewHalf: 0.96, reactFrames: 9, doorStun: 100,
 } as const;
 
@@ -44,7 +44,7 @@ export interface GEnemy {
   state: 'IDLE' | 'WIND' | 'DASH' | 'STUN';
   aw: 0 | 1 | 2;                      // 0 순찰·대기 / 1 소음 조사 / 2 교전
   react: number; look: number; tx: number; ty: number;   // 반응 지연, 조사 후 두리번 시간, 조사 목표
-  t: number; cd: number; ang: number; lx: number; ly: number; dir: number; burst: number; flash: number; phase: number; styled: boolean;
+  t: number; cd: number; fire: number; ang: number; lx: number; ly: number; dir: number; burst: number; flash: number; phase: number; styled: boolean;
   home: { x: number; y: number; ang: number }; patrol?: [number, number][]; pi: number; moved: number;
 }
 export interface GBullet { x: number; y: number; vx: number; vy: number; r: number; dmg: number; friendly: boolean; pierce: number; hit: number[]; life: number; kind?: 'normal' | 'throw' | 'sniper'; src?: GKind; w?: WeaponId }
@@ -81,12 +81,13 @@ export type GEvent =
   | { t: 'exitopen' }
   | { t: 'win' } | { t: 'dead' };
 
-const COVER_SIZE: Record<CoverKind, [number, number]> = { barrier: [78, 26], crate: [42, 31], stack: [27, 47], crates2: [36, 44], barrel: [18, 28] };
+// 충돌 크기 = 그려지는 크기(스프라이트 ×1.3)의 약 92%: 캐릭터가 엄폐물과 겹쳐 보이지 않게
+const COVER_SIZE: Record<CoverKind, [number, number]> = { barrier: [76, 31], crate: [43, 33], stack: [28, 48], crates2: [38, 45], barrel: [19, 28] };
 export const SECTION_COUNT = SECTIONS.length;
 
 const ENEMY_DEF: Record<GKind, { hp: number; r: number; pts: number }> = {
   rifle: { hp: 1.2, r: 13, pts: 100 }, charger: { hp: 2, r: 15, pts: 160 }, sniper: { hp: 1.2, r: 12, pts: 220 }, heavy: { hp: 8, r: 18, pts: 400 }, dog: { hp: 1.2, r: 11, pts: 120 },
-  turret: { hp: 11, r: 24, pts: 220 }, drone: { hp: 1, r: 10, pts: 40 }, tank: { hp: 55, r: 46, pts: 900 }, boss: { hp: 160, r: 62, pts: 4000 },
+  turret: { hp: 11, r: 24, pts: 220 }, drone: { hp: 1, r: 10, pts: 40 }, tank: { hp: 55, r: 46, pts: 900 }, boss: { hp: 130, r: 62, pts: 4000 },
 };
 const DROPS: Partial<Record<GKind, { w: WeaponId; p: number }>> = { rifle: { w: 'smg', p: 0.4 }, heavy: { w: 'shotgun', p: 0.7 }, sniper: { w: 'rail', p: 0.3 } };
 
@@ -144,7 +145,7 @@ export class GroundSim {
     const d = ENEMY_DEF[kind];
     const e: GEnemy = {
       id: this.nextId++, kind, x, y, r: d.r, hp: d.hp, maxHp: d.hp, section: sectionOfRow(Math.floor(y / TILE)), state: 'IDLE', aw: 0, react: 0, look: 0, tx: x, ty: y,
-      t: 0, cd: 40 + Math.floor(this.rng() * 50), ang, lx: 0, ly: 0, dir: this.rng() < 0.5 ? -1 : 1, burst: 0, flash: 0, phase: 1, styled: false, home: { x, y, ang }, patrol, pi: 0, moved: 0,
+      t: 0, cd: 40 + Math.floor(this.rng() * 50), fire: 0, ang, lx: 0, ly: 0, dir: this.rng() < 0.5 ? -1 : 1, burst: 0, flash: 0, phase: 1, styled: false, home: { x, y, ang }, patrol, pi: 0, moved: 0,
     };
     this.enemies.push(e);
     return e;
@@ -207,7 +208,17 @@ export class GroundSim {
     const a = Math.atan2(by - e.y, bx - e.x); this.move(e, Math.cos(a) * speed, Math.sin(a) * speed, r);
     return true;
   }
-  canSee(ax: number, ay: number, bx: number, by: number): boolean { return !rayBlocked(this.tiles, ax, ay, bx, by, blocksSight); }
+  /** 시야: 벽·닫힌 문이 가린다. 열려 있는 문(누가 서 있거나 지나가는 중)은 투명 */
+  canSee(ax: number, ay: number, bx: number, by: number): boolean {
+    const dx = bx - ax, dy = by - ay, n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / (TILE / 2)));
+    for (let i = 1; i < n; i++) {
+      const x = ax + (dx * i) / n, y = ay + (dy * i) / n, t = tileAt(this.tiles, x, y);
+      if (!blocksSight(t)) continue;
+      if (t === T.DOOR && (this.doorT.get(Math.floor(y / TILE) * COLS + Math.floor(x / TILE)) ?? 0) > 0) continue;
+      return false;
+    }
+    return true;
+  }
 
   // ---------------------------------------------------------------- 틱
   step(inp: GInput): void {
@@ -269,10 +280,10 @@ export class GroundSim {
     }
     p.moving = false;
     if (p.rollT > 0) {
-      p.rollT--; this.move(p, p.rdx * GROUND.rollSpeed, p.rdy * GROUND.rollSpeed, p.r, true);
+      p.rollT--; this.move(p, p.rdx * GROUND.rollSpeed, p.rdy * GROUND.rollSpeed, GROUND.moveRadius, true);
       if (p.rollT === 0) p.dashBonus = 40;   // 구르기 직후 첫 사격 강화 (대시-킬)
     } else {
-      this.move(p, mx * GROUND.speed, my * GROUND.speed, p.r, true);
+      this.move(p, mx * GROUND.speed, my * GROUND.speed, GROUND.moveRadius, true);   // 이동 판정은 몸통 크기(탄 판정은 더 작은 p.r)
       if (m > 0.1) { p.walk += 0.28; p.moving = true; }
     }
     // 조준: 조준 입력이 있으면 그 방향, 없으면(발사 중) 가장 가까운 적 자동 조준, 둘 다 없으면 이동 방향
@@ -397,6 +408,7 @@ export class GroundSim {
 
   // ---------------------------------------------------------------- 적
   private enemyShot(e: GEnemy, ang: number, speed: number, dmg = 1, r = 3.5, kind: GBullet['kind'] = 'normal'): void {
+    e.fire = 6;   // 발사 프레임(총구 화염) 표시용
     this.bullets.push({ x: e.x + Math.cos(ang) * (e.r * 0.8), y: e.y + Math.sin(ang) * (e.r * 0.8), vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, r, dmg, friendly: false, pierce: 0, hit: [], life: 240, kind, src: e.kind });
   }
   private angToPlayer(e: GEnemy): number { return Math.atan2(this.p.y - e.y, this.p.x - e.x); }
@@ -407,6 +419,7 @@ export class GroundSim {
       const e = this.enemies[i];
       if (!e) continue;
       if (e.flash > 0) e.flash--;
+      if (e.fire > 0) e.fire--;
       const dist = Math.hypot(p.x - e.x, p.y - e.y);
       if (e.aw === 0 && dist > 900) continue;                     // 멀리 있는 경계 전 적은 쉰다
       if (e.state === 'STUN') { if (--e.t <= 0) { e.state = 'IDLE'; e.cd = 40; } continue; }
@@ -588,7 +601,8 @@ export class GroundSim {
       for (let s = 0; s < sub && !gone; s++) {
         b.x += b.vx / sub; b.y += b.vy / sub;
         const t = tileAt(this.tiles, b.x, b.y);
-        if (blocksBullet(t)) { this.emit({ t: 'wallhit', x: b.x - b.vx / sub, y: b.y - b.vy / sub, ang: Math.atan2(b.vy, b.vx) }); gone = true; break; }
+        const openDoor = t === T.DOOR && (this.doorT.get(Math.floor(b.y / TILE) * COLS + Math.floor(b.x / TILE)) ?? 0) > 0;   // 열린(누가 서 있거나 지나가는) 문은 탄이 통과
+        if (blocksBullet(t) && !openDoor) { this.emit({ t: 'wallhit', x: b.x - b.vx / sub, y: b.y - b.vy / sub, ang: Math.atan2(b.vy, b.vx) }); gone = true; break; }
         const c = this.blocked(b.x, b.y);
         if (c) { if (c.kind === 'barrel') this.breakCover(c); if (!(b.friendly && b.pierce > 0 && c.kind === 'barrel')) { this.emit({ t: 'wallhit', x: b.x, y: b.y, ang: Math.atan2(b.vy, b.vx) }); gone = true; } break; }
         if (b.friendly) {

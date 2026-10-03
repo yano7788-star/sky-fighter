@@ -50,8 +50,8 @@ export function buildLevel(): Level {
     fill(6, b + 2, 6, b + 27, T.WALL); fill(11, b + 2, 11, b + 27, T.WALL);   // 복도와 방 사이 벽
     fill(0, b + 28, 6, b + 28, T.WALL); fill(11, b + 28, 17, b + 28, T.WALL);
     for (const r of [12, 20]) { fill(1, b + r, 5, b + r, T.WALL); fill(12, b + r, 16, b + r, T.WALL); }   // 방 칸막이
-    for (const r of left) set(6, b + r, T.DOOR);
-    for (const r of right) set(11, b + r, T.DOOR);
+    for (const r of left) { set(6, b + r, T.DOOR); set(6, b + r + 1, T.DOOR); }     // 문은 두 칸 높이 (캐릭터 몸통이 지나갈 폭)
+    for (const r of right) { set(11, b + r, T.DOOR); set(11, b + r + 1, T.DOOR); }
   };
 
   // 1층 (행 68~101)

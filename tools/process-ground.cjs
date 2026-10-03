@@ -215,8 +215,16 @@ async function topSheet(file, out, scale, f = 1, PIV = [62, 70, 62, 70]) {   // 
       const col = 9; for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const si = ((d * S + y) * S * 10 + 8 * S + x) * 4, di = ((d * S + y) * S * 10 + col * S + x) * 4; sheet[di] = sheet[si]; sheet[di + 1] = sheet[si + 1]; sheet[di + 2] = sheet[si + 2]; sheet[di + 3] = sheet[si + 3]; }
     }
   }
+  // 색 변형을 아래로 쌓는다: 0 플레이어 / 1 보병(붉은) / 2 돌격병(주황) / 3 저격수(청색) / 4 헤비(강철) / 5 경비견(황갈) — 같은 몸을 색만 달리해 적으로 쓴다
+  const VARS = [null, [190, 60, 52, 0.5], [205, 120, 40, 0.5], [60, 95, 175, 0.5], [120, 135, 155, 0.5], [165, 120, 70, 0.5]], blockBytes = S * 10 * S * 4 * 4, all = Buffer.alloc(blockBytes * VARS.length);
+  VARS.forEach((v, vi) => {
+    sheet.copy(all, vi * blockBytes);
+    if (!v) return;
+    for (let i = 0; i < blockBytes; i += 4) { const o = vi * blockBytes + i; if (!all[o + 3]) continue; const r = all[o], g = all[o + 1], b = all[o + 2], skin = r > 110 && r > g + 25 && r > b + 35 && r < 190;   // 얼굴·머리 갈색은 유지
+      if (skin && vi !== 1) continue; all[o] = Math.round(r * (1 - v[3]) + v[0] * v[3] * (0.55 + (r + g + b) / 765)); all[o + 1] = Math.round(g * (1 - v[3]) + v[1] * v[3] * (0.55 + (r + g + b) / 765)); all[o + 2] = Math.round(b * (1 - v[3]) + v[2] * v[3] * (0.55 + (r + g + b) / 765)); }
+  });
   const outFile = path.join(OUT, out + '.png');
-  await sharp(sheet, { raw: { width: S * 10, height: S * 4, channels: 4 } }).png({ palette: true, colors: 48, dither: 0, effort: 10 }).toFile(outFile);
+  await sharp(all, { raw: { width: S * 10, height: S * 4 * VARS.length, channels: 4 } }).png({ palette: true, colors: 128, dither: 0, effort: 10 }).toFile(outFile);
   console.log(out, 'cell', S, (fs.statSync(outFile).size / 1024).toFixed(1) + 'KB', 'idle tip dist (px)', tips.map(t => Math.round(t[0])).join(','));
 }
 
