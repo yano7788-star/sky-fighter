@@ -10,7 +10,6 @@ import type { GroundTest } from '../groundtest';
 import { newSimpleState, preciseAim, simpleControl, type ControlMode } from '../core/groundinput';
 
 const CTL_KEY = 'sf-ground-ctl';
-const loadCtl = (): ControlMode | null => { try { const v = localStorage.getItem(CTL_KEY); return v === 'simple' || v === 'precise' ? v : null; } catch { return null; } };
 const LAY_KEY = 'sf-ground-lay';
 const loadLay = (): 'land' | 'port' | null => { try { const v = localStorage.getItem(LAY_KEY); return v === 'land' || v === 'port' ? v : null; } catch { return null; } };
 const saveLay = (v: 'land' | 'port'): void => { try { localStorage.setItem(LAY_KEY, v); } catch { /* 무시 */ } };
@@ -154,10 +153,10 @@ export class GroundScene extends Phaser.Scene {
     this.whiteFlash = this.add.rectangle(0, 0, W, H, 0xffffff, 0).setOrigin(0, 0);
     this.root.add([this.veil, this.redFlash, this.whiteFlash]);
     this.bindInput();
-    const saved = loadCtl(); this.ctl = this.test?.ctl ?? saved ?? (this.isTouch() ? 'simple' : 'precise'); this.choosing = !this.test && this.isTouch() && saved === null;   // 터치 기기는 처음에 한 번 조작 방식을 고른다
+    this.ctl = 'precise'; this.choosing = false;   // 터치 기기는 처음에 한 번 조작 방식을 고른다
     this.applyLayout(true);
     this.resizeFn = () => this.applyLayout(); window.addEventListener('resize', this.resizeFn); window.addEventListener('orientationchange', this.resizeFn);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { if (this.resizeFn) { window.removeEventListener('resize', this.resizeFn); window.removeEventListener('orientationchange', this.resizeFn); } this.scale.setGameSize(W * R, H * R); });   // 본편은 항상 세로
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { if (this.resizeFn) { window.removeEventListener('resize', this.resizeFn); window.removeEventListener('orientationchange', this.resizeFn); } this.rotated = false; this.landscape = false; this.applyRotation(); this.scale.setGameSize(W * R, H * R); });   // 본편은 항상 세로
     this.world.setVisible(false); this.ui.setVisible(false);
     if (this.test?.skipIntro) { this.world.setVisible(true); this.ui.setVisible(true); this.veil.setAlpha(0); this.stage = 'PLAY'; this.tutorialT = 60 * 7; }
     else this.runIntro();
@@ -230,11 +229,11 @@ export class GroundScene extends Phaser.Scene {
   /** 화면 방향에 맞춰 논리 화면 크기(세로 450×800 / 가로 800×450)와 HUD·컨트롤 배치를 다시 잡는다 */
   private applyLayout(force = false): void {
     const wide = window.innerWidth > window.innerHeight * 1.1, pref = loadLay(), land = this.test?.layout === 'landscape' ? true : this.test?.layout === 'portrait' ? false : pref ? pref === 'land' : wide;
-    const vw = land ? 800 : W, vh = land ? 450 : H, changed = vw !== this.vw || vh !== this.vh;
+    const asp = Math.max(16 / 9, Math.min(2.3, Math.max(window.innerWidth, window.innerHeight) / Math.max(1, Math.min(window.innerWidth, window.innerHeight)))), vw = land ? Math.round((450 * asp) / 2) * 2 : W, vh = land ? 450 : H, changed = vw !== this.vw || vh !== this.vh;
     this.landscape = land; this.vw = vw; this.vh = vh;
     if (changed || force) { this.scale.setGameSize(vw * R, vh * R); this.cameras.main.setSize(vw * R, vh * R); }
     for (const r of [this.veil, this.redFlash, this.whiteFlash]) r.setSize(vw, vh).setPosition(0, 0);
-    this.layoutHud();
+    this.layoutHud(); this.applyRotation();
     if (this.cutImg.visible && this.cutKey) this.cover2(this.cutKey, this.cutImg.alpha);
     if (changed && this.cam) this.cam.y = Math.max(0, Math.min(WORLD_H - this.viewH, this.g.p.y - this.viewH * 0.6));
   }
@@ -257,16 +256,10 @@ export class GroundScene extends Phaser.Scene {
     this.banner.setPosition(vw / 2, vh * 0.4); this.ovT?.setPosition(vw / 2, vh / 2);
     // 컨트롤 배치 (엄지가 닿는 오른쪽 아래에 사격 버튼을 크게, 나머지는 호 모양으로)
     this.pauseBtn = { x: vw - 26, y: 52, r: 16 }; this.rotBtn = { x: vw - 26, y: 90, r: 16 };
-    if (this.ctl === 'simple') {
-      const F = L ? { x: vw - 95, y: vh - 92, r: 48 } : { x: vw - 78, y: vh - 130, r: 46 };
-      this.fireBtn = F;
-      this.btns = L ? [{ name: 'roll', x: F.x - 102, y: F.y + 24, r: 32 }, { name: 'melee', x: F.x - 74, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x + 6, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 158, y: F.y - 30, r: 30 }]
-        : [{ name: 'roll', x: F.x - 92, y: F.y + 28, r: 32 }, { name: 'melee', x: F.x - 80, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 150, y: F.y - 24, r: 30 }];
-    } else {
-      this.fireBtn = { x: -999, y: -999, r: 0 };
-      const names: ('roll' | 'melee' | 'bomb' | 'pick')[] = ['roll', 'melee', 'bomb', 'pick'];
-      this.btns = names.map((name, i) => L ? { name, x: vw - 46, y: 118 + i * 66, r: 31 } : { name, x: vw - 46, y: vh - 244 - i * 70, r: 31 });
-    }
+    this.fireBtn = { x: -999, y: -999, r: 0 };   // 정밀 모드만 남김: 사격은 오른쪽 조준 스틱, 버튼은 그 옆 호 모양
+    const F = L ? { x: vw - 95, y: vh - 92 } : { x: vw - 78, y: vh - 130 };
+    this.btns = L ? [{ name: 'roll', x: F.x - 102, y: F.y + 24, r: 32 }, { name: 'melee', x: F.x - 74, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x + 6, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 158, y: F.y - 30, r: 30 }]
+      : [{ name: 'roll', x: F.x - 92, y: F.y + 28, r: 32 }, { name: 'melee', x: F.x - 80, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 150, y: F.y - 24, r: 30 }];
   }
 
   // ---------------------------------------------------------------- 입력
@@ -280,7 +273,7 @@ export class GroundScene extends Phaser.Scene {
       this.keys.add(k);
       if (k === 'p' || k === 'escape') { this.setPaused(!this.paused); return; }
       if (this.stage === 'DEAD' && (k === 'r' || k === 'enter' || k === ' ')) { this.deadConfirm(); return; }
-      if (this.paused) { if (k === 'enter') this.setPaused(false); else if (k === 't') this.pressQuit(); else if (k === 'c') this.setCtl(this.ctl === 'simple' ? 'precise' : 'simple'); return; }
+      if (this.paused) { if (k === 'enter') this.setPaused(false); else if (k === 't') this.pressQuit(); return; }
       if (this.choosing) return;
       if (k === 'shift' || k === ' ') this.rollQ = true;
       if (k === 'f') this.meleeQ = true;
@@ -297,8 +290,37 @@ export class GroundScene extends Phaser.Scene {
     window.addEventListener('blur', onBlur);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => window.removeEventListener('blur', onBlur));
   }
-  private lx(p: Phaser.Input.Pointer): number { return p.x / R; }
-  private ly(p: Phaser.Input.Pointer): number { return p.y / R; }
+  /** 가로 레이아웃인데 폰이 세로로 서 있으면 캔버스를 CSS로 90° 돌려 화면을 가득 채운다 → 포인터 좌표를 직접 역변환 */
+  private rotated = false; private rotFit = { w: 1, h: 1 };
+  private applyRotation(): void {
+    const rot = this.landscape && window.innerHeight > window.innerWidth * 1.05, el = document.getElementById('game');
+    if (!el) return;
+    this.rotated = rot;
+    const sm = this.scale;
+    if (rot) {   // Phaser 의 FIT 은 회전된 부모의 getBoundingClientRect 를 써서 틀어지므로, 회전 중에는 NONE + 줌으로 직접 맞춘다
+      Object.assign(el.style, { position: 'fixed', top: '0', left: window.innerWidth + 'px', width: window.innerHeight + 'px', height: window.innerWidth + 'px', transformOrigin: 'top left', transform: 'rotate(90deg)', display: 'flex', alignItems: 'center', justifyContent: 'center' });
+      sm.scaleMode = Phaser.Scale.NONE; sm.autoCenter = Phaser.Scale.NO_CENTER; sm.refresh();
+      const z = Math.min(window.innerHeight / this.vw, window.innerWidth / this.vh); this.rotFit = { w: this.vw * z, h: this.vh * z };
+      sm.canvas.style.width = this.rotFit.w + 'px'; sm.canvas.style.height = this.rotFit.h + 'px'; sm.canvas.style.marginLeft = sm.canvas.style.marginTop = '0';
+      return;
+    } else {
+      Object.assign(el.style, { position: '', top: '', left: '', width: '', height: '', transformOrigin: '', transform: '', display: '', alignItems: '', justifyContent: '' });
+      sm.scaleMode = Phaser.Scale.FIT; sm.autoCenter = Phaser.Scale.CENTER_BOTH;
+    }
+    sm.refresh();
+  }
+  private ptr(p: Phaser.Input.Pointer): [number, number] {
+    if (!this.rotated) return [p.x / R, p.y / R];
+    const ev = p.event as (TouchEvent | MouseEvent | PointerEvent | undefined);
+    let cx = p.x, cy = p.y;
+    if (ev && 'changedTouches' in ev && ev.changedTouches.length) { const t = Array.from(ev.changedTouches).find(q => q.identifier === (p as unknown as { identifier: number }).identifier) ?? ev.changedTouches[0]; cx = t.clientX; cy = t.clientY; }
+    else if (ev && 'clientX' in ev) { cx = ev.clientX; cy = ev.clientY; }
+    const d = { width: this.rotFit.w, height: this.rotFit.h }, pw = window.innerHeight, ph = window.innerWidth;
+    const lpx = cy, lpy = window.innerWidth - cx, ox = (pw - d.width) / 2, oy = (ph - d.height) / 2;
+    return [((lpx - ox) / d.width) * this.vw, ((lpy - oy) / d.height) * this.vh];
+  }
+  private lx(p: Phaser.Input.Pointer): number { return this.ptr(p)[0]; }
+  private ly(p: Phaser.Input.Pointer): number { return this.ptr(p)[1]; }
   private btnAt(x: number, y: number): 'roll' | 'melee' | 'bomb' | 'pick' | null {
     for (const b of this.btns) { if (b.name === 'pick' && !this.g.nearWeapon()) continue; if (Math.hypot(x - b.x, y - b.y) < b.r + 6) return b.name; }
     return null;
@@ -875,10 +897,9 @@ export class GroundScene extends Phaser.Scene {
     } else {
       T[0].setVisible(true).setText('일시정지').setFontSize(22).setPosition(vw / 2, vh * (land ? 0.14 : 0.2));
       box('resume', vh * (land ? 0.3 : 0.32), 48, '계속하기', T[1]);
-      box('toggle', vh * (land ? 0.46 : 0.44), 60, `조작: ${this.ctl === 'simple' ? '간편 (이동 + 사격 버튼)' : '정밀 (이동 + 조준 스틱)'}\n눌러서 바꾸기`, T[2]);
-      box('rotate', vh * (land ? 0.62 : 0.56), 48, `화면: ${land ? '가로' : '세로'} → ${land ? '세로' : '가로'}로 바꾸기`, T[5]);
-      box('quit', vh * (land ? 0.78 : 0.68), 48, this.quitArmed ? '정말 포기? 한 번 더 누르세요' : '포기하고 본편으로', T[3], this.quitArmed);
-      T[4].setVisible(true).setText('키보드: Enter 계속 · C 조작 전환 · T 두 번 포기').setFontSize(12).setPosition(vw / 2, vh * (land ? 0.93 : 0.78));
+      box('rotate', vh * (land ? 0.5 : 0.46), 48, `화면: ${land ? '가로' : '세로'} → ${land ? '세로' : '가로'}로 바꾸기`, T[5]);
+      box('quit', vh * (land ? 0.68 : 0.6), 48, this.quitArmed ? '정말 포기? 한 번 더 누르세요' : '포기하고 본편으로', T[3], this.quitArmed);
+      T[4].setVisible(true).setText('키보드: Enter 계속 · T 두 번 포기').setFontSize(12).setPosition(vw / 2, vh * (land ? 0.93 : 0.78));
     }
   }
   private overlayText(): void {
