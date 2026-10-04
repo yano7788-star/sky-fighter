@@ -19,7 +19,7 @@ export interface WeaponDef { name: string; dmg: number; cd: number; speed: numbe
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   pistol:  { name: '권총',       dmg: 34,  cd: f(0.26),  speed: 1050 / 60, spread: 0.02, pellets: 1, life: 90, noise: 600, move: 255 / 60, muzzle: [13, 2], ammo: Infinity, pierce: 0, seq: [['shoot', f(0.1)]] },
   rifle:   { name: '소총',       dmg: 20,  cd: f(0.11),  speed: 1200 / 60, spread: 0.03, pellets: 1, life: 90, noise: 700, move: 255 / 60, muzzle: [14, 0], ammo: 60,       pierce: 0, seq: [['shoot', f(0.07)]] },
-  silenced: { name: '소음기 권총', dmg: 30, cd: f(0.28), speed: 1000 / 60, spread: 0.02, pellets: 1, life: 90, noise: 60, move: 250 / 60, muzzle: [21, 2], ammo: 24, pierce: 0, seq: [['shoot', f(0.1)]] },   // 소음 거의 0: 바로 옆이 아니면 아무도 못 듣는다
+  silenced: { name: '소음기 권총', dmg: 30, cd: f(0.28), speed: 1000 / 60, spread: 0.02, pellets: 1, life: 90, noise: 60, move: 250 / 60, muzzle: [21, 2], ammo: 8, pierce: 0, seq: [['shoot', f(0.1)]] },   // 소음 거의 0: 바로 옆이 아니면 아무도 못 듣는다
   smg:     { name: 'SMG',        dmg: 13,  cd: f(0.075), speed: 1100 / 60, spread: 0.07, pellets: 1, life: 90, noise: 700, move: 190 / 60, muzzle: [21, 0], ammo: 90,       pierce: 0, seq: [['shoot_a', f(0.06)], ['aim', f(0.3)]] },
   shotgun: { name: '샷건',       dmg: 22,  cd: 0,        speed: 870 / 60,  spread: 0.2,  pellets: 6, life: 25, noise: 800, move: 125 / 60, muzzle: [20, 1], ammo: 8,        pierce: 0, seq: [['shoot', f(0.09)], ['pump_back', f(0.14), 'casing'], ['pump_fwd', f(0.14)], ['aim', f(0.32)]] },
   rail:    { name: '레일 라이플', dmg: 140, cd: f(0.97),  speed: 1800 / 60, spread: 0,    pellets: 1, life: 60, noise: 800, move: 225 / 60, muzzle: [14, 0], ammo: 8,        pierce: 6, seq: [['shoot', f(0.13)]] },
@@ -647,14 +647,17 @@ export class GroundSim {
   /** mult: 샷건 거리 감쇠 / dmgScale: 아군 피해 배율(빌드 보정). first: 샷건은 한 번 발사당 한 번만 히트스톱 */
   private hitEnemy(e: GEnemy, w: FeelKey, ang: number, mult: number, ix: number, iy: number, dmgScale = 1, first = true): void {
     if (e.dying) return;
-    const F = FEEL[w], arm = ARMOR[e.kind]?.[w] ?? 1, dmg = F.dmg * dmgScale * mult * arm;
-    e.hp -= dmg; e.hitT = F.flash; this.alertEnemy(e);
+    const F = FEEL[w], arm = ARMOR[e.kind]?.[w] ?? 1; let dmg = F.dmg * dmgScale * mult * arm;
+    if (w === 'silenced' && e.state === 'idle' && (e.kind === 'rifle' || e.kind === 'charger' || e.kind === 'sniper')) dmg = Math.max(dmg, e.hp);   // 눈치채지 못한 적에게 소음기 탄은 치명타 (헤비·개·포탑은 제외)
+    e.hp -= dmg; e.hitT = F.flash;
+    const quiet = w === 'silenced' && e.hp <= 0;   // 소음기로 죽이면 소리도 경보도 없다
+    if (!quiet) this.alertEnemy(e);
     const boss = e.kind === 'boss', turret = e.kind === 'turret';
     if (!boss && !turret) { e.hitPose = F.pose; e.stunT = Math.max(e.stunT, Math.round(F.stun * mult)); e.vx += Math.cos(ang) * F.knock * mult / (e.kind === 'heavy' ? 2.5 : 1); e.vy += Math.sin(ang) * F.knock * mult / (e.kind === 'heavy' ? 2.5 : 1); const vm = Math.hypot(e.vx, e.vy); if (vm > 1000) { e.vx *= 1000 / vm; e.vy *= 1000 / vm; } e.aimT = 0; e.windT = 0; }
     const kill = e.hp <= 0;
     this.emit({ t: 'hit', x: ix, y: iy, ang, w, kill, kind: e.kind, dmg, armor: arm < 1 });
     if (!kill) { if (first && F.stop) this.emit({ t: 'hitstop', frames: F.stop }); if (F.shake) this.emit({ t: 'shake', v: F.shake }); }
-    for (const o of this.enemies) if (o !== e && o.state === 'idle' && o.section === e.section && Math.hypot(o.x - e.x, o.y - e.y) < GROUND.allyAlert && kill) this.alertEnemy(o);
+    for (const o of this.enemies) if (o !== e && o.state === 'idle' && o.section === e.section && Math.hypot(o.x - e.x, o.y - e.y) < GROUND.allyAlert && kill && !quiet) this.alertEnemy(o);
     if (kill) this.killEnemy(e, w, ang);
   }
   private killEnemy(e: GEnemy, w: FeelKey, ang: number): void {

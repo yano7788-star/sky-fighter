@@ -204,10 +204,10 @@ describe('침입 경보 (구출 임무: 소란이 나면 경비병이 몰려온�
     run(g, 120); expect(g.enemies.filter(x => x.reinf).length).toBeGreaterThanOrEqual(2);
     run(g, 330); expect(g.enemies.filter(x => x.reinf).length).toBeGreaterThanOrEqual(5);
   });
-  it('암살은 경보를 울리지 않지만, 소음기로 쏴서 안 죽으면 경보가 울린다', () => {
+  it('암살은 경보를 울리지 않지만, 소음기로 쏴서 안 죽으면(헤비) 경보가 울린다', () => {
     const a = mk(); const e = add(a, 'rifle', a.p.x, a.p.y - 70, -Math.PI / 2); e.state = 'idle'; const o = add(a, 'rifle', a.p.x + 300, a.p.y - 500, 0); o.state = 'idle';
     a.step({ ...NO_INPUT, melee: true }); run(a, 110); expect(a.enemies.includes(e)).toBe(false); expect(a.alarm).toBe(false);
-    const b = mk(); b.p.weapon = 'silenced'; b.p.ammo = 24; const t = add(b, 'rifle', b.p.x, b.p.y - 300, Math.PI / 2 + 3.14); t.state = 'idle'; t.ang = -Math.PI / 2;
+    const b = mk(); b.p.weapon = 'silenced'; b.p.ammo = 24; const t = add(b, 'heavy', b.p.x, b.p.y - 300, Math.PI / 2 + 3.14); t.state = 'idle'; t.ang = -Math.PI / 2;   // 헤비는 한 방에 안 죽는다
     for (let i = 0; i < 12; i++) b.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(b.alarm).toBe(true);
   });
   it('인질을 풀기 전에 죽어서 재도전하면 경보가 해제된다', () => {
@@ -224,5 +224,15 @@ describe('경보 해제', () => {
     for (const x of g.enemies.slice()) (g as any).killEnemy(x, 'rifle', 0);
     g.drain(); run(g, 3); expect(g.alarm).toBe(false); expect(g.drain().some(x => x.t === 'alarmOff')).toBe(true);
     const e2 = add(g, 'rifle', g.p.x, g.p.y - 100, Math.PI / 2); e2.state = 'idle'; run(g, 5); expect(g.alarm).toBe(true);
+  });
+});
+
+describe('소음기 처치는 경보 없음 · 탄 8발', () => {
+  it('눈치채지 못한 보병을 소음기로 쏴 죽이면 경보도 동료 경계도 없다', () => {
+    const g = new GroundSim({ seed: 5, mission: 'rescue', hostageWho: 1 }); g.enemies.length = 0; g.p.invuln = 99999; g.p.x = 10 * TILE; g.p.y = 129.4 * TILE;
+    expect(g.p.ammo).toBe(8);
+    const t = add(g, 'rifle', g.p.x, g.p.y - 200, -Math.PI / 2); t.state = 'idle'; const nb = add(g, 'rifle', g.p.x + 70, g.p.y - 210, -Math.PI / 2); nb.state = 'idle';
+    for (let i = 0; i < 14; i++) g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 });
+    expect(g.enemies.includes(t)).toBe(false); expect(g.alarm).toBe(false); expect(nb.state).toBe('idle'); expect(g.p.ammo).toBeLessThan(8);
   });
 });
