@@ -108,3 +108,41 @@ describe('은신 긴장도 (소음기 → 음악 약화)', () => {
     (g as any).alertEnemy(e); expect(g.stealthLevel).toBeNull();
   });
 });
+
+describe('인질 구출 임무 (4스테이지 뒤)', () => {
+  const mk = (who: 1 | 2 = 2) => new GroundSim({ seed: 3, mission: 'rescue', hostageWho: who });
+  it('소음기 권총 + 섬광·연막 2개로 시작, 인질은 감방에 갇혀 있고 아래 두 문은 열려 있다', () => {
+    const g = mk();
+    expect(g.p.weapon).toBe('silenced'); expect(g.p.flashes).toBe(2); expect(g.p.smokes).toBe(2);
+    expect(g.hostage?.state).toBe('caged'); expect(g.secs[2].name).toBe('감방동');
+    const locked = g.doors.filter(d => d.locked).map(d => d.kind); expect(locked.sort()).toEqual(['exit', 'gate']);   // 감방동→헬기장 문과 출구만 잠김
+  });
+  it('인질 곁에 1.2초 머물면 풀려나고 경보·증원·문 해제', () => {
+    const g = mk(); const h = g.hostage!; g.enemies.length = 0; g.p.x = h.x - 60; g.p.y = h.y; g.p.invuln = 99999;
+    run(g, 80); expect(h.state).toBe('free'); expect(g.alarm).toBe(true);
+    expect(g.drain().some(e => e.t === 'hostageFree')).toBe(true);
+    expect(g.doors.filter(d => d.locked).length).toBe(0);
+    run(g, 130); expect(g.enemies.some(e => e.state === 'alert')).toBe(true);   // 1차 증원
+  });
+  it('인질과 함께 헬기장 위쪽에 도착하면 승리(구출 성공), 인질 없이는 승리하지 않는다', () => {
+    const g = mk(); const h = g.hostage!; g.enemies.length = 0; g.p.invuln = 99999;
+    g.p.x = 9 * TILE; g.p.y = 1.5 * TILE; run(g, 5); expect(g.state).toBe('PLAY');
+    g.p.x = h.x - 60; g.p.y = h.y; run(g, 80); expect(h.state).toBe('free'); g.enemies.length = 0;
+    g.p.x = 9 * TILE; g.p.y = 1.8 * TILE; h.x = 9 * TILE; h.y = 2.6 * TILE; run(g, 3);
+    expect(g.state).toBe('WIN'); expect(g.result().rescued).toBe(true);
+  });
+  it('풀린 인질은 플레이어를 따라온다', () => {
+    const g = mk(); const h = g.hostage!; g.enemies.length = 0; g.p.invuln = 99999; g.p.x = h.x - 60; g.p.y = h.y; run(g, 80);
+    g.p.x = 9 * TILE; g.p.y = 62 * TILE; const d0 = Math.hypot(h.x - g.p.x, h.y - g.p.y); run(g, 240);
+    expect(Math.hypot(h.x - g.p.x, h.y - g.p.y)).toBeLessThan(Math.max(130, d0 * 0.5));
+  });
+  it('Sim: 4스테이지 클리어 직후 구출 임무가 열리고, 성공하면 유물 보상 / 실패해도 게임오버 없이 5스테이지로', () => {
+    const mkS = () => { const s = new Sim(3, metaParams({} as any, 'sister1', null)); s.groundEnabled = true; s.startAtTier(4); s.bossTier = 4; s.stagePhase = 'CLEAR'; s.phaseTimer = 1; s.player.invincible = 99999; return s; };
+    const s = mkS(); s.step(idle(s)); s.step(idle(s)); expect(s.rescueRequest).toBe(true); expect(s.rescueWho()).toBe(2);
+    expect(new Sim(3, metaParams({} as any, 'sister2', null)).rescueWho()).toBe(1);
+    s.startRescue(); expect(s.rescueActive).toBe(true); const sc0 = s.score;
+    s.finishRescue({ rescued: true, score: 3000 }); expect(s.score).toBe(sc0 + 3000); expect(s.pending?.length).toBeGreaterThan(0);
+    const t = mkS(); t.step(idle(t)); t.step(idle(t)); t.startRescue(); t.finishRescue({ rescued: false, score: 0 });
+    expect(t.state).toBe('PLAYING'); expect(t.stageTier).toBe(5); expect(t.rescueActive).toBe(false);
+  });
+});

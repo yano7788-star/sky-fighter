@@ -159,6 +159,13 @@ export class GameScene extends Phaser.Scene {
     this.scene.setVisible(false); this.scene.pause();
     this.scene.launch('GroundScene', { sim: this.sim });
   }
+  /** 4스테이지 직후: 인질 구출 임무 (GroundScene 이 mission='rescue' 로 시작) */
+  private startRescue(): void {
+    this.sim.startRescue(); this.ejectG?.setVisible(false); this.ejectT?.setVisible(false);
+    this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
+    this.scene.setVisible(false); this.scene.pause();
+    this.scene.launch('GroundScene', { sim: this.sim, mission: 'rescue' });
+  }
   /** 지상전에서 돌아왔을 때: 줌아웃 + 번쩍임으로 이륙 */
   private onGroundBack(): void {
     this.scene.setVisible(true); this.acc = 0; this.hitStop = 0; this.keys.clear();
@@ -167,7 +174,8 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: cam, zoom: 1, duration: 800, ease: 'Cubic.easeOut' });
     this.fx.ring(this.sim.player.x, this.sim.player.y, '#7dd3fc', 140);
     audio.resume();
-    if (matchMedia('(orientation: landscape)').matches && navigator.maxTouchPoints > 0) this.toast('기기를 세로로 돌려 주세요');
+    if (this.sim.rescueUnlocked) { this.toast((this.sim.rescueUnlocked === 1 ? '언니' : '동생') + ' 구출 성공!\n격납고에서 파일럿으로 선택할 수 있다'); this.sim.rescueUnlocked = 0; }
+    else if (matchMedia('(orientation: landscape)').matches && navigator.maxTouchPoints > 0) this.toast('기기를 세로로 돌려 주세요');
   }
 
   // ------------------------------------------------------------------ 탈출(EJECT)
@@ -421,6 +429,7 @@ export class GameScene extends Phaser.Scene {
     }
     const s = this.sim;
     if (s.groundRequest) { this.startGround(); return; }
+    if (s.rescueRequest) { this.startRescue(); return; }
     if (s.pending) {   // 레벨업 카드 선택 중: 시뮬레이션 정지, 오버레이 표시
       if (this.shownPending !== s.pending) { this.shownPending = s.pending; this.levelup.show(s.pending, s.build); this.activeId = null; this.firing = false; }
       this.fx.tick();

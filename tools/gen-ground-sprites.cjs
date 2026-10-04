@@ -171,6 +171,17 @@ function rifleIcon() { const p = new Pix(38, 10); p.rect(0, 3, 9, 7, '#5c3a1e');
     const img = recolor(await loadRaw(path.join(SRC, 'enemy_spritesheet.png')), map);
     await writeSheet('gs_foe_' + k, rightColumn(img, 64), 64);
   }
+  // 2-b) 구출 대상 자매(인질): 보병 시트를 언니(검정+적색)/동생(백색+금색)으로 칠하고, 4번째 프레임은 밧줄에 묶인 자세
+  const SIS = {
+    sister1: { '#802e28': '#24242c', '#960e14': '#c81e2e', '#ce3430': '#ff4a5a', '#581e1c': '#14141a', '#68080e': '#8a1220' },
+    sister2: { '#802e28': '#e8e4d8', '#960e14': '#d6a62c', '#ce3430': '#ffd860', '#581e1c': '#b8b4a6', '#68080e': '#a07818' },
+  };
+  for (const [k, map] of Object.entries(SIS)) {
+    const fr = rightColumn(recolor(await loadRaw(path.join(SRC, 'enemy_spritesheet.png')), map), 64).slice(0, 3);
+    const bound = new Pix(64, 64); bound.blit(fr[0], 0, 0);
+    bound.rect(24, 30, 40, 31, '#8a6a3a'); bound.rect(24, 34, 40, 35, '#6e5230'); bound.set(41, 30, '#8a6a3a'); bound.set(41, 34, '#6e5230');   // 밧줄
+    await writeSheet('gs_' + k, [...fr, bound], 64);
+  }
   // 3) 새로 그린 스프라이트
   await writeSheet('gs_dog', ['idle', 'run_a', 'run_b', 'bite', 'hit', 'dead'].map(dogFrame), 32);
   await writeSheet('gs_drone', ['a', 'b', 'wreck'].map(droneFrame), 24);

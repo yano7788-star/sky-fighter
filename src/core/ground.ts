@@ -1,5 +1,5 @@
 import { createRng, type Rng } from './rng';
-import { COLS, ROWS, SECTIONS, TILE, WORLD_H, WORLD_W, buildLevel, flowField, sectionOfRow, type Level } from './groundmap';
+import { COLS, ROWS, SECTIONS, TILE, WORLD_H, WORLD_W, buildLevel, buildRescueLevel, flowField, sectionOfRow, sectionsOf, type Level, type MissionKind, type SectionDef } from './groundmap';
 
 /**
  * 지상전 「강하」 규칙 (순수 TS, Phaser 무관). 한 틱 = 1/60초, 길이 단위는 월드 px (타일 64, 도트 4).
@@ -49,8 +49,8 @@ export const GROUND = {
 } as const;
 export const SECTION_COUNT = SECTIONS.length;
 
-export interface GroundOpts { seed: number; pilot: 0 | 1 | 2; dmgMult: number; rateMult: number; maxHp: number; grenades: number; assist: boolean }
-export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: GROUND.grenades, assist: false };
+export interface GroundOpts { seed: number; pilot: 0 | 1 | 2; dmgMult: number; rateMult: number; maxHp: number; grenades: number; assist: boolean; mission: MissionKind; hostageWho: 1 | 2 }
+export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: GROUND.grenades, assist: false, mission: 'assault', hostageWho: 2 };
 
 export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; melee: boolean; bomb: boolean; swap?: boolean; pickup?: boolean; aimDist?: number }
 export const NO_INPUT: GInput = { mx: 0, my: 0, ax: 0, ay: 0, fire: false, roll: false, melee: false, bomb: false };
@@ -91,6 +91,7 @@ export type GEvent =
   | { t: 'doorKick'; x: number; y: number } | { t: 'doorOpen'; x: number; y: number } | { t: 'doorHit'; x: number; y: number } | { t: 'doorBreak'; x: number; y: number; o: 'v' | 'h' }
   | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
   | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
+  | { t: 'hostageFree'; x: number; y: number } | { t: 'reinforce'; x: number; y: number } | { t: 'hostageProgress'; k: number }
   | { t: 'flashbang'; x: number; y: number; r: number } | { t: 'smoke'; x: number; y: number; r: number } | { t: 'stealth'; x: number; y: number; pts: number; melee: boolean } | { t: 'ghost'; n: number; pts: number } | { t: 'swap'; to: BombType }
   | { t: 'pickup'; what: 'heart' | 'weapon' | 'bomb'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
   | { t: 'gate'; section: number } | { t: 'section'; n: number; name: string } | { t: 'cleared'; n: number } | { t: 'exitopen' } | { t: 'reset'; section: number }
@@ -110,6 +111,8 @@ const BODY_R: Record<GKind, number> = { rifle: 34, charger: 36, sniper: 34, heav
 const HIT_R: Record<GKind, number> = { rifle: 30, charger: 32, sniper: 30, heavy: 42, dog: 26, turret: 58, drone: 22, boss: 92 };
 
 const LEVEL: Level = buildLevel();
+let LEVEL_R: Level | null = null;   // 구출 임무 맵(처음 쓸 때 만든다)
+export interface GHostage { x: number; y: number; who: 1 | 2; state: 'caged' | 'free' | 'safe'; freeT: number; ang: number; walk: number; moving: boolean }
 const cellOf = (x: number, y: number): number => Math.floor(y / TILE) * COLS + Math.floor(x / TILE);
 const norm = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -118,12 +121,15 @@ export class GroundSim {
   opts: GroundOpts;
   frame = 0;
   state: 'PLAY' | 'WIN' | 'DEAD' = 'PLAY';
-  tiles: Uint8Array = LEVEL.tiles;
+  tiles!: Uint8Array; level: Level = LEVEL; secs: SectionDef[] = SECTIONS;
+  /** 인질 구출 임무 상태 */
+  hostage: GHostage | null = null; alarm = false; alarmT = 0; private wave = 0; private hflow = new Int16Array(COLS * ROWS); private hflowAt = -99;
+  get mission(): MissionKind { return this.opts.mission; }
   p!: GPlayer;
   enemies: GEnemy[] = []; dying: GEnemy[] = []; bullets: GBullet[] = []; pickups: GPickup[] = []; bombs: GBomb[] = []; smokes: GSmoke[] = []; private alerted: boolean[] = [false, false, false, false]; stealthKills = 0;
   doors: GDoor[] = []; windows: GWindow[] = []; crates: GCrate[] = [];
   events: GEvent[] = [];
-  cleared: boolean[] = SECTIONS.map(() => false);
+  cleared: boolean[] = [false, false, false, false];
   reached = 0;
   score = 0; kills = 0; combo = 0; comboT = 0; time = 0; maxCombo = 0; styles = 0;
   private cells: Obj[][] = [];
@@ -133,30 +139,37 @@ export class GroundSim {
   constructor(opts: Partial<GroundOpts> = {}) {
     this.opts = { ...DEFAULT_GROUND_OPTS, ...opts };
     this.rng = createRng(this.opts.seed + 7919);
-    this.p = { x: LEVEL.start.x, y: LEVEL.start.y, hp: this.opts.maxHp, maxHp: this.opts.maxHp, aim: -Math.PI / 2, invuln: 60, weapon: 'pistol', ammo: Infinity, grenades: this.opts.grenades, flashes: 1, smokes: 1, gsel: 'frag', seq: null, cd: 0, rollCd: 0, rollAng: 0, rollI: 0, moving: false, walk: 0, gunBlocked: false, kick: 0, pickCd: 0, smgAlt: 0, combatT: 0, hitFlash: 0 };
-    this.tiles = LEVEL.tiles.slice();   // 벽 타일은 변하지 않지만 시험에서 바꿀 수 있게 복사
+    if (this.opts.mission === 'rescue') { LEVEL_R ??= buildRescueLevel(); this.level = LEVEL_R; this.secs = sectionsOf('rescue'); }
+    const LV = this.level;
+    this.p = { x: LV.start.x, y: LV.start.y, hp: this.opts.maxHp, maxHp: this.opts.maxHp, aim: -Math.PI / 2, invuln: 60, weapon: 'pistol', ammo: Infinity, grenades: this.opts.grenades, flashes: 1, smokes: 1, gsel: 'frag', seq: null, cd: 0, rollCd: 0, rollAng: 0, rollI: 0, moving: false, walk: 0, gunBlocked: false, kick: 0, pickCd: 0, smgAlt: 0, combatT: 0, hitFlash: 0 };
+    this.tiles = LV.tiles.slice();   // 벽 타일은 변하지 않지만 시험에서 바꿀 수 있게 복사
     // 오브젝트 생성 + 칸 색인
-    for (const d of LEVEL.doors) { const o: GDoor = { id: this.nextId++, c: d.c, r: d.r, w: d.w, h: d.h, o: d.o, kind: d.kind, section: d.section, hp: 12, phi: 0, target: 0, rate: GROUND.doorRate, broken: false, locked: d.kind !== 'door', x0: d.c * TILE, y0: d.r * TILE, x1: (d.c + d.w) * TILE, y1: (d.r + d.h) * TILE }; this.doors.push(o); this.index(o.c, o.r, o.w, o.h, { t: 'door', o }); }
-    for (const w of LEVEL.windows) { const o: GWindow = { id: this.nextId++, c: w.c, r: w.r, w: w.w, h: w.h, o: w.o, section: w.section, hp: 2, broken: false, x0: w.c * TILE, y0: w.r * TILE, x1: (w.c + w.w) * TILE, y1: (w.r + w.h) * TILE }; this.windows.push(o); this.index(o.c, o.r, o.w, o.h, { t: 'window', o }); }
-    for (const c of LEVEL.crates) { const o: GCrate = { id: this.nextId++, kind: c.kind, x: (c.c + 0.5) * TILE, y: (c.r + 0.5) * TILE, hp: c.kind === 'barrel' ? 1 : 3, broken: false, section: c.section, hitT: 0, hs: c.kind === 'barrel' ? 22 : 28 }; this.crates.push(o); this.index(c.c, c.r, 1, 1, { t: 'crate', o }); }
+    for (const d of LV.doors) { const o: GDoor = { id: this.nextId++, c: d.c, r: d.r, w: d.w, h: d.h, o: d.o, kind: d.kind, section: d.section, hp: 12, phi: 0, target: 0, rate: GROUND.doorRate, broken: false, locked: d.kind !== 'door', x0: d.c * TILE, y0: d.r * TILE, x1: (d.c + d.w) * TILE, y1: (d.r + d.h) * TILE }; this.doors.push(o); this.index(o.c, o.r, o.w, o.h, { t: 'door', o }); }
+    for (const w of LV.windows) { const o: GWindow = { id: this.nextId++, c: w.c, r: w.r, w: w.w, h: w.h, o: w.o, section: w.section, hp: 2, broken: false, x0: w.c * TILE, y0: w.r * TILE, x1: (w.c + w.w) * TILE, y1: (w.r + w.h) * TILE }; this.windows.push(o); this.index(o.c, o.r, o.w, o.h, { t: 'window', o }); }
+    for (const c of LV.crates) { const o: GCrate = { id: this.nextId++, kind: c.kind, x: (c.c + 0.5) * TILE, y: (c.r + 0.5) * TILE, hp: c.kind === 'barrel' ? 1 : 3, broken: false, section: c.section, hitT: 0, hs: c.kind === 'barrel' ? 22 : 28 }; this.crates.push(o); this.index(c.c, c.r, 1, 1, { t: 'crate', o }); }
     for (let s = 0; s < SECTION_COUNT; s++) this.populate(s);
-    this.emit({ t: 'section', n: 0, name: SECTIONS[0].name });
+    this.emit({ t: 'section', n: 0, name: this.secs[0].name });
+    if (this.opts.mission === 'rescue') {   // 소음기 권총 + 섬광/연막 2개씩으로 시작, 인질은 감방에
+      this.p.weapon = 'silenced'; this.p.ammo = WEAPONS.silenced.ammo; this.p.flashes = 2; this.p.smokes = 2;
+      this.hostage = { x: LV.hostage!.x, y: LV.hostage!.y, who: this.opts.hostageWho, state: 'caged', freeT: 0, ang: Math.PI, walk: 0, moving: false };
+    }
   }
   private index(c: number, r: number, w: number, h: number, o: Obj): void { for (let rr = r; rr < r + h; rr++) for (let cc = c; cc < c + w; cc++) { const i = rr * COLS + cc; (this.cells[i] ??= []).push(o); } }
   private emit(e: GEvent): void { this.events.push(e); }
   drain(): GEvent[] { const e = this.events; this.events = []; return e; }
   get boss(): GEnemy | undefined { return this.enemies.find(e => e.kind === 'boss'); }
   get section(): number { return sectionOfRow(Math.floor(this.p.y / TILE)); }
-  get isBossRoom(): boolean { return this.section === 3; }
+  get isBossRoom(): boolean { return this.opts.mission === 'assault' && this.section === 3; }
   get remaining(): number { const s = this.section; return this.enemies.filter(e => e.section === s && e.kind !== 'drone').length; }
-  get exitOpen(): boolean { return this.cleared[3]; }
+  get exitOpen(): boolean { return this.opts.mission === 'rescue' ? this.hostage?.state !== 'caged' : this.cleared[3]; }
 
   // ---------------------------------------------------------------- 구역 구성
   private populate(s: number): void {
     this.alerted[s] = false;
     this.enemies = this.enemies.filter(e => e.section !== s); this.dying = this.dying.filter(e => e.section !== s); this.pickups = this.pickups.filter(k => k.section !== s);
-    for (const m of LEVEL.spawns) if (m.section === s) this.addEnemy(m.k, m.x, m.y, ((m.ang ?? 90) * Math.PI) / 180, m.patrol);
-    for (const k of LEVEL.pickups) if (k.section === s) this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: k.weapon, ammo: WEAPONS[k.weapon].ammo, x: k.x, y: k.y, t: 0, section: s });
+    for (const m of this.level.spawns) if (m.section === s) this.addEnemy(m.k, m.x, m.y, ((m.ang ?? 90) * Math.PI) / 180, m.patrol);
+    for (const k of this.level.bombPickups ?? []) if (k.section === s) this.pickups.push({ id: this.nextId++, kind: 'bomb', bt: k.bt, x: k.x, y: k.y, t: 0, section: s });
+    for (const k of this.level.pickups) if (k.section === s) this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: k.weapon, ammo: WEAPONS[k.weapon].ammo, x: k.x, y: k.y, t: 0, section: s });
     for (const d of this.doors) if (d.section === s && !(this.cleared[s] && d.kind !== 'door')) { d.hp = 12; d.phi = 0; d.target = 0; d.broken = false; d.locked = d.kind !== 'door'; }
     for (const w of this.windows) if (w.section === s) { w.hp = 2; w.broken = false; }
     for (const c of this.crates) if (c.section === s) { c.hp = c.kind === 'barrel' ? 1 : 3; c.broken = false; }
@@ -172,19 +185,20 @@ export class GroundSim {
   }
   /** 사망 후 이어하기: 지금 구역을 처음부터 다시 (이미 정리한 구역은 그대로) */
   revive(): void {
-    const s = this.section, def = SECTIONS[s];
+    const s = this.section, def = this.secs[s];
     this.p.hp = Math.max(2, Math.ceil(this.p.maxHp / 2)); this.p.invuln = 120; this.combo = 0; this.comboT = 0; this.p.seq = null; this.p.rollI = 0;
     this.state = 'PLAY'; this.bullets.length = 0; this.bombs.length = 0;
     if (!this.cleared[s]) this.populate(s);
-    this.p.x = s === 0 ? LEVEL.start.x : 9 * TILE; this.p.y = s === 0 ? LEVEL.start.y : (def.r1 - 1.5) * TILE;
-    this.p.weapon = 'pistol'; this.p.ammo = Infinity;
+    this.p.x = s === 0 ? this.level.start.x : 9 * TILE; this.p.y = s === 0 ? this.level.start.y : (def.r1 - 1.5) * TILE;
+    if (this.opts.mission === 'rescue') { this.p.weapon = 'silenced'; this.p.ammo = WEAPONS.silenced.ammo; if (this.hostage?.state === 'free') { this.hostage.x = this.p.x; this.hostage.y = this.p.y + 90; } }
+    else { this.p.weapon = 'pistol'; this.p.ammo = Infinity; }
     this.emit({ t: 'reset', section: s });
   }
   /** 테스트용: 지정 구역에서 시작 — 아래 구역은 정리된 것으로 처리하고 플레이어를 그 구역 입구로 옮긴다 */
   debugStart(section: number, weapon: WeaponId): void {
     for (let s = 0; s < Math.min(section, 3); s++) { this.enemies = this.enemies.filter(e => e.section !== s); this.pickups = this.pickups.filter(k => k.section !== s); this.cleared[s] = true; this.unlock(s); }
-    const def = SECTIONS[section];
-    this.p.x = section === 0 ? LEVEL.start.x : 9 * TILE; this.p.y = section === 0 ? LEVEL.start.y : (def.r1 - 1.5) * TILE; this.reached = section;
+    const def = this.secs[section];
+    this.p.x = section === 0 ? this.level.start.x : 9 * TILE; this.p.y = section === 0 ? this.level.start.y : (def.r1 - 1.5) * TILE; this.reached = section;
     this.p.weapon = weapon; this.p.ammo = WEAPONS[weapon].ammo; this.p.invuln = 60;
     this.emit({ t: 'section', n: section, name: def.name });
   }
@@ -324,13 +338,14 @@ export class GroundSim {
 
   private updateSections(): void {
     const s = this.section;
-    if (s > this.reached) { this.reached = s; this.emit({ t: 'section', n: s, name: SECTIONS[s].name }); this.score += 200; }
+    if (this.opts.mission === 'rescue') { this.updateRescue(); return; }
+    if (s > this.reached) { this.reached = s; this.emit({ t: 'section', n: s, name: this.secs[s].name }); this.score += 200; }
     for (let i = 0; i < 3; i++) {   // 일반 구역: 모두 정리하면 위층 문이 열린다
       if (this.cleared[i] || this.enemies.some(e => e.section === i)) continue;
       this.cleared[i] = true; this.unlock(i);
       this.score += 300 + 150 * i; this.emit({ t: 'cleared', n: i });
       if (!this.alerted[i]) { const gp = 500 + 200 * i; this.score += gp; this.emit({ t: 'ghost', n: i, pts: gp }); }   // 한 번도 들키지 않고 정리
-      this.pickups.push({ id: this.nextId++, kind: 'heart', x: 9 * TILE, y: (SECTIONS[i].r0 + 4) * TILE, t: 0, section: i });
+      this.pickups.push({ id: this.nextId++, kind: 'heart', x: 9 * TILE, y: (this.secs[i].r0 + 4) * TILE, t: 0, section: i });
     }
     if (!this.cleared[3] && this.reached === 3 && !this.boss) {
       this.cleared[3] = true; this.score += 800; this.unlock(3);
@@ -338,6 +353,54 @@ export class GroundSim {
       this.enemies = this.enemies.filter(k => k.section !== 3);
     }
     if (this.cleared[3] && this.p.y < 2.2 * TILE && Math.abs(this.p.x - 9 * TILE) < 2.2 * TILE) { this.state = 'WIN'; this.emit({ t: 'win' }); this.emit({ t: 'slowmo', ms: 700, scale: 0.3 }); }
+  }
+  /** 인질 구출 임무: 구역 진행(들키지 않고 지나가면 보너스), 인질 풀기(가까이 1.2초), 경보·증원, 인질 호송, 헬기장 도착 */
+  private updateRescue(): void {
+    const s = this.section, p = this.p, h = this.hostage!;
+    if (s > this.reached) {
+      if (this.reached < 2 && !this.alerted[this.reached]) { const gp = 400 + 300 * this.reached; this.score += gp; this.emit({ t: 'ghost', n: this.reached, pts: gp }); }   // 한 번도 들키지 않고 통과
+      this.reached = s; this.emit({ t: 'section', n: s, name: this.secs[s].name }); this.score += 200;
+    }
+    if (h.state === 'caged') {
+      const near = Math.hypot(p.x - h.x, p.y - h.y) < 95;
+      const was = h.freeT; h.freeT = near ? h.freeT + 1 : Math.max(0, h.freeT - 2);
+      if (h.freeT !== was) this.emit({ t: 'hostageProgress', k: Math.min(1, h.freeT / 75) });
+      if (h.freeT >= 75) this.freeHostage();
+    } else if (h.state === 'free') {
+      this.updateHostageMove(h); this.alarmT++;
+      const waves = [120, 540, 960, 1380];   // 증원: 2~3명씩 좌우 계단에서 쏟아진다
+      if (this.wave < waves.length && this.alarmT >= waves[this.wave]) this.spawnWave(this.wave++);
+      if (p.y < 2.2 * TILE && Math.abs(p.x - 9 * TILE) < 2.2 * TILE && Math.hypot(p.x - h.x, p.y - h.y) < 320) {
+        h.state = 'safe'; this.state = 'WIN'; this.score += 1000;
+        this.emit({ t: 'win' }); this.emit({ t: 'slowmo', ms: 800, scale: 0.3 });
+      }
+    }
+  }
+  private freeHostage(): void {
+    const h = this.hostage!; h.state = 'free'; h.freeT = 75; this.alarm = true; this.alarmT = 0; this.wave = 0; this.score += 1500;
+    if (!this.alerted[2]) { this.score += 1000; this.emit({ t: 'ghost', n: 2, pts: 1000 }); }   // 완전 잠입으로 구출
+    this.emit({ t: 'hostageFree', x: h.x, y: h.y }); this.emit({ t: 'shake', v: 10 });
+    this.unlock(2); this.unlock(3);
+    for (const e of this.enemies) if (e.section >= 2 && !e.dying) this.alertEnemy(e);
+  }
+  private spawnWave(i: number): void {
+    const pts = this.level.reinforce ?? [], kinds: GKind[][] = [['rifle', 'rifle'], ['rifle', 'charger', 'rifle'], ['rifle', 'rifle', 'charger'], ['charger', 'rifle', 'rifle']];
+    kinds[i].forEach((k, j) => {
+      const pt = pts[(i + j) % pts.length]; if (!pt) return;
+      const e = this.addEnemy(k, pt.x + (j - 1) * 40, pt.y, pt.x < 9 * TILE ? 0 : Math.PI); this.alertEnemy(e); this.emit({ t: 'reinforce', x: e.x, y: e.y });
+    });
+  }
+  /** 풀려난 인질: 플레이어를 따라다닌다(가까우면 멈춤). 적의 표적이 되지는 않는다 */
+  private updateHostageMove(h: GHostage): void {
+    const p = this.p, d = Math.hypot(p.x - h.x, p.y - h.y);
+    h.moving = false;
+    if (d > 900) { h.x = p.x; h.y = p.y + 70; return; }   // 너무 뒤처지면 곁으로
+    if (d > 110) {
+      if (this.frame - this.hflowAt >= 12) { flowField(Math.floor(p.x / TILE), Math.floor(p.y / TILE), this.walkable, this.hflow); this.hflowAt = this.frame; }
+      const ox = h.x, oy = h.y;
+      if (!this.stepFlow(h, this.hflow, GROUND.speed * (d > 260 ? 1.15 : 0.95), 26, true)) { const a = Math.atan2(p.y - h.y, p.x - h.x); this.move(h, Math.cos(a) * 2, Math.sin(a) * 2, 26, true); }
+      if (Math.hypot(h.x - ox, h.y - oy) > 0.3) { h.moving = true; h.ang = Math.atan2(h.y - oy, h.x - ox); h.walk++; }
+    } else h.ang = Math.atan2(p.y - h.y, p.x - h.x);
   }
   /** 구역의 잠긴 문(위층 문 / 출구)을 열어 둔다 */
   private unlock(section: number): void {
@@ -724,7 +787,7 @@ export class GroundSim {
   }
   nearWeapon(): GPickup | null { return this.pickups.find(k => k.kind === 'weapon' && Math.hypot(this.p.x - k.x, this.p.y - k.y) < 60) ?? null; }
 
-  result(): { win: boolean; score: number; kills: number; rooms: number; maxCombo: number; styles: number; hpLeft: number } {
-    return { win: this.state === 'WIN', score: this.score, kills: this.kills, rooms: this.reached + (this.state === 'WIN' ? 1 : 0), maxCombo: this.maxCombo, styles: this.styles, hpLeft: this.p.hp };
+  result(): { win: boolean; score: number; kills: number; rooms: number; maxCombo: number; styles: number; hpLeft: number; rescued: boolean } {
+    return { rescued: this.hostage?.state === 'safe', win: this.state === 'WIN', score: this.score, kills: this.kills, rooms: this.reached + (this.state === 'WIN' ? 1 : 0), maxCombo: this.maxCombo, styles: this.styles, hpLeft: this.p.hp };
   }
 }

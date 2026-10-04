@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { H, STEP_MS, W } from '../core/config';
 import { BOMB_NAME, FEEL, GroundSim, type BombType, WEAPONS, type GBullet, type GDoor, type GEnemy, type GEvent, type GInput, type GKind, type WeaponId } from '../core/ground';
-import { ART, COLS, ROWS, SECTIONS, TILE, WORLD_H, WORLD_W, sectionOfRow } from '../core/groundmap';
+import { ART, COLS, ROWS, TILE, WORLD_H, WORLD_W, sectionOfRow } from '../core/groundmap';
 import type { Sim } from '../core/sim';
 import { textStyle } from '../render/hud';
 import { R } from '../render/textures';
+import { loadMeta, saveMeta } from '../systems/storage';
 import { audio } from '../systems/audio';
 import type { GroundTest } from '../groundtest';
 import { newSimpleState, preciseAim, simpleControl, type ControlMode } from '../core/groundinput';
@@ -40,6 +41,14 @@ const STYLE = [
   { base: [43, 62, 72], alt: [38, 55, 65], line: [26, 38, 46], neon: '#ff4fd8' },    // 1층 (청록 타일)
   { base: [62, 55, 44], alt: [56, 49, 39], line: [38, 32, 24], neon: '#ffb02e' },    // 2층 (황갈 타일)
   { base: [62, 68, 78], alt: [55, 60, 70], line: [36, 40, 48], neon: '#ff4d4d' },    // 격납고 (강판)
+];
+
+/** 인질 구출 임무(야간 수용소)의 구역 분위기 — 3스테이지 건물보다 어둡고 차갑다 */
+const STYLE_R = [
+  { base: [38, 52, 46], alt: [33, 46, 41], line: [22, 32, 28], neon: '#5dffa0' },    // 외곽 마당 (야간 아스팔트)
+  { base: [38, 42, 52], alt: [34, 38, 47], line: [22, 25, 32], neon: '#ff4a4a' },    // 지하 통로 (철판 + 적색 비상등)
+  { base: [58, 60, 68], alt: [52, 54, 62], line: [34, 36, 44], neon: '#ffc84a' },    // 감방동 (회색 타일 + 호박색)
+  { base: [64, 68, 76], alt: [58, 62, 70], line: [40, 44, 52], neon: '#ffe14a' },    // 옥상 헬기장 (경고 노랑)
 ];
 
 type Stage = 'INTRO' | 'PLAY' | 'OUTRO' | 'DEAD' | 'END';
@@ -123,10 +132,12 @@ export class GroundScene extends Phaser.Scene {
   private tutorialT = 0; private deadTimer = 0; private finished = false;
   private ovT?: Phaser.GameObjects.Text;
 
+  private rescue = false; private siren = 0; private hostageImg?: Phaser.GameObjects.Image; private alarmRect!: Phaser.GameObjects.Rectangle;
+  private brief: { objs: Phaser.GameObjects.GameObject[]; btns: { name: string; x: number; y: number; w: number; h: number }[]; g: Phaser.GameObjects.Graphics; texts: Phaser.GameObjects.Text[]; portrait: Phaser.GameObjects.Image } | null = null;
   constructor() { super('GroundScene'); }
 
-  init(data: { sim: Sim; test?: GroundTest }): void {
-    this.sim = data.sim; this.test = data.test ?? null; this.stage = 'INTRO'; this.finished = false; this.paused = false; this.quitArmed = false; this.keys.clear();
+  init(data: { sim: Sim; test?: GroundTest; mission?: 'rescue' }): void {
+    this.sim = data.sim; this.test = data.test ?? null; this.rescue = data.mission === 'rescue' || this.test?.mission === 'rescue'; this.brief = null; this.siren = 0; this.stage = 'INTRO'; this.finished = false; this.paused = false; this.quitArmed = false; this.keys.clear();
     this.enemyImgs = new Map(); this.dyingImgs = new Map(); this.pickupImgs = new Map(); this.decals = []; this.boomSprites = []; this.popTexts = [];
     this.acc = 0; this.hitStop = 0; this.shake = 0; this.slowUntil = 0; this.slowScale = 1; this.deadTimer = 0; this.bannerT = 0; this.pixel = null; this.caps = [];
     this.prts = []; this.pops = []; this.kick = { x: 0, y: 0 }; this.cross = { spread: 0, hit: 0, kill: 0 }; this.glowT = 0; this.cam = { x: 0, y: WORLD_H - H / Z }; this.fireId = -1; this.choosing = false; this.menuTexts = []; this.cutKey = '';
@@ -140,7 +151,7 @@ export class GroundScene extends Phaser.Scene {
 
   create(): void {
     const seed = (Math.floor(this.sim.score) * 31 + this.sim.frame) >>> 0;
-    this.g = new GroundSim({ ...this.sim.groundOpts(seed), assist: loadAssist(), ...(this.test ? { pilot: this.test.pilot } : {}) });
+    this.g = new GroundSim({ ...(this.rescue ? this.sim.rescueOpts(seed) : this.sim.groundOpts(seed)), assist: loadAssist(), ...(this.test ? { pilot: this.test.pilot } : {}) });
     if (this.test && (this.test.section > 0 || this.test.weapon !== 'pistol')) this.g.debugStart(this.test.section, this.test.weapon);
     this.cameras.main.setBackgroundColor('#000000');
     this.root = this.add.container(0, 0).setScale(R);
@@ -155,14 +166,16 @@ export class GroundScene extends Phaser.Scene {
     this.veil = this.add.rectangle(0, 0, W, H, 0x000000, 1).setOrigin(0, 0);
     this.redFlash = this.add.rectangle(0, 0, W, H, 0xff2222, 0).setOrigin(0, 0);
     this.whiteFlash = this.add.rectangle(0, 0, W, H, 0xffffff, 0).setOrigin(0, 0);
-    this.root.add([this.veil, this.redFlash, this.whiteFlash]);
+    this.alarmRect = this.add.rectangle(0, 0, W, H, 0xff1a1a, 0).setOrigin(0, 0);
+    this.root.add([this.alarmRect, this.veil, this.redFlash, this.whiteFlash]);
     this.bindInput();
     this.ctl = 'precise'; this.choosing = false;   // 터치 기기는 처음에 한 번 조작 방식을 고른다
     this.applyLayout(true);
     this.resizeFn = () => this.applyLayout(); window.addEventListener('resize', this.resizeFn); window.addEventListener('orientationchange', this.resizeFn);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { if (this.resizeFn) { window.removeEventListener('resize', this.resizeFn); window.removeEventListener('orientationchange', this.resizeFn); } this.rotated = false; this.landscape = false; this.applyRotation(); this.scale.setGameSize(W * R, H * R); });   // 본편은 항상 세로
     this.world.setVisible(false); this.ui.setVisible(false);
-    if (this.test?.skipIntro) { this.world.setVisible(true); this.ui.setVisible(true); this.veil.setAlpha(0); this.stage = 'PLAY'; this.tutorialT = 60 * 7; }
+    if (this.rescue && !this.test?.skipIntro) { this.runBriefing(); }
+    else if (this.test?.skipIntro) { this.world.setVisible(true); this.ui.setVisible(true); this.veil.setAlpha(0); this.stage = 'PLAY'; this.tutorialT = 60 * 7; }
     else this.runIntro();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { audio.setStealth(null); audio.tickStealth(0); audio.resume(); });
   }
@@ -170,7 +183,7 @@ export class GroundScene extends Phaser.Scene {
   // ---------------------------------------------------------------- 월드 구성: 구역마다 바닥/벽 캔버스(도트 해상도) + 데칼 RT
   private buildWorld(): void {
     const floorImgs: Phaser.GameObjects.Image[] = [], wallImgs: Phaser.GameObjects.Image[] = [];
-    for (const sec of SECTIONS) {
+    for (const sec of this.g.secs) {
       const rows = sec.r1 - sec.r0 + 1, w = COLS * 16, h = rows * 16, fk = `gt_f${sec.id}`, wk = `gt_w${sec.id}`;
       for (const k of [fk, wk]) if (this.textures.exists(k)) this.textures.remove(k);
       const ft = this.textures.createCanvas(fk, w, h)!, wt = this.textures.createCanvas(wk, w, h)!;
@@ -189,15 +202,16 @@ export class GroundScene extends Phaser.Scene {
 
   /** 한 구역의 바닥·벽을 캔버스(도트 1px = 월드 4px)에 그린다: 타일 16×16 도트 */
   private drawChunk(s: number, fc: CanvasRenderingContext2D, wc: CanvasRenderingContext2D): void {
-    const sec = SECTIONS[s], st = STYLE[s], tiles = this.g.tiles;
+    const sec = this.g.secs[s], st = (this.rescue ? STYLE_R : STYLE)[s], tiles = this.g.tiles;
+    const pat = sec.floor === 'roof' || sec.floor === 'yard' ? 'noise' : sec.floor === 'indoor' || sec.floor === 'cells' || sec.floor === 'bunker' ? 'tile' : 'plate';
     const rgb = (a: number[]) => `rgb(${a[0]},${a[1]},${a[2]})`;
     const isWall = (c: number, r: number) => c < 0 || c >= COLS || r < 0 || r >= ROWS || tiles[r * COLS + c] === 1;
     for (let r = sec.r0; r <= sec.r1; r++) for (let c = 0; c < COLS; c++) {
       const x = c * 16, y = (r - sec.r0) * 16, h = ((c * 73856093) ^ (r * 19349663)) >>> 0;
       if (isWall(c, r)) { fc.fillStyle = '#0c0d10'; fc.fillRect(x, y, 16, 16); continue; }
       fc.fillStyle = rgb((c + r) % 2 === 0 ? st.base : st.alt); fc.fillRect(x, y, 16, 16);
-      if (s === 1 || s === 2) { fc.fillStyle = rgb(st.line); fc.fillRect(x, y + 7, 16, 1); fc.fillRect(x + 7, y, 1, 16); fc.fillStyle = 'rgba(255,255,255,.05)'; fc.fillRect(x + 1, y + 1, 6, 1); fc.fillRect(x + 9, y + 9, 6, 1); }
-      else if (s === 0) { fc.fillStyle = rgb(st.line); fc.fillRect(x, y, 16, 1); fc.fillRect(x, y, 1, 16); for (let i = 0; i < 6; i++) { const q = (h >>> (i * 3)) & 255; fc.fillStyle = q & 1 ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.16)'; fc.fillRect(x + 2 + (q % 12), y + 2 + ((q >> 3) % 12), 1, 1); } if (h % 11 === 0) { fc.fillStyle = rgb(st.line); fc.fillRect(x + 3, y + 5, 4, 1); fc.fillRect(x + 6, y + 6, 3, 1); fc.fillRect(x + 8, y + 7, 2, 1); } }
+      if (pat === 'tile') { fc.fillStyle = rgb(st.line); fc.fillRect(x, y + 7, 16, 1); fc.fillRect(x + 7, y, 1, 16); fc.fillStyle = 'rgba(255,255,255,.05)'; fc.fillRect(x + 1, y + 1, 6, 1); fc.fillRect(x + 9, y + 9, 6, 1); }
+      else if (pat === 'noise') { fc.fillStyle = rgb(st.line); fc.fillRect(x, y, 16, 1); fc.fillRect(x, y, 1, 16); for (let i = 0; i < 6; i++) { const q = (h >>> (i * 3)) & 255; fc.fillStyle = q & 1 ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.16)'; fc.fillRect(x + 2 + (q % 12), y + 2 + ((q >> 3) % 12), 1, 1); } if (h % 11 === 0) { fc.fillStyle = rgb(st.line); fc.fillRect(x + 3, y + 5, 4, 1); fc.fillRect(x + 6, y + 6, 3, 1); fc.fillRect(x + 8, y + 7, 2, 1); } }
       else { fc.fillStyle = rgb(st.line); fc.fillRect(x, y, 16, 1); fc.fillRect(x, y, 1, 16); fc.fillStyle = 'rgba(255,255,255,.10)'; fc.fillRect(x + 1, y + 1, 1, 1); fc.fillRect(x + 14, y + 1, 1, 1); fc.fillRect(x + 1, y + 14, 1, 1); fc.fillRect(x + 14, y + 14, 1, 1); if (h % 9 === 0) { fc.fillStyle = 'rgba(0,0,0,.18)'; fc.fillRect(x + 4, y + 4, 8, 8); } }
     }
     // 벽이 바닥에 드리우는 그림자(+2,+2 도트) → 벽 윗면 → 네온 경계선
@@ -236,7 +250,8 @@ export class GroundScene extends Phaser.Scene {
     const asp = Math.max(16 / 9, Math.min(2.3, Math.max(window.innerWidth, window.innerHeight) / Math.max(1, Math.min(window.innerWidth, window.innerHeight)))), vw = land ? Math.round((450 * asp) / 2) * 2 : W, vh = land ? 450 : H, changed = vw !== this.vw || vh !== this.vh;
     this.landscape = land; this.vw = vw; this.vh = vh;
     if (changed || force) { this.scale.setGameSize(vw * R, vh * R); this.cameras.main.setSize(vw * R, vh * R); }
-    for (const r of [this.veil, this.redFlash, this.whiteFlash]) r.setSize(vw, vh).setPosition(0, 0);
+    for (const r of [this.alarmRect, this.veil, this.redFlash, this.whiteFlash]) r.setSize(vw, vh).setPosition(0, 0);
+    if (this.brief) this.layoutBrief();
     this.layoutHud(); this.applyRotation();
     if (this.cutImg.visible && this.cutKey) this.cover2(this.cutKey, this.cutImg.alpha);
     if (changed && this.cam) this.cam.y = Math.max(0, Math.min(WORLD_H - this.viewH, this.g.p.y - this.viewH * 0.6));
@@ -276,6 +291,7 @@ export class GroundScene extends Phaser.Scene {
       if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' ', 'tab'].includes(k)) e.preventDefault();
       if (this.keys.has(k)) return;
       this.keys.add(k);
+      if (this.brief) { if (k === 'enter' || k === ' ') this.briefGo(); else if (k === 'escape') this.finish(false); return; }
       if (k === 'p' || k === 'escape') { this.setPaused(!this.paused); return; }
       if (this.stage === 'DEAD' && (k === 'r' || k === 'enter' || k === ' ')) { this.deadConfirm(); return; }
       if (this.paused) { if (k === 'enter') this.setPaused(false); else if (k === 't') this.pressQuit(); return; }
@@ -345,6 +361,7 @@ export class GroundScene extends Phaser.Scene {
   private pointerDown(p: Phaser.Input.Pointer): void {
     audio.unlock();
     const x = this.lx(p), y = this.ly(p);
+    if (this.brief) { const a = this.briefHit(x, y); if (a === 'go') this.briefGo(); else if (a === 'skip') this.finish(false); return; }
     if (this.stage === 'DEAD') { this.deadConfirm(); return; }
     if (this.choosing || this.paused) { const a = this.menuAt(x, y); if (a) this.menuAction(a); else if (this.paused && !p.wasTouch) this.setPaused(false); return; }
     if (this.stage !== 'PLAY') return;
@@ -406,6 +423,49 @@ export class GroundScene extends Phaser.Scene {
     const t = this.add.text(this.vw / 2, y, text, { ...textStyle(size, '#ffffff'), stroke: '#02060e', strokeThickness: 5 }).setOrigin(0.5).setAlpha(0);
     this.root.add(t); this.caps.push(t); this.tweens.add({ targets: t, alpha: 1, duration: 260 }); return t;
   }
+  // ---------------------------------------------------------------- 인질 구출 임무: 브리핑
+  private pilotName(id: string): string { return id === 'sister1' ? '언니' : id === 'sister2' ? '동생' : '에이스'; }
+  private runBriefing(): void {
+    const who = this.g.hostage!.who, hn = who === 1 ? '언니' : '동생', me = this.pilotName(this.sim.meta.pilot), owned = loadMeta().pilots.owned.includes(who === 1 ? 'sister1' : 'sister2');
+    audio.updateMusic(null);
+    this.veil.setAlpha(1);
+    const g = this.add.graphics(), mk = (txt: string, size: number, color: string) => { const t = this.add.text(0, 0, txt, { ...textStyle(size, color), wordWrap: { width: 380 }, lineSpacing: 6 }).setOrigin(0, 0).setAlpha(0); return t; };
+    const portrait = this.add.image(0, 0, who === 1 ? 'pilot1' : 'pilot2').setOrigin(0.5);
+    const texts = [
+      mk('SOS — 구출 임무', 24, '#fca5a5'),
+      mk(`[${me}] 4스테이지 전투 중, ${hn}의 기체가 격추되어 신호가 끊겼다.`, 15, '#e2e8f0'),
+      mk(`적 지휘부는 ${hn}${who === 1 ? "를" : "을"} 야간 수용소에 가뒀다. 감시가 삼엄하다.`, 15, '#e2e8f0'),
+      mk('임무: 외곽 잠입 → 지하 통로 → 감방동에서 구출 → 옥상 헬기장으로 탈출', 15, '#fde68a'),
+      mk('소음기 권총·섬광탄·연막탄 지급. 들키지 않는 게 최선이다 — 구출하는 순간 경보가 울린다.', 14, '#94a3b8'),
+      mk(owned ? '성공 시: 유물 보상 + 크레딧' : `성공 시: ${hn} 해금 + 유물 보상`, 15, '#86efac'),
+      mk('작전 개시', 18, '#ffffff'), mk('건너뛰기 (보상 없음)', 14, '#cbd5e1'),
+    ];
+    this.root.add([g, portrait, ...texts]);
+    this.brief = { objs: [g, portrait, ...texts], btns: [{ name: 'go', x: 0, y: 0, w: 0, h: 0 }, { name: 'skip', x: 0, y: 0, w: 0, h: 0 }], g, texts, portrait };
+    this.layoutBrief();
+    texts.forEach((t, i) => this.tweens.add({ targets: t, alpha: 1, duration: 400, delay: 300 + i * 650 }));
+    this.tweens.add({ targets: portrait, alpha: { from: 0, to: 1 }, duration: 700 });
+  }
+  private layoutBrief(): void {
+    const b = this.brief; if (!b) return; const vw = this.vw, vh = this.vh, L = this.landscape;
+    const px = L ? vw * 0.22 : vw / 2, py = L ? vh / 2 : vh * 0.2, ps = L ? Math.min(vh * 0.8, 360) : Math.min(vw * 0.46, 200);
+    b.portrait.setPosition(px, py).setDisplaySize(ps * (b.portrait.width / b.portrait.height), ps);
+    const tx = L ? vw * 0.42 : 24, ww = L ? vw * 0.52 : vw - 48; let y = L ? vh * 0.1 : vh * 0.34;
+    b.texts.slice(0, 6).forEach(t => { t.setWordWrapWidth(ww).setPosition(tx, y); y += t.height + (L ? 10 : 8); });
+    const bw = Math.min(ww, 300), bh = 46, by = Math.min(vh - 110, y + 14);
+    b.btns[0] = { name: 'go', x: tx + bw / 2, y: by + bh / 2, w: bw, h: bh }; b.btns[1] = { name: 'skip', x: tx + bw / 2, y: by + bh + 14 + 20, w: bw, h: 40 };
+    b.g.clear(); b.g.fillStyle(0x02060e, 1); b.g.fillRect(0, 0, vw, vh);
+    b.g.fillStyle(0x7f1d1d, 0.95); b.g.fillRoundedRect(tx, by, bw, bh, 10); b.g.lineStyle(2, 0xfbbf24, 0.9); b.g.strokeRoundedRect(tx, by, bw, bh, 10);
+    b.g.fillStyle(0x0f172a, 0.9); b.g.fillRoundedRect(tx, by + bh + 14, bw, 40, 10); b.g.lineStyle(2, 0x64748b, 0.9); b.g.strokeRoundedRect(tx, by + bh + 14, bw, 40, 10);
+    b.texts[6].setOrigin(0.5).setPosition(b.btns[0].x, b.btns[0].y); b.texts[7].setOrigin(0.5).setPosition(b.btns[1].x, b.btns[1].y);
+  }
+  private briefHit(x: number, y: number): string | null { for (const b of this.brief?.btns ?? []) if (Math.abs(x - b.x) < b.w / 2 && Math.abs(y - b.y) < b.h / 2) return b.name; return null; }
+  private briefGo(): void {
+    if (!this.brief) return; this.brief.objs.forEach(o => o.destroy()); this.brief = null;
+    this.world.setVisible(true); this.ui.setVisible(true);
+    this.tweens.add({ targets: this.veil, alpha: 0, duration: 900 });
+    this.stage = 'PLAY'; this.tutorialT = 60 * 10; this.say('외곽 침투'); audio.sfx('heal');
+  }
   private runIntro(): void {
     const cam = this.cameras.main;
     audio.updateMusic(null);
@@ -446,7 +506,7 @@ export class GroundScene extends Phaser.Scene {
       this.cover2('cut_takeoff'); this.cutImg.setAlpha(0);
       this.tweens.add({ targets: this.cutImg, alpha: 1, duration: 500 });
       this.tweens.add({ targets: this.cutImg, scale: this.cutImg.scale * 1.08, duration: 2200, ease: 'Sine.easeOut' });
-      this.caption('기체 탈환! 이륙!', 26);
+      this.caption(this.rescue ? `${this.g.hostage!.who === 1 ? '언니' : '동생'} 구출 성공! 귀환한다!` : '기체 탈환! 이륙!', 26);
       audio.sfx('item'); audio.sfx('enrage');
     });
     this.time.delayedCall(3600, () => {
@@ -466,7 +526,10 @@ export class GroundScene extends Phaser.Scene {
     if (this.finished) return; this.finished = true; this.stage = 'END';
     this.clearPixel(); this.cameras.main.setZoom(1);
     const r = this.g.result();
-    if (win) this.sim.finishGround({ score: r.score, rooms: r.rooms }); else this.sim.groundFail();
+    if (this.rescue) {   // 선택 임무: 실패·포기해도 게임오버가 아니다. 성공하면 구출한 자매를 해금한다
+      if (win && r.rescued) { const m = loadMeta(), id = this.g.hostage!.who === 1 ? 'sister1' : 'sister2'; if (!m.pilots.owned.includes(id)) { m.pilots.owned.push(id); this.sim.rescueUnlocked = this.g.hostage!.who; } else { m.credits += 150; this.sim.rescueUnlocked = 0; } saveMeta(m); }
+      this.sim.finishRescue({ rescued: win && r.rescued, score: r.score });
+    } else if (win) this.sim.finishGround({ score: r.score, rooms: r.rooms }); else this.sim.groundFail();
     audio.resume();
     this.scene.stop();
     this.scene.resume('GameScene');
@@ -492,8 +555,14 @@ export class GroundScene extends Phaser.Scene {
         if (this.hitStop > 0) { this.hitStop--; this.tickFx(0.2); continue; }   // 히트스톱: 시뮬레이션은 멈추고 입자만 아주 느리게
         this.tick();
       }
+      if (this.rescue) {   // 구출 임무: 배경음악 없음. 은신 중엔 드론+심장 박동, 경보가 울리면 사이렌 + 빠른 박동
+        audio.setStealth(this.g.alarm ? 1 : (this.g.stealthLevel ?? 0.2)); audio.tickStealth(Math.min(delta, 50)); audio.updateMusic(null);
+        if (this.g.alarm && --this.siren <= 0) { this.siren = 80; audio.sfx('gSiren'); }
+        this.alarmRect.setAlpha(this.g.alarm ? 0.04 + 0.07 * (0.5 + 0.5 * Math.sin(this.time.now * 0.01)) : 0);
+      } else {
       audio.setStealth(this.g.stealthLevel); audio.tickStealth(Math.min(delta, 50));
       audio.updateMusic(this.g.isBossRoom ? 'boss' : 'solar');
+      }
     }
     if (this.stage === 'DEAD' && this.deadTimer > 0) this.deadTimer--;
     this.render();
@@ -533,7 +602,7 @@ export class GroundScene extends Phaser.Scene {
   /** 바닥 데칼에 한 점 (도트 단위 크기). 구역별 RT 에 찍는다 */
   private stamp(x: number, y: number, w: number, h: number, color: number, alpha: number): void {
     if (this.stampBudget > 160) return;
-    const s = sectionOfRow(Math.floor(y / TILE)), sec = SECTIONS[s], rt = this.decals[s]; if (!rt) return;
+    const s = sectionOfRow(Math.floor(y / TILE)), sec = this.g.secs[s], rt = this.decals[s]; if (!rt) return;
     this.stampBudget++; rt.fill(color, alpha, Math.floor(x / ART), Math.floor((y - sec.r0 * TILE) / ART), w, h);
   }
   private prt(k: Prt['k'], x: number, y: number, ang: number, sp: number, life: number, size: number, c: number): void {
@@ -587,7 +656,7 @@ export class GroundScene extends Phaser.Scene {
       case 'smear': this.stamp(e.x, e.y, 3, 3, 0x7a1414, 0.7); break;
       case 'pool': for (let i = 0; i < 3; i++) this.stamp(e.x + rnd(-e.r, e.r), e.y + rnd(-e.r, e.r), Math.max(2, Math.round(e.r / 5)), Math.max(2, Math.round(e.r / 5)), 0x6e1212, 0.22); break;
       case 'stamp': {   // 시체를 바닥 데칼에 합성 (이후 비용 0)
-        const s = sectionOfRow(Math.floor(e.y / TILE)), sec = SECTIONS[s], rt = this.decals[s]; if (!rt) break;
+        const s = sectionOfRow(Math.floor(e.y / TILE)), sec = this.g.secs[s], rt = this.decals[s]; if (!rt) break;
         const sheet = e.kind === 'dog' ? 'gs_dog' : e.kind === 'drone' ? 'gs_drone' : e.kind === 'turret' ? 'gs_turret' : e.kind === 'boss' ? 'gs_boss' : FOE_SHEET[e.kind] ?? 'gs_foe_rifle';
         const row = FOE_SHEET[e.kind] ? (e.fallF ? 13 : 9) : e.kind === 'dog' ? 5 : e.kind === 'drone' ? 2 : e.kind === 'turret' ? 3 : 5;
         this.stampImg.setTexture(sheet, row).setPosition(e.x / ART, (e.y - sec.r0 * TILE) / ART).setRotation(e.ang).setScale(1).setVisible(false);
@@ -638,6 +707,8 @@ export class GroundScene extends Phaser.Scene {
       case 'style': audio.sfx('gStyle'); this.pop(e.x, e.y - 90, 'STYLE!', '#67e8f9', 18); break;
       case 'reset': this.decals[e.section]?.clear(); break;
       case 'win': audio.sfx('item'); this.runOutro(); break;
+      case 'hostageFree': audio.sfx('enrage'); audio.sfx('item'); this.say('구출! 경보 발령!', 30); this.pop(e.x, e.y - 90, '!!', '#ff4040', 26); this.alarmRect.setAlpha(0.1); break;
+      case 'reinforce': this.pop(e.x, e.y - 90, '증원!', '#fca5a5', 16); audio.sfx('gEnemyShot'); break;
       case 'dead': this.stage = 'DEAD'; this.deadTimer = 25; audio.sfx('enrage'); break;
     }
   }
@@ -680,7 +751,7 @@ export class GroundScene extends Phaser.Scene {
       if (k.kind === 'weapon' && Math.hypot(p.x - k.x, p.y - k.y) < 60) nearW = `E 줍기: ${WEAPONS[k.weapon!].name}${k.ammo !== undefined && k.ammo < 999 ? ' ' + k.ammo : ''}`;
     }
     for (const [id, img] of this.pickupImgs) if (!livePk.has(id)) { img.destroy(); this.pickupImgs.delete(id); }
-    this.renderEnemies(inView);
+    this.renderEnemies(inView); this.renderHostage(t);
     this.renderBullets(inView);
     this.renderPlayer(t);
     for (const q of this.prts) {   // 입자
@@ -830,6 +901,19 @@ export class GroundScene extends Phaser.Scene {
     const walk = p.moving ? [rows.walk_a, rows.idle, rows.walk_b, rows.idle][Math.floor(p.walk / 8) % 4] : rows.idle;
     return { sheet, row: walk, rot: p.aim };
   }
+  /** 인질: 갇혀 있을 땐 묶인 자세 + 풀어 주는 진행 링, 풀리면 플레이어를 따라다닌다 */
+  private renderHostage(t: number): void {
+    const g = this.g, h = g.hostage; if (!h) return;
+    if (!this.hostageImg) { this.hostageImg = this.add.image(0, 0, `gs_sister${h.who}`, 0).setScale(4); this.actorLayer.add(this.hostageImg); }
+    const img = this.hostageImg; img.setVisible(h.state !== 'safe');
+    const row = h.state === 'caged' ? 3 : h.moving ? [1, 0, 2, 0][Math.floor(h.walk / 9) % 4] : 0;
+    img.setTexture(`gs_sister${h.who}`, row).setPosition(Math.round(h.x), Math.round(h.y)).setRotation(h.state === 'caged' ? 0 : h.ang);
+    if (h.state === 'caged') {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 0.006);
+      this.topG.lineStyle(3, 0xfde68a, 0.35 + 0.35 * pulse); this.topG.strokeCircle(h.x, h.y, 54 + pulse * 6);
+      if (h.freeT > 0) { this.topG.lineStyle(6, 0x86efac, 0.95); this.topG.beginPath(); this.topG.arc(h.x, h.y, 70, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, h.freeT / 75), false); this.topG.strokePath(); }
+    }
+  }
   private renderPlayer(t: number): void {
     const p = this.g.p, { sheet, row, rot } = this.playerPose(), img = this.playerImg;
     img.setTexture(sheet, row).setPosition(Math.round(p.x), Math.round(p.y)).setRotation(rot).setScale(ART);
@@ -847,8 +931,14 @@ export class GroundScene extends Phaser.Scene {
       HEART.forEach((row, ry) => { for (let rx = 0; rx < 7; rx++) if (row[rx] === 'X') { h.fillStyle(full || (half && rx < 4) ? 0xef4444 : 0x3b0d12, 1); h.fillRect(x0 + rx * 2, y0 + ry * 2, 2, 2); } });
     }
     const sec = g.section, touch = this.isTouch();
-    T2.room.setText(`${SECTIONS[sec].name}  ${sec === 3 ? (g.exitOpen ? '— 출구!' : '— BOSS') : ''}`);
+    if (this.rescue) {
+      const hs = g.hostage!, who = hs.who === 1 ? '언니' : '동생';
+      T2.room.setText(g.secs[sec].name);
+      T2.left.setText(hs.state === 'caged' ? `목표: ${who} 구출 (감방동) — 곁에 서 있으면 풀어 준다` : hs.state === 'free' ? `${who}와 함께 옥상 헬기장으로! — 경보 발령, 증원 접근` : '');
+    } else {
+    T2.room.setText(`${g.secs[sec].name}  ${sec === 3 ? (g.exitOpen ? '— 출구!' : '— BOSS') : ''}`);
     T2.left.setText(g.cleared[sec] ? (sec === 3 ? '' : '▲ 위층으로 올라가라') : sec === 3 ? '' : `남은 적 ${g.remaining}`);
+    }
     T2.score.setText(String(Math.round(g.score)));
     const w = WEAPONS[p.weapon];
     T2.weapon.setText(p.weapon === 'pistol' ? w.name : `${w.name}  ${p.ammo}/${w.ammo}`).setColor(p.gunBlocked ? '#f87171' : p.weapon === 'pistol' ? '#cbd5e1' : '#fde68a');
@@ -861,7 +951,7 @@ export class GroundScene extends Phaser.Scene {
     else if (p.gunBlocked && this.stage === 'PLAY') T2.hint.setText('총이 벽에 막혀 있다 — 물러서라').setAlpha(0.9);
     else if (this.tutorialT > 0 && !this.choosing && !this.paused) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 문은 몸으로 밀어서 연다') : 'WASD 이동 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
     else T2.hint.setAlpha(0);
-    if ((g.cleared[sec] && sec < 3) || (sec === 3 && g.exitOpen)) { const gy = (SECTIONS[sec].r0 + 1) * TILE; if (gy < cy) { const a = 0.6 + 0.4 * Math.sin(this.time.now * 0.008); h.fillStyle(0xfde68a, a); h.fillTriangle(vw / 2, 74, vw / 2 - 12, 92, vw / 2 + 12, 92); } }   // 다음 구역 문 방향 화살표
+    if (!this.rescue && ((g.cleared[sec] && sec < 3) || (sec === 3 && g.exitOpen))) { const gy = (this.g.secs[sec].r0 + 1) * TILE; if (gy < cy) { const a = 0.6 + 0.4 * Math.sin(this.time.now * 0.008); h.fillStyle(0xfde68a, a); h.fillTriangle(vw / 2, 74, vw / 2 - 12, 92, vw / 2 + 12, 92); } }   // 다음 구역 문 방향 화살표
     this.popTexts.forEach(tx => tx.setVisible(false));   // 월드 → 화면 팝업 글자
     this.pops.forEach((pp, i) => { let tx = this.popTexts[i]; if (!tx) { tx = this.add.text(0, 0, '', textStyle(14, '#fff')).setOrigin(0.5); tx.setShadow(0, 0, '#000', 4, true, true); this.ui.add(tx); this.popTexts[i] = tx; } tx.setVisible(true).setText(pp.text).setColor(pp.color).setFontSize(pp.size).setPosition((pp.x - cx) * Z, (pp.y - cy) * Z).setAlpha(Math.min(1, pp.life / 14)); });
     if (!touch && this.mouse.used && this.stage === 'PLAY' && !this.paused) {   // 크로스헤어: 발사하면 벌어지고, 명중은 흰 X, 사살은 빨간 X, 총이 막히면 빨강
