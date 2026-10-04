@@ -67,6 +67,9 @@ export interface GEnemy {
   home: { x: number; y: number; ang: number }; patrol?: [number, number][]; pi: number; moved: number;
   alertT: number; windT: number; dashT: number; lx: number; ly: number; burst: number; phase: number; styled: boolean; fire: number;
   dying: boolean; fallT: number; fallF: boolean; deathAng: number; smearD: number; w: FeelKey;
+  /** 수상한 소리 조사 중(경계 전): 1=소리 난 곳으로 걸어감, 2=두리번, 3=제자리로 복귀 */
+  inv?: { ph: 1 | 2 | 3; t: number; x: number; y: number; fl: Int16Array };
+  pauseT?: number; head?: number;   // 순찰 중 지점에서 멈춰 둘러보기
 }
 export interface GBullet { x: number; y: number; vx: number; vy: number; dmg: number; friendly: boolean; w: FeelKey; life: number; dist: number; pellet: boolean; first: boolean; pierce: number; hit: number[]; dodged: boolean; src?: GKind; kind?: 'normal' | 'sniper' }
 export interface GDoor { id: number; c: number; r: number; w: number; h: number; o: 'v' | 'h'; kind: 'door' | 'gate' | 'exit'; section: number; hp: number; phi: number; target: number; rate: number; broken: boolean; locked: boolean; x0: number; y0: number; x1: number; y1: number }
@@ -92,6 +95,7 @@ export type GEvent =
   | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
   | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
   | { t: 'hostageFree'; x: number; y: number } | { t: 'reinforce'; x: number; y: number } | { t: 'hostageProgress'; k: number }
+  | { t: 'suspicious'; x: number; y: number } | { t: 'tick'; x: number; y: number; r: number }
   | { t: 'assassinate'; x: number; y: number; ang: number } | { t: 'step'; x: number; y: number; r: number }
   | { t: 'flashbang'; x: number; y: number; r: number } | { t: 'smoke'; x: number; y: number; r: number } | { t: 'stealth'; x: number; y: number; pts: number; melee: boolean } | { t: 'ghost'; n: number; pts: number } | { t: 'swap'; to: BombType }
   | { t: 'pickup'; what: 'heart' | 'weapon' | 'bomb'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
@@ -305,7 +309,7 @@ export class GroundSim {
     const s = sectionOfRow(Math.floor(y / TILE));
     for (const e of this.enemies) if (e.state === 'idle' && e.section === s && Math.hypot(e.x - x, e.y - y) < radius) this.alertEnemy(e);
   }
-  private alertEnemy(e: GEnemy): void { if (e.state === 'alert' || e.dying) return; if (e.section >= 0 && e.section < 4) this.alerted[e.section] = true; e.state = 'alert'; e.alertT = f(0.7); e.windT = 0; this.emit({ t: 'alert', x: e.x, y: e.y }); }
+  private alertEnemy(e: GEnemy): void { if (e.state === 'alert' || e.dying) return; if (e.section >= 0 && e.section < 4) this.alerted[e.section] = true; e.inv = undefined; e.state = 'alert'; e.alertT = f(0.7); e.windT = 0; this.emit({ t: 'alert', x: e.x, y: e.y }); }
 
   // ---------------------------------------------------------------- 틱
   step(inp: GInput): void {
@@ -594,6 +598,7 @@ export class GroundSim {
           else if (ob.type === 'door') { this.hurtDoor(ob.o as GDoor); gone = true; }
           else if (ob.type === 'crate') { this.hurtCrate(ob.o as GCrate); this.emit({ t: 'wallhit', x: b.x, y: b.y, ang: Math.atan2(b.vy, b.vx) }); gone = true; }
           else if (ob.type === 'window') { const w = ob.o as GWindow; if (!b.hit.includes(-w.id)) { b.hit.push(-w.id); w.hp--; this.emit({ t: 'windowHit', x: b.x, y: b.y }); if (w.hp <= 0) this.breakWindow(w); } }   // 유리창은 깨고 총알은 계속 날아간다
+          if (gone && b.friendly && b.w === 'silenced' && ob.type !== 'window') { const bs = Math.hypot(b.vx, b.vy) || 1; this.lure(b.x, b.y, b.vx / bs, b.vy / bs); }   // 소음기 탄이 벽에 맞는 "딱" 소리
           if (gone) break;
         }
         if (b.friendly) {
@@ -700,8 +705,10 @@ export class GroundSim {
       const px0 = e.x, py0 = e.y;
       if (e.stunT > 0) { e.stunT--; e.moving = false; continue; }
       if (e.state === 'idle') {
-        if (e.kind === 'turret') e.ang = e.base + Math.sin((this.frame + e.id * 31) * 0.02) * 1.2;
-        else if (e.patrol && e.patrol.length > 1 && e.kind !== 'sniper') { const [wx, wy] = e.patrol[e.pi], a = Math.atan2(wy - e.y, wx - e.x), o = { x: e.x, y: e.y }; this.move(o, Math.cos(a) * 0.9, Math.sin(a) * 0.9, BODY_R[e.kind], false); e.x = o.x; e.y = o.y; e.ang += norm(a - e.ang) * 0.15; if (Math.hypot(wx - e.x, wy - e.y) < 28 || (Math.hypot(e.x - px0, e.y - py0) < 0.2 && ++e.moved > 30)) { e.pi = (e.pi + 1) % e.patrol.length; e.moved = 0; } }
+        if (e.inv && e.kind !== 'turret') this.investigate(e);
+        else if (e.kind === 'turret') e.ang = e.base + Math.sin((this.frame + e.id * 31) * 0.02) * 1.2;
+        else if (e.patrol && e.patrol.length > 1 && e.kind !== 'sniper' && (e.pauseT ?? 0) > 0) { e.pauseT!--; e.ang = (e.head ?? e.ang) + 0.9 * Math.sin(this.frame * 0.07 + e.id); }   // 지점에서 멈춰 좌우를 살핀다
+        else if (e.patrol && e.patrol.length > 1 && e.kind !== 'sniper') { const [wx, wy] = e.patrol[e.pi], a = Math.atan2(wy - e.y, wx - e.x), o = { x: e.x, y: e.y }; this.move(o, Math.cos(a) * 0.9, Math.sin(a) * 0.9, BODY_R[e.kind], false); e.x = o.x; e.y = o.y; e.ang += norm(a - e.ang) * 0.15; if (Math.hypot(wx - e.x, wy - e.y) < 28 || (Math.hypot(e.x - px0, e.y - py0) < 0.2 && ++e.moved > 30)) { e.pi = (e.pi + 1) % e.patrol.length; e.moved = 0; e.pauseT = 100; e.head = a; } }
         else e.ang = e.base + 0.35 * Math.sin((this.frame / 60 + e.look) * 2.29);
         if (e.kind === 'boss') { if (this.section === 3 && (this.sees(e) || dist < 700)) this.alertEnemy(e); else { e.ang = Math.atan2(p.y - e.y, p.x - e.x); continue; } }
         else if (e.kind !== 'drone' && this.sees(e)) this.alertEnemy(e);
@@ -710,6 +717,32 @@ export class GroundSim {
       }
       this.combat(e, dist);
       e.moving = Math.hypot(e.x - px0, e.y - py0) > 0.3; if (e.moving) e.walk++;
+    }
+  }
+  /** 소음기 총알이 벽·상자·문에 맞은 소리: 가까운 경계 전 적이 그쪽으로 걸어가 둘러본 뒤 돌아간다 (플레이어를 보면 평소대로 경계) */
+  lure(x: number, y: number, ux: number, uy: number): void {
+    let ix = x - ux * 70, iy = y - uy * 70; if (this.obstacleAt(ix, iy)) { ix = x - ux * 130; iy = y - uy * 130; if (this.obstacleAt(ix, iy)) return; }
+    const s = sectionOfRow(Math.floor(y / TILE));
+    this.emit({ t: 'tick', x, y, r: 380 });
+    for (const e of this.enemies) {
+      if (e.dying || e.state !== 'idle' || e.section !== s || e.kind === 'turret' || e.kind === 'boss' || e.kind === 'drone' || e.kind === 'dog') continue;
+      if (Math.hypot(e.x - x, e.y - y) > 380) continue;
+      e.inv = { ph: 1, t: 0, x: ix, y: iy, fl: this.flowTo(ix, iy) }; this.emit({ t: 'suspicious', x: e.x, y: e.y });
+    }
+  }
+  private investigate(e: GEnemy): void {
+    const iv = e.inv!, r = BODY_R[e.kind]; iv.t++;
+    const face = (ox: number, oy: number, k: number) => { if (Math.hypot(e.x - ox, e.y - oy) > 0.1) e.ang += norm(Math.atan2(e.y - oy, e.x - ox) - e.ang) * k; };
+    if (iv.ph === 1) {
+      if (Math.hypot(iv.x - e.x, iv.y - e.y) < 70 || iv.t > 480) { iv.ph = 2; iv.t = 0; return; }
+      const ox = e.x, oy = e.y; if (!this.stepFlow(e, iv.fl, 1.0, r, false)) { const a = Math.atan2(iv.y - e.y, iv.x - e.x); this.move(e, Math.cos(a), Math.sin(a), r, false); }
+      face(ox, oy, 0.2);
+    } else if (iv.ph === 2) {
+      e.ang = Math.atan2(iv.y - e.y, iv.x - e.x) + 0.9 * Math.sin(iv.t * 0.06);
+      if (iv.t > 140) { iv.ph = 3; iv.t = 0; iv.fl = this.flowTo(e.home.x, e.home.y); }
+    } else {
+      if (e.patrol || Math.hypot(e.home.x - e.x, e.home.y - e.y) < 50 || iv.t > 600) { e.inv = undefined; if (!e.patrol) e.ang = e.base; return; }
+      const ox = e.x, oy = e.y; this.stepFlow(e, iv.fl, 0.9, r, false); face(ox, oy, 0.2);
     }
   }
   private chase(e: GEnemy, sp: number, los: boolean, toP: number): void {

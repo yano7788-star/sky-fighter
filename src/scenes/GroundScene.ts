@@ -692,6 +692,8 @@ export class GroundScene extends Phaser.Scene {
       case 'wallhit': for (let i = 0; i < 4; i++) this.prt('spark', e.x, e.y, e.ang + Math.PI + rnd(-0.9, 0.9), rnd(150, 420), rnd(6, 12), 3, 0xffe27a); this.prt('dust', e.x, e.y, e.ang + Math.PI, rnd(30, 90), 22, 8, 0xb0b8c4); this.stamp(e.x, e.y, 1, 1, 0x0b0f14, 0.7); break;
       case 'assassinate': audio.sfx('gSilenced'); this.pop(e.x, e.y - 100, '암살', '#a5f3fc', 18); for (let i = 0; i < 5; i++) this.prt('blood', e.x, e.y, e.ang + rnd(-0.6, 0.6), rnd(60, 200), rnd(10, 22), 4, 0x8b1a1a); break;
       case 'step': this.stepRings.push({ x: e.x, y: e.y, r: e.r, t: 0 }); break;
+      case 'tick': this.stepRings.push({ x: e.x, y: e.y, r: e.r, t: 0 }); audio.sfx('gCasing'); break;
+      case 'suspicious': this.pop(e.x, e.y - 90, '?', '#fde047', 22); break;
       case 'flashbang': audio.sfx('boom'); this.whiteFlash.setAlpha(0.9); this.tweens.add({ targets: this.whiteFlash, alpha: 0, duration: 700 }); for (let i = 0; i < 16; i++) this.prt('spark', e.x, e.y, rnd(0, 6.28), rnd(200, 600), rnd(10, 22), 3, 0xffffff); break;
       case 'smoke': audio.sfx('item'); for (let i = 0; i < 12; i++) this.prt('smoke', e.x, e.y, rnd(0, 6.28), rnd(60, 200), rnd(30, 60), 14, 0xb8c0cc); break;
       case 'stealth': this.pop(e.x, e.y - 100, e.melee ? '암살 +' + e.pts : '무음 처치 +' + e.pts, '#a5f3fc', 16); break;
@@ -957,7 +959,7 @@ export class GroundScene extends Phaser.Scene {
     if (b && b.state === 'alert') { T2.boss.setText('격납고 수문장'); h.fillStyle(0x0f172a, 0.8); h.fillRect(vw / 2 - 100, 56, 200, 8); h.fillStyle(0xef4444, 1); h.fillRect(vw / 2 - 100, 56, 200 * Math.max(0, b.hp / b.maxHp), 8); h.lineStyle(1, 0xffffff, 0.5); h.strokeRect(vw / 2 - 100, 56, 200, 8); } else T2.boss.setText('');
     if (nearW && p.weapon !== 'pistol' && !touch) T2.hint.setText(nearW).setAlpha(1);
     else if (p.gunBlocked && this.stage === 'PLAY') T2.hint.setText('총이 벽에 막혀 있다 — 물러서라').setAlpha(0.9);
-    else if (this.tutorialT > 0 && !this.choosing && !this.paused) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 왼쪽 스틱을 살짝 밀면 조심 걷기 · 적 등 뒤에서 근접 = 암살') : 'WASD 이동 · C 조심 걷기(소리 없음) · 적 등 뒤에서 F = 암살 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
+    else if (this.tutorialT > 0 && !this.choosing && !this.paused) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 왼쪽 스틱을 살짝 밀면 조심 걷기 · 적 등 뒤에서 근접 = 암살 · 소음기 탄을 벽에 쏘면 근처 적이 살피러 간다') : 'WASD 이동 · C 조심 걷기(소리 없음) · 적 등 뒤에서 F = 암살 · 벽에 소음기를 쏴 시선 끌기 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
     else T2.hint.setAlpha(0);
     if (!this.rescue && ((g.cleared[sec] && sec < 3) || (sec === 3 && g.exitOpen))) { const gy = (this.g.secs[sec].r0 + 1) * TILE; if (gy < cy) { const a = 0.6 + 0.4 * Math.sin(this.time.now * 0.008); h.fillStyle(0xfde68a, a); h.fillTriangle(vw / 2, 74, vw / 2 - 12, 92, vw / 2 + 12, 92); } }   // 다음 구역 문 방향 화살표
     this.popTexts.forEach(tx => tx.setVisible(false));   // 월드 → 화면 팝업 글자

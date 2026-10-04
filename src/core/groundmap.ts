@@ -127,7 +127,7 @@ export function buildRescueLevel(): Level {
   band(0, 'exit'); band(34, 'gate');
   fill(3, 28, 7, 28, T.WALL); fill(11, 24, 15, 24, T.WALL); fill(5, 17, 5, 21, T.WALL); fill(12, 11, 12, 15, T.WALL); fill(2, 8, 6, 8, T.WALL); fill(14, 5, 16, 5, T.WALL); fill(9, 14, 10, 14, T.WALL);
   crate(8, 30); crate(14, 29); crate(2, 24); crate(3, 24); crate(15, 18); crate(16, 18); crate(9, 20); crate(13, 8); crate(7, 12); barrel(4, 14); barrel(15, 10); barrel(10, 26);
-  en('sniper', 15, 9, { ang: 180 }); en('heavy', 3, 22, { ang: 0 }); en('rifle', 3, 13, { ang: 0 }); en('rifle', 13, 21, { ang: 180 }); en('turret', 2, 4);
+  en('sniper', 15, 9, { ang: 0 }); en('heavy', 3, 22, { ang: 180 }); en('rifle', 3, 13, { ang: 180 }); en('rifle', 13, 21, { ang: 0 }); en('turret', 2, 4);
   const reinforce = [{ x: tc(2), y: tc(17), section: 3 }, { x: tc(15), y: tc(19), section: 3 }, { x: tc(2), y: tc(27), section: 3 }];
 
   // ---------------------------------------------------------------- 감방동 (행 34~67): 가운데 복도, 왼쪽 경비실, 오른쪽 감방 4칸
@@ -138,8 +138,8 @@ export function buildRescueLevel(): Level {
   fill(6, 58, 6, 59, T.FLOOR); door(6, 58, 1, 2, 'v'); fill(6, 62, 6, 63, T.FLOOR); win(6, 62, 1, 2, 'v');
   fill(1, 44, 4, 44, T.WALL);   // 왼쪽 위 서류 벽
   crate(8, 44); crate(9, 44); crate(7, 52); crate(10, 60); crate(8, 64); crate(2, 50); crate(3, 50); crate(2, 63); barrel(9, 40); barrel(1, 47); crate(14, 47); crate(13, 58);
-  en('rifle', 14, 41, { ang: 180 }); en('charger', 14, 59, { ang: 180 }); en('rifle', 8, 41, { patrol: [[tc(8), tc(41)], [tc(9), tc(63)]] }); en('heavy', 10, 47, { ang: 90 });
-  en('rifle', 3, 62, { ang: 0 }); en('rifle', 4, 58, { ang: 0 }); en('dog', 3, 52, { patrol: [[tc(2), tc(52)], [tc(5), tc(50)]] });
+  en('rifle', 14, 41, { ang: 0 }); en('charger', 14, 59, { ang: 0 }); en('rifle', 8, 41, { patrol: [[tc(8), tc(41)], [tc(9), tc(63)]] }); en('heavy', 10, 47, { ang: -90 });
+  en('rifle', 3, 62, { ang: 180 }); en('rifle', 4, 58, { ang: 180 }); en('dog', 3, 52, { patrol: [[tc(2), tc(52)], [tc(5), tc(50)]] });
   wp('silenced', 14, 46); bp('flash', 14, 53 + 1); bp('smoke', 2, 65);
   const hostage = { x: tc(14), y: tc(52) };
 
@@ -150,8 +150,8 @@ export function buildRescueLevel(): Level {
   win(6, 96, 2, 1, 'h'); win(9, 90, 2, 1, 'h'); win(6, 84, 2, 1, 'h'); win(11, 78, 2, 1, 'h');
   // (기둥은 두지 않는다: 벽·상자와 64px 이하의 틈이 생기면 반경 36 플레이어가 못 지나간다 — tools/clear-check.ts)
   crate(4, 99); crate(5, 99); crate(12, 99); crate(13, 99); crate(9, 92); crate(10, 92); crate(6, 87); crate(7, 87); crate(12, 88); crate(15, 81); crate(8, 81); crate(9, 81); crate(4, 75); crate(5, 75); crate(11, 76); barrel(12, 94);
-  en('rifle', 3, 98, { ang: 0 }); en('rifle', 3, 94, { patrol: [[tc(2), tc(94)], [tc(13), tc(94)]] }); en('sniper', 15, 92, { ang: 180 }); en('charger', 3, 87, { ang: 0 }); en('rifle', 9, 86, { ang: 90 });
-  en('rifle', 12, 81, { ang: 180 }); en('rifle', 14, 79, { ang: 180 }); en('dog', 5, 80, { patrol: [[tc(3), tc(81)], [tc(14), tc(82)]] }); en('heavy', 9, 75, { ang: 90 }); en('turret', 16, 74);
+  en('rifle', 3, 98, { ang: 180 }); en('rifle', 3, 94, { patrol: [[tc(2), tc(94)], [tc(13), tc(94)]] }); en('sniper', 15, 92, { ang: 0 }); en('charger', 3, 87, { ang: 180 }); en('rifle', 9, 86, { ang: -90 });
+  en('rifle', 12, 81, { ang: 0 }); en('rifle', 14, 79, { ang: 0 }); en('dog', 5, 80, { patrol: [[tc(3), tc(81)], [tc(14), tc(82)]] }); en('heavy', 9, 75, { ang: -90 }); en('turret', 16, 74);
   wp('silenced', 2, 100); wp('smg', 15, 88);
   bp('smoke', 15, 98); bp('flash', 2, 82);
 
@@ -161,7 +161,7 @@ export function buildRescueLevel(): Level {
   fill(6, 117, 6, 118, T.FLOOR); door(6, 117, 1, 2, 'v'); fill(6, 119, 6, 120, T.FLOOR); win(6, 119, 1, 2, 'v');   // 초소: 문 + 유리창
   fill(9, 124, 13, 124, T.WALL); fill(13, 124, 13, 126, T.WALL); fill(3, 108, 3, 112, T.WALL); fill(6, 110, 10, 110, T.WALL); fill(13, 112, 16, 112, T.WALL); fill(10, 118, 10, 120, T.WALL);
   crate(11, 115); crate(12, 115); crate(11, 116); crate(14, 108); crate(15, 108); crate(7, 126); crate(6, 126); crate(4, 124); crate(15, 120); crate(16, 120); crate(8, 106); barrel(13, 106); barrel(1, 112); barrel(16, 128);
-  en('rifle', 4, 119, { ang: 0 }); en('rifle', 4, 107, { patrol: [[tc(4), tc(107)], [tc(12), tc(108)]] }); en('rifle', 14, 118, { ang: 180 }); en('rifle', 9, 113, { ang: 90 }); en('dog', 2, 105, { patrol: [[tc(2), tc(105)], [tc(15), tc(106)]] }); en('rifle', 14, 104, { ang: 90 });
+  en('rifle', 4, 119, { ang: 180 }); en('rifle', 4, 107, { patrol: [[tc(4), tc(107)], [tc(12), tc(108)]] }); en('rifle', 14, 118, { ang: -90 }); en('rifle', 9, 113, { ang: -90 }); en('dog', 2, 105, { patrol: [[tc(2), tc(105)], [tc(15), tc(106)]] }); en('rifle', 14, 104, { ang: 0 });
   wp('silenced', 3, 119); bp('flash', 13, 120); bp('smoke', 1, 124);
   return { tiles, doors, windows, crates, spawns, pickups, bombPickups, hostage, reinforce, start: { x: tc(9), y: tc(128) } };
 }

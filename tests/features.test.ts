@@ -168,3 +168,30 @@ describe('조심 접근 · 암살', () => {
     const m = setup(); const al = add(m, 'rifle', m.p.x, m.p.y - 70, -Math.PI / 2); al.state = 'alert'; expect(m.stabTarget()).toBeNull();   // 경계 중
   });
 });
+
+describe('시선 끌기 · 순찰 멈춤', () => {
+  const setup = (seed = 9) => { const g = new GroundSim({ seed }); clean(g); g.p.invuln = 99999; g.p.weapon = 'silenced'; g.p.ammo = 24; return g; };
+  it('벽에 맞은 소음기 탄 → 가까운 경계 전 적이 소리 난 곳으로 가서 둘러보고 돌아간다 (경계는 안 한다)', () => {
+    const g = setup(); g.p.x = 260; g.p.y = 8000;
+    const e = add(g, 'rifle', 420, 7900, -Math.PI / 2); e.state = 'idle'; const home = { x: e.x, y: e.y };
+    for (let i = 0; i < 12; i++) g.step({ ...NO_INPUT, fire: true, ax: -1, ay: 0 });
+    expect(e.inv).toBeTruthy(); const evs = g.drain(); expect(evs.some(x => x.t === 'tick')).toBe(true); expect(evs.some(x => x.t === 'suspicious')).toBe(true);
+    g.p.x = 700; g.p.y = 8300;   // 멀리 떨어져 시야 밖
+    let moved = 0; for (let i = 0; i < 160; i++) { g.step(NO_INPUT); moved = Math.max(moved, Math.hypot(e.x - home.x, e.y - home.y)); }
+    expect(moved).toBeGreaterThan(40); expect(e.state).toBe('idle');
+    for (let i = 0; i < 900; i++) g.step(NO_INPUT);
+    expect(e.inv).toBeUndefined(); expect(e.state).toBe('idle'); expect(Math.hypot(e.x - home.x, e.y - home.y)).toBeLessThan(80);
+  });
+  it('조사 중에도 정면에 플레이어가 보이면 경계한다 / 380px 밖은 반응하지 않는다', () => {
+    const g = setup(); const e = add(g, 'rifle', g.p.x + 200, g.p.y - 100, 0); e.state = 'idle';
+    g.lure(g.p.x + 220, g.p.y - 100, 1, 0); expect(e.inv).toBeTruthy();
+    const far = setup(); const f = add(far, 'rifle', far.p.x + 500, far.p.y - 100, 0); f.state = 'idle'; far.lure(far.p.x, far.p.y - 100, 1, 0); expect(f.inv).toBeUndefined();
+    const sees = setup(); const h = add(sees, 'rifle', sees.p.x, sees.p.y - 90, Math.PI / 2); h.state = 'idle'; h.inv = { ph: 2, t: 0, x: h.x, y: h.y, fl: new Int16Array(1) };
+    run(sees, 30); expect(h.state).toBe('alert'); expect(h.inv).toBeUndefined();
+  });
+  it('순찰 적은 지점에 닿으면 잠깐 멈춰 둘러본다', () => {
+    const g = setup(); const e = (g as any).addEnemy('rifle', g.p.x, g.p.y - 700, 0, [[g.p.x + 120, g.p.y - 700], [g.p.x, g.p.y - 700]]) as GEnemy; e.state = 'idle';
+    let paused = false; for (let i = 0; i < 200; i++) { g.step(NO_INPUT); if ((e.pauseT ?? 0) > 10) { const x0 = e.x; run(g, 5); paused = Math.abs(e.x - x0) < 0.5; break; } }
+    expect(paused).toBe(true);
+  });
+});
