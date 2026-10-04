@@ -11,6 +11,9 @@ import { newSimpleState, preciseAim, simpleControl, type ControlMode } from '../
 
 const CTL_KEY = 'sf-ground-ctl';
 const loadCtl = (): ControlMode | null => { try { const v = localStorage.getItem(CTL_KEY); return v === 'simple' || v === 'precise' ? v : null; } catch { return null; } };
+const LAY_KEY = 'sf-ground-lay';
+const loadLay = (): 'land' | 'port' | null => { try { const v = localStorage.getItem(LAY_KEY); return v === 'land' || v === 'port' ? v : null; } catch { return null; } };
+const saveLay = (v: 'land' | 'port'): void => { try { localStorage.setItem(LAY_KEY, v); } catch { /* 무시 */ } };
 const saveCtl = (m: ControlMode): void => { try { localStorage.setItem(CTL_KEY, m); } catch { /* 무시 */ } };
 
 const CUTS = ['cut_shotdown', 'cut_landing', 'cut_takeoff'];
@@ -95,6 +98,7 @@ export class GroundScene extends Phaser.Scene {
   private fireBtn = { x: 0, y: 0, r: 46 };
   private btns: { name: 'roll' | 'melee' | 'bomb' | 'pick'; x: number; y: number; r: number }[] = [];
   private pauseBtn = { x: 0, y: 0, r: 16 };
+  private rotBtn = { x: 0, y: 0, r: 16 };
   private menuHit: { name: string; x: number; y: number; w: number; h: number }[] = [];
   private menuTexts: Phaser.GameObjects.Text[] = [];
   private cutKey = '';
@@ -225,7 +229,7 @@ export class GroundScene extends Phaser.Scene {
   private isTouch(): boolean { return this.touchMode || this.sys.game.device.input.touch; }
   /** 화면 방향에 맞춰 논리 화면 크기(세로 450×800 / 가로 800×450)와 HUD·컨트롤 배치를 다시 잡는다 */
   private applyLayout(force = false): void {
-    const wide = window.innerWidth > window.innerHeight * 1.1, land = this.test?.layout === 'landscape' ? true : this.test?.layout === 'portrait' ? false : wide;
+    const wide = window.innerWidth > window.innerHeight * 1.1, pref = loadLay(), land = this.test?.layout === 'landscape' ? true : this.test?.layout === 'portrait' ? false : pref ? pref === 'land' : wide;
     const vw = land ? 800 : W, vh = land ? 450 : H, changed = vw !== this.vw || vh !== this.vh;
     this.landscape = land; this.vw = vw; this.vh = vh;
     if (changed || force) { this.scale.setGameSize(vw * R, vh * R); this.cameras.main.setSize(vw * R, vh * R); }
@@ -233,6 +237,16 @@ export class GroundScene extends Phaser.Scene {
     this.layoutHud();
     if (this.cutImg.visible && this.cutKey) this.cover2(this.cutKey, this.cutImg.alpha);
     if (changed && this.cam) this.cam.y = Math.max(0, Math.min(WORLD_H - this.viewH, this.g.p.y - this.viewH * 0.6));
+  }
+  /** 화면 방향 수동 전환 (기기 회전이 안 먹을 때용): 저장 + 가능하면 전체화면·방향 잠금까지 시도 */
+  private toggleLayout(): void {
+    const land = !this.landscape; saveLay(land ? 'land' : 'port'); this.applyLayout(true);
+    if (!this.isTouch()) return;
+    try {
+      const so = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+      const lock = () => so.lock?.(land ? 'landscape' : 'portrait').catch(() => { /* 미지원 */ });
+      if (!document.fullscreenElement && land) document.documentElement.requestFullscreen?.().then(lock, () => { /* 거부 */ }); else lock();
+    } catch { /* 미지원 */ }
   }
   private layoutHud(): void {
     const { vw, vh, landscape: L } = this, T = this.hudText;
@@ -242,7 +256,7 @@ export class GroundScene extends Phaser.Scene {
     else { T.weapon.setOrigin(0, 0).setPosition(12, vh - 46); T.grenade.setOrigin(0, 0).setPosition(12, vh - 26); }
     this.banner.setPosition(vw / 2, vh * 0.4); this.ovT?.setPosition(vw / 2, vh / 2);
     // 컨트롤 배치 (엄지가 닿는 오른쪽 아래에 사격 버튼을 크게, 나머지는 호 모양으로)
-    this.pauseBtn = { x: vw - 26, y: 52, r: 16 };
+    this.pauseBtn = { x: vw - 26, y: 52, r: 16 }; this.rotBtn = { x: vw - 26, y: 90, r: 16 };
     if (this.ctl === 'simple') {
       const F = L ? { x: vw - 95, y: vh - 92, r: 48 } : { x: vw - 78, y: vh - 130, r: 46 };
       this.fireBtn = F;
@@ -296,6 +310,7 @@ export class GroundScene extends Phaser.Scene {
     if (name === 'resume') this.setPaused(false);
     else if (name === 'toggle') this.setCtl(this.ctl === 'simple' ? 'precise' : 'simple');
     else if (name === 'quit') this.pressQuit();
+    else if (name === 'rotate') this.toggleLayout();
   }
 
   private pointerDown(p: Phaser.Input.Pointer): void {
@@ -307,6 +322,7 @@ export class GroundScene extends Phaser.Scene {
     if (p.wasTouch) {
       this.touchMode = true; this.layoutHud();
       if (Math.hypot(x - this.pauseBtn.x, y - this.pauseBtn.y) < this.pauseBtn.r + 10) { this.setPaused(true); return; }
+      if (Math.hypot(x - this.rotBtn.x, y - this.rotBtn.y) < this.rotBtn.r + 10) { this.toggleLayout(); return; }
       const b = this.btnAt(x, y);
       if (b) { if (b === 'roll') this.rollQ = true; else if (b === 'melee') this.meleeQ = true; else if (b === 'bomb') this.bombQ = true; else this.pickQ = true; return; }
       if (x < this.vw * 0.42 && this.moveStick.id < 0) this.moveStick = { id: p.id, ax: x, ay: y, vx: 0, vy: 0 };
@@ -803,7 +819,7 @@ export class GroundScene extends Phaser.Scene {
     if (b && b.state === 'alert') { T2.boss.setText('격납고 수문장'); h.fillStyle(0x0f172a, 0.8); h.fillRect(vw / 2 - 100, 56, 200, 8); h.fillStyle(0xef4444, 1); h.fillRect(vw / 2 - 100, 56, 200 * Math.max(0, b.hp / b.maxHp), 8); h.lineStyle(1, 0xffffff, 0.5); h.strokeRect(vw / 2 - 100, 56, 200, 8); } else T2.boss.setText('');
     if (nearW && p.weapon !== 'pistol' && !touch) T2.hint.setText(nearW).setAlpha(1);
     else if (p.gunBlocked && this.stage === 'PLAY') T2.hint.setText('총이 벽에 막혀 있다 — 물러서라').setAlpha(0.9);
-    else if (this.tutorialT > 0) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 문은 몸으로 밀어서 연다') : 'WASD 이동 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
+    else if (this.tutorialT > 0 && !this.choosing && !this.paused) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 문은 몸으로 밀어서 연다') : 'WASD 이동 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
     else T2.hint.setAlpha(0);
     if ((g.cleared[sec] && sec < 3) || (sec === 3 && g.exitOpen)) { const gy = (SECTIONS[sec].r0 + 1) * TILE; if (gy < cy) { const a = 0.6 + 0.4 * Math.sin(this.time.now * 0.008); h.fillStyle(0xfde68a, a); h.fillTriangle(vw / 2, 74, vw / 2 - 12, 92, vw / 2 + 12, 92); } }   // 다음 구역 문 방향 화살표
     this.popTexts.forEach(tx => tx.setVisible(false));   // 월드 → 화면 팝업 글자
@@ -818,6 +834,8 @@ export class GroundScene extends Phaser.Scene {
     for (const tx of [T2.fire, T2.roll, T2.melee, T2.bomb, T2.pick, T2.pause]) tx.setText('');
     if (touch && this.stage === 'PLAY' && !this.choosing && !this.paused) {
       const pb = this.pauseBtn; h.fillStyle(0x0f172a, 0.5); h.fillCircle(pb.x, pb.y, pb.r); h.lineStyle(2, 0x94a3b8, 0.9); h.strokeCircle(pb.x, pb.y, pb.r); h.fillStyle(0xe2e8f0, 1); h.fillRect(pb.x - 5, pb.y - 6, 3, 12); h.fillRect(pb.x + 2, pb.y - 6, 3, 12);
+      const rb = this.rotBtn; h.fillStyle(0x0f172a, 0.5); h.fillCircle(rb.x, rb.y, rb.r); h.lineStyle(2, 0x94a3b8, 0.9); h.strokeCircle(rb.x, rb.y, rb.r);
+      if (this.landscape) h.strokeRect(rb.x - 4, rb.y - 7, 8, 14); else h.strokeRect(rb.x - 7, rb.y - 4, 14, 8);   // 바꿀 화면 방향 모양
       if (this.ctl === 'simple') {
         const F = this.fireBtn, on = this.fireId >= 0; h.fillStyle(on ? 0xb45309 : 0x0f172a, on ? 0.7 : 0.45); h.fillCircle(F.x, F.y, F.r); h.lineStyle(3, p.gunBlocked ? 0xf87171 : on ? 0xfde047 : 0x7dd3fc, 0.95); h.strokeCircle(F.x, F.y, F.r);
         T2.fire.setText('사격').setOrigin(0.5).setPosition(F.x, F.y);
@@ -843,22 +861,24 @@ export class GroundScene extends Phaser.Scene {
     this.menuHit = []; T.forEach(t => t.setVisible(false));
     if (!show) return;
     h.fillStyle(0x000000, 0.72); h.fillRect(0, 0, vw, vh);
-    const bw = Math.min(vw - 60, 380), box = (name: string, y: number, hh: number, label: string, t: Phaser.GameObjects.Text, hot = false) => {
+    const bw = Math.min(vw - 60, this.landscape ? 560 : 380), box = (name: string, y: number, hh: number, label: string, t: Phaser.GameObjects.Text, hot = false) => {
       h.fillStyle(hot ? 0x7c2d12 : 0x0f172a, 0.92); h.fillRoundedRect(vw / 2 - bw / 2, y - hh / 2, bw, hh, 12); h.lineStyle(2, hot ? 0xfbbf24 : 0x7dd3fc, 0.9); h.strokeRoundedRect(vw / 2 - bw / 2, y - hh / 2, bw, hh, 12);
       t.setVisible(true).setText(label).setPosition(vw / 2, y); this.menuHit.push({ name, x: vw / 2, y, w: bw, h: hh });
     };
     const land = this.landscape;
     if (this.choosing) {
       T[0].setVisible(true).setText('조작 방식을 고르세요').setFontSize(20).setPosition(vw / 2, vh * (land ? 0.14 : 0.2));
-      box('simple', vh * (land ? 0.38 : 0.4), land ? 78 : 100, '간편\n이동 스틱 + 사격 버튼 (조준 없음)\n방향은 이동 방향 · 사격 중에는 방향이 고정돼 뒷걸음질 사격', T[1], this.ctl === 'simple');
-      box('precise', vh * (land ? 0.62 : 0.6), land ? 78 : 100, '정밀\n이동 스틱 + 조준 스틱 (트윈스틱)\n스틱 방향으로 조준 · 살짝만 밀어도 발사', T[2], this.ctl === 'precise');
-      T[3].setVisible(true).setText('나중에 일시정지(II) 메뉴에서 바꿀 수 있어요').setFontSize(13).setPosition(vw / 2, vh * (land ? 0.84 : 0.76));
+      box('simple', vh * (land ? 0.33 : 0.36), land ? 70 : 100, '간편\n이동 스틱 + 사격 버튼 (조준 없음)\n방향은 이동 방향 · 사격 중에는 방향이 고정돼 뒷걸음질 사격', T[1], this.ctl === 'simple');
+      box('precise', vh * (land ? 0.55 : 0.52), land ? 70 : 100, '정밀\n이동 스틱 + 조준 스틱 (트윈스틱)\n스틱 방향으로 조준 · 살짝만 밀어도 발사', T[2], this.ctl === 'precise');
+      box('rotate', vh * (land ? 0.77 : 0.67), 44, `화면: ${land ? '가로' : '세로'} → ${land ? '세로' : '가로'}로 바꾸기`, T[4]);
+      T[3].setVisible(true).setText('나중에 일시정지(II) 메뉴에서 바꿀 수 있어요').setFontSize(13).setPosition(vw / 2, vh * (land ? 0.92 : 0.77));
     } else {
       T[0].setVisible(true).setText('일시정지').setFontSize(22).setPosition(vw / 2, vh * (land ? 0.14 : 0.2));
-      box('resume', vh * (land ? 0.34 : 0.36), 52, '계속하기', T[1]);
-      box('toggle', vh * (land ? 0.54 : 0.5), 64, `조작: ${this.ctl === 'simple' ? '간편 (이동 + 사격 버튼)' : '정밀 (이동 + 조준 스틱)'}\n눌러서 바꾸기`, T[2]);
-      box('quit', vh * (land ? 0.74 : 0.64), 52, this.quitArmed ? '정말 포기? 한 번 더 누르세요' : '포기하고 본편으로', T[3], this.quitArmed);
-      T[4].setVisible(true).setText('키보드: Enter 계속 · C 조작 전환 · T 두 번 포기').setFontSize(12).setPosition(vw / 2, vh * (land ? 0.9 : 0.78));
+      box('resume', vh * (land ? 0.3 : 0.32), 48, '계속하기', T[1]);
+      box('toggle', vh * (land ? 0.46 : 0.44), 60, `조작: ${this.ctl === 'simple' ? '간편 (이동 + 사격 버튼)' : '정밀 (이동 + 조준 스틱)'}\n눌러서 바꾸기`, T[2]);
+      box('rotate', vh * (land ? 0.62 : 0.56), 48, `화면: ${land ? '가로' : '세로'} → ${land ? '세로' : '가로'}로 바꾸기`, T[5]);
+      box('quit', vh * (land ? 0.78 : 0.68), 48, this.quitArmed ? '정말 포기? 한 번 더 누르세요' : '포기하고 본편으로', T[3], this.quitArmed);
+      T[4].setVisible(true).setText('키보드: Enter 계속 · C 조작 전환 · T 두 번 포기').setFontSize(12).setPosition(vw / 2, vh * (land ? 0.93 : 0.78));
     }
   }
   private overlayText(): void {
