@@ -11,13 +11,13 @@ function startUlt(s: Sim) {
 }
 
 describe('QA2', () => {
-  it('timestop: freezes comboTimer/phase timers, ends after 150', () => {
+  it('timestop: freezes comboTimer/phase timers, ends after 225', () => {
     const s = mk('sister2'); startUlt(s);
     expect(s.timeStopped).toBe(true);
     s.combo = 5; s.comboTimer = 50; const f = s.stageFrames;
     for (let i = 0; i < 100; i++) s.step(idle(s));
     expect(s.comboTimer).toBe(50); expect(s.stageFrames).toBe(f);
-    for (let i = 0; i < 60; i++) s.step(idle(s));
+    for (let i = 0; i < 130; i++) s.step(idle(s));
     expect(s.timeStopped).toBe(false);
   });
   it('timestop: boss killed during stop -> BOSS_DYING timer frozen until stop ends (then proceeds)', () => {

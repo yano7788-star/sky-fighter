@@ -177,6 +177,24 @@ export class GameScene extends Phaser.Scene {
     if (!this.toastT) { this.toastT = this.add.text(W / 2, H * 0.5, '', { fontFamily: 'sans-serif', fontSize: '20px', color: '#fde68a', stroke: '#000', strokeThickness: 4, align: 'center' }).setOrigin(0.5); this.ui.add(this.toastT); }
     this.toastT.setText(msg).setAlpha(1).setVisible(true); this.tweens.add({ targets: this.toastT, alpha: 0, delay: 1800, duration: 600 });
   }
+  private formG?: Phaser.GameObjects.Graphics; private formT: Phaser.GameObjects.Text[] = [];
+  /** 편대 신호: 편대가 들어올 가장자리에 붉은 ▼/◀▶ 경고 + 방향 빔 */
+  private renderFormWarn(): void {
+    const fw = this.sim.formWarn;
+    if (!this.formG) { this.formG = this.add.graphics(); this.ui.add(this.formG); for (let i = 0; i < 2; i++) { const t = this.add.text(0, 0, '!', { fontFamily: 'sans-serif', fontSize: '18px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5); this.ui.add(t); this.formT.push(t); } }
+    const g = this.formG; g.clear(); this.formT.forEach(t => t.setVisible(false));
+    if (!fw || this.paused) return;
+    const pulse = 0.55 + 0.45 * Math.sin(this.time.now * 0.02), prog = 1 - fw.t / 80;
+    fw.pts.forEach((p, i) => {
+      const side = p.x <= 0 ? 1 : p.x >= W ? -1 : 0, x = side === 1 ? 20 : side === -1 ? W - 20 : p.x, y = side ? p.y : 44;
+      g.lineStyle(2, 0xff4d4d, 0.25 * pulse * prog);
+      if (side) { g.beginPath(); g.moveTo(side === 1 ? 0 : W, y); g.lineTo(side === 1 ? W : 0, y); g.strokePath(); } else { g.beginPath(); g.moveTo(x, 62); g.lineTo(x, H * 0.6); g.strokePath(); }
+      g.fillStyle(0xdc2626, 0.55 + 0.4 * pulse); g.lineStyle(2, 0xfde047, 0.9);
+      if (side) { g.fillTriangle(x - 14 * side, y - 16, x - 14 * side, y + 16, x + 16 * side, y); g.strokeTriangle(x - 14 * side, y - 16, x - 14 * side, y + 16, x + 16 * side, y); }
+      else { g.fillTriangle(x - 18, y - 16, x + 18, y - 16, x, y + 18); g.strokeTriangle(x - 18, y - 16, x + 18, y - 16, x, y + 18); }
+      const t = this.formT[i]; if (t) t.setVisible(true).setPosition(side ? x - 2 * side : x, side ? y : y - 6);
+    });
+  }
   /** 보스 과부하 경고(붉은 맥동) + 탈출 버튼 */
   private renderEject(): void {
     const s = this.sim, ej = s.stagePhase === 'EJECT', ov = s.overload && s.stagePhase !== 'CLEAR';
@@ -499,6 +517,7 @@ export class GameScene extends Phaser.Scene {
       case 'vibrate': try { if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(e.pattern); } catch { /* 미지원 */ } break;   // 사용자 입력 전에는 브라우저가 차단
       case 'muzzle': this.muzzle = 3; break;
       case 'graze': this.fx.explosion(e.x, e.y, '#e0f2fe', 2); break;
+      case 'formclear': this.fx.pop(e.x, e.y - 20, 'FORMATION CLEAR', '#7dd3fc', 20); this.fx.pop(e.x, e.y + 6, `+${e.pts}`, '#fde047', 17); this.fx.ring(e.x, e.y, '#7dd3fc', 130); this.fx.ring(e.x, e.y, '#fde047', 80); break;
       case 'combo': break;   // HUD가 sim.combo를 직접 읽는다
       case 'bomb':   // 폭탄: 화면을 가르는 3중 충격파
         this.fx.ring(e.x, e.y, '#ffffff', 420); this.fx.ring(e.x, e.y, '#fb923c', 320); this.fx.ring(e.x, e.y, '#fde68a', 220);
@@ -615,7 +634,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private render(): void {
-    const s = this.sim; this.renderEject();
+    const s = this.sim; this.renderEject(); this.renderFormWarn();
     // 화면 흔들림은 월드에만 적용 (HUD는 흔들리지 않음)
     const sh = this.paused ? 0 : this.shake;   // 일시정지 중에는 흔들림 정지
     this.world.setPosition(sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0, sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0);

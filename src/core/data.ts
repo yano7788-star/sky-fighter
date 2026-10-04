@@ -120,7 +120,7 @@ export const SPAWN_INTERVAL: Record<number, number> = { 1: 30, 2: 26, 3: 23, 4: 
 /** 스테이지가 오를수록 일반 적 체력 배율 */
 export const enemyHpScale = (tier: number) => 1 + 0.14 * (tier - 1);
 /** 적이 이 높이(y) 아래로 내려와 '화면 안'에 들어오기 전에는 맞지 않는다 (화면 밖에서 죽는 문제 방지) */
-export const ON_SCREEN_Y = 14;
+export const ON_SCREEN_Y = 64;   // 적은 이 높이(화면 위쪽 8%)까지 내려온 뒤에야 피격 — 등장하자마자 죽어서 보이지 않던 문제
 
 /** 인해전술(벌떼): 스테이지 전투 진행도 at 지점에 예고 후 화면을 가득 채워 한 번에 내려온다 */
 export type HordeKind = 'wall' | 'diag' | 'pincer' | 'flank';   // flank = 양옆에서 가로로 휩쓸고 지나가는 횡대
@@ -131,6 +131,9 @@ export const HORDES: Record<number, { at: number; kind: HordeKind }[]> = {
   4: [{ at: 0.3, kind: 'flank' }, { at: 0.8, kind: 'pincer' }],
   5: [{ at: 0.25, kind: 'diag' }, { at: 0.55, kind: 'flank' }, { at: 0.85, kind: 'wall' }],
 };
+/** 적 편대 신호: 편대가 오기 전에 가장자리에 경고가 뜨고, 전멸시키면 보너스 (v 자 / 좌우 교차 / 급강하) */
+export type FormKind = 'vee' | 'cross' | 'dive';
+export const FORMATION = { warn: 80, first: 420, gap: [560, 340] as [number, number], bonus: 300, tail: 420 };
 export const HORDE = { warn: 100, speed: 2.5, contactDmg: 18 };
 /** 옆에서 날아오는 적: 2스테이지부터, 비행기류가 이 확률로 측면에서 등장 */
 export const SIDE_ENTRY_CHANCE = 0.22;
@@ -209,8 +212,8 @@ export const BOMB = {
 /** 파일럿별 궁극기 */
 export const ULT_KIND = {
   palm:     { name: '자매의 손바닥', owner: '에이스', cutin: 120 },
-  barrage:  { name: '미사일 포격',   owner: '언니',   cutin: 90, active: 200, invincible: 210, dmg: 4.2, interval: 3 },   // 약 3.3초간 위에서 미사일 비
-  timestop: { name: '시간 정지',     owner: '동생',   cutin: 90, active: 150, boost: 1.5 },                                // 2.5초간 적·탄 정지, 내 피해 1.5배
+  barrage:  { name: '미사일 포격',   owner: '언니',   cutin: 90, active: 200, invincible: 210, dmg: 2.6, interval: 4 },   // 약 3.3초간 위에서 미사일 비
+  timestop: { name: '시간 정지',     owner: '동생',   cutin: 90, active: 225, boost: 1.5 },                                // 3.75초간 적·탄 정지, 내 피해 1.5배
 } as const;
 
 export const ULT = {

@@ -50,7 +50,7 @@ describe('QA audit 2 (수정 확인)', () => {
   });
   it('시간 정지가 끝나는 순간 짧은 무적이 생긴다', () => {
     const s = new Sim(2) as any; s.player.invincible = 0;
-    s.ult.kind = 'timestop'; s.ult.phase = 'ACTIVE'; s.ult.t = 149;
+    s.ult.kind = 'timestop'; s.ult.phase = 'ACTIVE'; s.ult.t = 224;
     s.step(noop); expect(s.ult.phase).toBe('IDLE'); expect(s.player.invincible).toBeGreaterThanOrEqual(29);
   });
   it('미션 bosses 값은 무한 모드에서 과대 집계되지 않는다', () => {

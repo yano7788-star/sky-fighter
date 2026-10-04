@@ -78,7 +78,7 @@ describe('지상전 코어 (MVP 이식)', () => {
     expect(g.obstacleAt((d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2)?.type).toBe('door'); expect(g.los(g.p.x, g.p.y, d.x0 - 100, g.p.y)).toBe(false);
     run(g, 60, { ...NO_INPUT, mx: -1 });
     expect(Math.abs(d.phi)).toBeGreaterThan(45); expect(g.p.x).toBeLessThan(d.x0);
-    const k = doorAt(g, 11, 76); expect(k.kind).toBe('door'); g.p.x = (k.c - 1) * TILE + 20; g.p.y = (k.r + 1) * TILE; g.p.aim = 0;
+    const k = doorAt(g, 11, 73); expect(k.kind).toBe('door'); g.p.x = (k.c - 1) * TILE + 20; g.p.y = (k.r + 1) * TILE; g.p.aim = 0;
     g.step({ ...NO_INPUT, melee: true, ax: 1, ay: 0 }); run(g, 12); expect(Math.abs(k.phi)).toBeGreaterThan(30);
   });
   it('문은 12발에 부서져 통로가 영구히 열린다', () => {

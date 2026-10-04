@@ -45,15 +45,18 @@ export function buildLevel(): Level {
   fill(0, 0, COLS - 1, 1, T.WALL); fill(0, 0, 0, 33, T.WALL); fill(COLS - 1, 0, COLS - 1, 33, T.WALL);
   fill(8, 0, 9, 1, T.FLOOR); door(8, 0, 2, 2, 'h', 'exit');   // 보스를 잡으면 열리는 이륙 격납고 문
   crate(3, 9); crate(4, 9); crate(13, 9); crate(14, 9); crate(6, 16); crate(7, 16); crate(10, 16); crate(11, 16); barrel(2, 14); barrel(15, 14); crate(8, 22); crate(9, 22); crate(3, 26); crate(14, 26); crate(8, 29); crate(9, 29);
+  fill(1, 19, 4, 19, T.WALL); fill(13, 13, 13, 15, T.WALL); fill(15, 23, 16, 23, T.WALL);   // 엄폐 벽(좌우가 다르다)
   en('boss', 9, 9);
 
   // ---------------------------------------------------------------- 건물 층 (공통 구조): 방 6개(좌우 3개씩) + 복도 + 로비
-  const interior = (b: number, left: number[], right: number[], winL: number[], winR: number[]): void => {
+  const interior = (b: number, left: number[], right: number[], winL: number[], winR: number[], divL: number[], divR: number[], pillars: [number, number, number][]): void => {   // 좌우 칸막이 행(divL/divR)이 서로 달라 방 크기가 비대칭, pillars=[열,시작행,끝행] 복도 기둥
     fill(0, b, COLS - 1, b + 1, T.WALL); fill(0, b, 0, b + 33, T.WALL); fill(COLS - 1, b, COLS - 1, b + 33, T.WALL);
     set(8, b, T.FLOOR); set(9, b, T.FLOOR); set(8, b + 1, T.FLOOR); set(9, b + 1, T.FLOOR); door(8, b, 2, 2, 'h', 'gate');   // 위층으로 가는 잠긴 문 (층을 정리하면 열림)
     fill(6, b + 2, 6, b + 27, T.WALL); fill(11, b + 2, 11, b + 27, T.WALL);
     fill(0, b + 28, 6, b + 28, T.WALL); fill(11, b + 28, 17, b + 28, T.WALL);
-    for (const r of [12, 20]) { fill(1, b + r, 5, b + r, T.WALL); fill(12, b + r, 16, b + r, T.WALL); }
+    for (const r of divL) fill(1, b + r, 5, b + r, T.WALL);
+    for (const r of divR) fill(12, b + r, 16, b + r, T.WALL);
+    for (const [c, r0, r1] of pillars) fill(c, b + r0, c, b + r1, T.WALL);
     for (const r of left) { fill(6, b + r, 6, b + r + 1, T.FLOOR); door(6, b + r, 1, 2, 'v'); }
     for (const r of right) { fill(11, b + r, 11, b + r + 1, T.FLOOR); door(11, b + r, 1, 2, 'v'); }
     for (const r of winL) { fill(6, b + r, 6, b + r + 1, T.FLOOR); win(6, b + r, 1, 2, 'v'); }
@@ -61,17 +64,17 @@ export function buildLevel(): Level {
   };
 
   // 1층 (행 68~101)
-  interior(68, [6, 16, 24], [8, 15, 25], [3, 18], [21]);
+  interior(68, [6, 16, 24], [5, 14, 24], [3, 18], [21], [12, 20], [10, 19], []);
   crate(3, 72); crate(1, 78); barrel(1, 79); crate(4, 84); crate(3, 93); crate(13, 73); crate(14, 73); crate(13, 85); crate(14, 92); crate(15, 92);
   crate(7, 80); crate(8, 80); crate(9, 89); crate(10, 89); crate(7, 99); crate(14, 99); barrel(2, 99);
   en('rifle', 3, 74, { ang: 0 }); en('rifle', 2, 77, { ang: 0 }); en('charger', 3, 85, { ang: 0 }); en('rifle', 2, 94, { ang: 0 });
   en('rifle', 15, 74, { ang: 180 }); en('rifle', 14, 85, { ang: 180 }); en('rifle', 13, 93, { ang: 180 }); en('rifle', 15, 91, { ang: 180 });
   en('rifle', 8, 77, { patrol: [[tc(8), tc(77)], [tc(9), tc(92)]] }); en('rifle', 9, 94, { patrol: [[tc(9), tc(94)], [tc(8), tc(82)]] }); en('turret', 9, 99);
-  wp('smg', 15, 78); wp('shotgun', 2, 93);
+  wp('smg', 15, 76); wp('shotgun', 2, 93);
 
   // 2층 (행 34~67)
-  interior(34, [5, 17, 25], [9, 14, 24], [8, 22], [3, 17]);
-  crate(2, 38); crate(3, 38); crate(4, 43); crate(1, 49); barrel(1, 48); crate(4, 52); crate(2, 58); crate(3, 58); crate(14, 39); crate(15, 44); barrel(16, 44); crate(15, 51); crate(13, 59);
+  interior(34, [5, 17, 25], [9, 14, 24], [8, 19], [3, 15], [14, 22], [11, 18], []);
+  crate(2, 38); crate(3, 38); crate(4, 43); crate(1, 49); barrel(1, 50); crate(4, 52); crate(2, 58); crate(3, 58); crate(14, 39); crate(15, 44); barrel(16, 44); crate(15, 51); crate(13, 59);
   crate(7, 45); crate(8, 45); crate(9, 53); crate(10, 53); crate(8, 65); crate(14, 64); barrel(3, 64);
   en('sniper', 2, 42, { ang: 0 }); en('rifle', 4, 38, { ang: 0 }); en('rifle', 3, 50, { ang: 0 }); en('heavy', 4, 59, { ang: 0 });
   en('rifle', 14, 38, { ang: 180 }); en('charger', 14, 44, { ang: 180 }); en('rifle', 14, 51, { ang: 180 }); en('heavy', 14, 59, { ang: 180 }); en('rifle', 15, 57, { ang: 180 });
@@ -82,9 +85,10 @@ export function buildLevel(): Level {
   fill(0, 102, COLS - 1, 103, T.WALL);   // 계단실
   set(8, 102, T.FLOOR); set(9, 102, T.FLOOR); set(8, 103, T.FLOOR); set(9, 103, T.FLOOR); door(8, 102, 2, 2, 'h', 'gate');
   fill(0, 104, 0, 131, T.WALL); fill(COLS - 1, 104, COLS - 1, 131, T.WALL); fill(0, 131, COLS - 1, 131, T.WALL);   // 옥상 가장자리 벽
-  crate(4, 108); crate(4, 109); crate(13, 108); crate(13, 109); crate(8, 112); crate(9, 112); crate(4, 118); crate(5, 118); crate(12, 118); crate(13, 118); crate(9, 122); barrel(2, 114); barrel(15, 114); crate(3, 126); crate(14, 126); crate(7, 126); crate(10, 126);
+  crate(4, 108); crate(4, 109); crate(14, 109); crate(15, 109); crate(15, 108); crate(8, 112); crate(9, 112); crate(4, 118); crate(5, 118); crate(11, 121); crate(12, 121); crate(9, 122); barrel(2, 114); barrel(15, 114); crate(3, 126); crate(14, 126); crate(7, 126); crate(10, 126);
   en('rifle', 5, 107, { ang: 90 }); en('rifle', 12, 107, { ang: 90 }); en('rifle', 4, 114, { ang: 90 }); en('rifle', 13, 114, { ang: 90 });
   en('rifle', 8, 117, { patrol: [[tc(3), tc(117)], [tc(14), tc(119)]] }); en('charger', 9, 110, { ang: 90 });
+  fill(12, 113, 15, 113, T.WALL); fill(12, 113, 12, 115, T.WALL);   // 옥상 오른쪽 환기구 엄폐벽
   wp('smg', 2, 121);
   return { tiles, doors, windows, crates, spawns, pickups, start: { x: tc(9), y: tc(128) } };
 }

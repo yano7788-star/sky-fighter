@@ -50,13 +50,13 @@ export const SECTION_COUNT = SECTIONS.length;
 export interface GroundOpts { seed: number; pilot: 0 | 1 | 2; dmgMult: number; rateMult: number; maxHp: number; grenades: number; assist: boolean }
 export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: GROUND.grenades, assist: false };
 
-export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; melee: boolean; bomb: boolean; pickup?: boolean; aimDist?: number }
+export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; melee: boolean; bomb: boolean; swap?: boolean; pickup?: boolean; aimDist?: number }
 export const NO_INPUT: GInput = { mx: 0, my: 0, ax: 0, ay: 0, fire: false, roll: false, melee: false, bomb: false };
 
 interface Seqn { kind: 'fire' | 'melee' | 'throw' | 'roll'; steps: Seq; i: number; t: number }
 export interface GPlayer {
   x: number; y: number; hp: number; maxHp: number; aim: number; invuln: number;
-  weapon: WeaponId; ammo: number; grenades: number; seq: Seqn | null; cd: number; rollCd: number; rollAng: number; rollI: number;
+  weapon: WeaponId; ammo: number; grenades: number; flashes: number; smokes: number; gsel: BombType; seq: Seqn | null; cd: number; rollCd: number; rollAng: number; rollI: number;
   moving: boolean; walk: number; gunBlocked: boolean; kick: number; pickCd: number; smgAlt: number; combatT: number; hitFlash: number;
 }
 export interface GEnemy {
@@ -70,8 +70,12 @@ export interface GBullet { x: number; y: number; vx: number; vy: number; dmg: nu
 export interface GDoor { id: number; c: number; r: number; w: number; h: number; o: 'v' | 'h'; kind: 'door' | 'gate' | 'exit'; section: number; hp: number; phi: number; target: number; rate: number; broken: boolean; locked: boolean; x0: number; y0: number; x1: number; y1: number }
 export interface GWindow { id: number; c: number; r: number; w: number; h: number; o: 'v' | 'h'; section: number; hp: number; broken: boolean; x0: number; y0: number; x1: number; y1: number }
 export interface GCrate { id: number; kind: 'crate' | 'barrel'; x: number; y: number; hp: number; broken: boolean; section: number; hitT: number; hs: number }
-export interface GPickup { id: number; kind: 'heart' | 'weapon' | 'bomb'; weapon?: WeaponId; ammo?: number; x: number; y: number; t: number; section: number; dropped?: boolean }
-export interface GBomb { x: number; y: number; sx: number; sy: number; tx: number; ty: number; t: number; flight: number; fuse: number; bounce: number }
+export interface GPickup { id: number; kind: 'heart' | 'weapon' | 'bomb'; bt?: BombType; weapon?: WeaponId; ammo?: number; x: number; y: number; t: number; section: number; dropped?: boolean }
+export type BombType = 'frag' | 'flash' | 'smoke';
+export const BOMB_TYPES: BombType[] = ['frag', 'flash', 'smoke'];
+export const BOMB_NAME: Record<BombType, string> = { frag: '파편탄', flash: '섬광탄', smoke: '연막탄' };
+export interface GSmoke { x: number; y: number; r: number; t: number; life: number }
+export interface GBomb { type: BombType;  x: number; y: number; sx: number; sy: number; tx: number; ty: number; t: number; flight: number; fuse: number; bounce: number }
 type Obj = { t: 'door'; o: GDoor } | { t: 'window'; o: GWindow } | { t: 'crate'; o: GCrate };
 
 export type GEvent =
@@ -85,6 +89,7 @@ export type GEvent =
   | { t: 'doorKick'; x: number; y: number } | { t: 'doorOpen'; x: number; y: number } | { t: 'doorHit'; x: number; y: number } | { t: 'doorBreak'; x: number; y: number; o: 'v' | 'h' }
   | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
   | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
+  | { t: 'flashbang'; x: number; y: number; r: number } | { t: 'smoke'; x: number; y: number; r: number } | { t: 'stealth'; x: number; y: number; pts: number; melee: boolean } | { t: 'ghost'; n: number; pts: number } | { t: 'swap'; to: BombType }
   | { t: 'pickup'; what: 'heart' | 'weapon' | 'bomb'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
   | { t: 'gate'; section: number } | { t: 'section'; n: number; name: string } | { t: 'cleared'; n: number } | { t: 'exitopen' } | { t: 'reset'; section: number }
   | { t: 'shake'; v: number } | { t: 'hitstop'; frames: number } | { t: 'slowmo'; ms: number; scale: number } | { t: 'bossPhase'; phase: number } | { t: 'style'; x: number; y: number }
@@ -113,7 +118,7 @@ export class GroundSim {
   state: 'PLAY' | 'WIN' | 'DEAD' = 'PLAY';
   tiles: Uint8Array = LEVEL.tiles;
   p!: GPlayer;
-  enemies: GEnemy[] = []; dying: GEnemy[] = []; bullets: GBullet[] = []; pickups: GPickup[] = []; bombs: GBomb[] = [];
+  enemies: GEnemy[] = []; dying: GEnemy[] = []; bullets: GBullet[] = []; pickups: GPickup[] = []; bombs: GBomb[] = []; smokes: GSmoke[] = []; private alerted: boolean[] = [false, false, false, false]; stealthKills = 0;
   doors: GDoor[] = []; windows: GWindow[] = []; crates: GCrate[] = [];
   events: GEvent[] = [];
   cleared: boolean[] = SECTIONS.map(() => false);
@@ -126,7 +131,7 @@ export class GroundSim {
   constructor(opts: Partial<GroundOpts> = {}) {
     this.opts = { ...DEFAULT_GROUND_OPTS, ...opts };
     this.rng = createRng(this.opts.seed + 7919);
-    this.p = { x: LEVEL.start.x, y: LEVEL.start.y, hp: this.opts.maxHp, maxHp: this.opts.maxHp, aim: -Math.PI / 2, invuln: 60, weapon: 'pistol', ammo: Infinity, grenades: this.opts.grenades, seq: null, cd: 0, rollCd: 0, rollAng: 0, rollI: 0, moving: false, walk: 0, gunBlocked: false, kick: 0, pickCd: 0, smgAlt: 0, combatT: 0, hitFlash: 0 };
+    this.p = { x: LEVEL.start.x, y: LEVEL.start.y, hp: this.opts.maxHp, maxHp: this.opts.maxHp, aim: -Math.PI / 2, invuln: 60, weapon: 'pistol', ammo: Infinity, grenades: this.opts.grenades, flashes: 1, smokes: 1, gsel: 'frag', seq: null, cd: 0, rollCd: 0, rollAng: 0, rollI: 0, moving: false, walk: 0, gunBlocked: false, kick: 0, pickCd: 0, smgAlt: 0, combatT: 0, hitFlash: 0 };
     this.tiles = LEVEL.tiles.slice();   // 벽 타일은 변하지 않지만 시험에서 바꿀 수 있게 복사
     // 오브젝트 생성 + 칸 색인
     for (const d of LEVEL.doors) { const o: GDoor = { id: this.nextId++, c: d.c, r: d.r, w: d.w, h: d.h, o: d.o, kind: d.kind, section: d.section, hp: 12, phi: 0, target: 0, rate: GROUND.doorRate, broken: false, locked: d.kind !== 'door', x0: d.c * TILE, y0: d.r * TILE, x1: (d.c + d.w) * TILE, y1: (d.r + d.h) * TILE }; this.doors.push(o); this.index(o.c, o.r, o.w, o.h, { t: 'door', o }); }
@@ -146,6 +151,7 @@ export class GroundSim {
 
   // ---------------------------------------------------------------- 구역 구성
   private populate(s: number): void {
+    this.alerted[s] = false;
     this.enemies = this.enemies.filter(e => e.section !== s); this.dying = this.dying.filter(e => e.section !== s); this.pickups = this.pickups.filter(k => k.section !== s);
     for (const m of LEVEL.spawns) if (m.section === s) this.addEnemy(m.k, m.x, m.y, ((m.ang ?? 90) * Math.PI) / 180, m.patrol);
     for (const k of LEVEL.pickups) if (k.section === s) this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: k.weapon, ammo: WEAPONS[k.weapon].ammo, x: k.x, y: k.y, t: 0, section: s });
@@ -200,6 +206,15 @@ export class GroundSim {
     const dx = bx - ax, dy = by - ay, n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 14));
     for (let i = 1; i < n; i++) { const ob = this.obstacleAt(ax + (dx * i) / n, ay + (dy * i) / n); if (ob && (ob.type !== 'window' || glass)) return false; }
     return true;
+  }
+  /** 연막 구름이 두 점 사이 시선을 막는가 (아주 가까우면(130px) 구름 속에서도 보인다) */
+  smokeBlocks(ax: number, ay: number, bx: number, by: number): boolean {
+    if (!this.smokes.length || Math.hypot(bx - ax, by - ay) < 130) return false;
+    for (const s of this.smokes) {
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1, u = Math.max(0, Math.min(1, ((s.x - ax) * dx + (s.y - ay) * dy) / L2));
+      if (Math.hypot(ax + dx * u - s.x, ay + dy * u - s.y) < s.r * Math.min(1, s.t / 40)) return true;
+    }
+    return false;
   }
   canSee(ax: number, ay: number, bx: number, by: number): boolean { return this.los(ax, ay, bx, by); }
   private rayEnd(ax: number, ay: number, ang: number, max: number): [number, number] {   // 마지막 빈 지점 (폭탄 경로)
@@ -273,7 +288,7 @@ export class GroundSim {
     const s = sectionOfRow(Math.floor(y / TILE));
     for (const e of this.enemies) if (e.state === 'idle' && e.section === s && Math.hypot(e.x - x, e.y - y) < radius) this.alertEnemy(e);
   }
-  private alertEnemy(e: GEnemy): void { if (e.state === 'alert' || e.dying) return; e.state = 'alert'; e.alertT = f(0.7); e.windT = 0; this.emit({ t: 'alert', x: e.x, y: e.y }); }
+  private alertEnemy(e: GEnemy): void { if (e.state === 'alert' || e.dying) return; if (e.section >= 0 && e.section < 4) this.alerted[e.section] = true; e.state = 'alert'; e.alertT = f(0.7); e.windT = 0; this.emit({ t: 'alert', x: e.x, y: e.y }); }
 
   // ---------------------------------------------------------------- 틱
   step(inp: GInput): void {
@@ -291,7 +306,8 @@ export class GroundSim {
     this.updateDoors();
     for (const c of this.crates) if (c.hitT > 0) c.hitT--;
     this.updatePlayer(inp);
-    this.updateBombs();
+    if (inp.swap) this.swapBomb();
+    this.updateBombs(); this.updateSmokes();
     this.updateEnemies();
     this.updateDying();
     this.updateBullets();
@@ -311,6 +327,7 @@ export class GroundSim {
       if (this.cleared[i] || this.enemies.some(e => e.section === i)) continue;
       this.cleared[i] = true; this.unlock(i);
       this.score += 300 + 150 * i; this.emit({ t: 'cleared', n: i });
+      if (!this.alerted[i]) { const gp = 500 + 200 * i; this.score += gp; this.emit({ t: 'ghost', n: i, pts: gp }); }   // 한 번도 들키지 않고 정리
       this.pickups.push({ id: this.nextId++, kind: 'heart', x: 9 * TILE, y: (SECTIONS[i].r0 + 4) * TILE, t: 0, section: i });
     }
     if (!this.cleared[3] && this.reached === 3 && !this.boss) {
@@ -365,7 +382,7 @@ export class GroundSim {
     if (inp.roll && p.rollCd <= 0 && canCancel) {
       p.rollAng = m > 0.15 ? Math.atan2(inp.my, inp.mx) : p.aim; p.rollCd = GROUND.rollCd; p.rollI = f(0.37); this.startSeq('roll', GROUND.rollSteps); this.emit({ t: 'roll', x: p.x, y: p.y, ang: p.rollAng });
     } else if (inp.melee && canCancel && !this.wallAhead(p.aim, 85)) { this.startSeq('melee', GROUND.meleeSteps); this.emit({ t: 'swing', x: p.x, y: p.y, ang: p.aim }); this.noise(p.x, p.y, 260); }
-    else if (inp.bomb && canCancel && p.grenades > 0 && !this.wallAhead(p.aim, 64)) { this.bombDist = inp.aimDist ?? 300; this.startSeq('throw', GROUND.throwSteps); this.emit({ t: 'throw' }); }
+    else if (inp.bomb && canCancel && this.bombCount(p.gsel) > 0 && !this.wallAhead(p.aim, 64)) { this.bombDist = inp.aimDist ?? 300; this.startSeq('throw', GROUND.throwSteps); this.emit({ t: 'throw' }); }
     // 이동
     const sk = p.seq?.kind;
     p.moving = false;
@@ -429,17 +446,30 @@ export class GroundSim {
     c.broken = true; this.emit({ t: 'crateBreak', x: c.x, y: c.y, barrel: c.kind === 'barrel' });
     if (c.kind === 'barrel') this.explode(c.x, c.y, true);   // 통: 폭발 (연쇄)
   }
+  bombCount(t: BombType): number { return t === 'frag' ? this.p.grenades : t === 'flash' ? this.p.flashes : this.p.smokes; }
+  private swapBomb(): void { const i = BOMB_TYPES.indexOf(this.p.gsel); this.p.gsel = BOMB_TYPES[(i + 1) % 3]; this.emit({ t: 'swap', to: this.p.gsel }); }
   private releaseBomb(): void {
     const p = this.p, a = p.aim, bx = p.x + Math.cos(a) * 12 * 4 - Math.sin(a) * 6 * 4, by = p.y + Math.sin(a) * 12 * 4 + Math.cos(a) * 6 * 4;
     const dist = Math.max(150, Math.min(480, this.bombDist)), [tx, ty] = this.rayEnd(p.x, p.y, a, dist), tt = Math.hypot(tx - bx, ty - by);
-    p.grenades--; this.bombs.push({ x: bx, y: by, sx: bx, sy: by, tx, ty, t: 0, flight: f(0.55 + tt / 800), fuse: GROUND.bombFuse, bounce: 0 }); this.emit({ t: 'release', x: bx, y: by });
+    const type = p.gsel; if (type === 'frag') p.grenades--; else if (type === 'flash') p.flashes--; else p.smokes--;
+    this.bombs.push({ type, x: bx, y: by, sx: bx, sy: by, tx, ty, t: 0, flight: f(0.55 + tt / 800), fuse: type === 'frag' ? GROUND.bombFuse : f(type === 'flash' ? 1.2 : 0.9), bounce: 0 }); this.emit({ t: 'release', x: bx, y: by });
   }
   private updateBombs(): void {
     for (let i = this.bombs.length - 1; i >= 0; i--) {
       const b = this.bombs[i]; b.t++; const u = Math.min(1, b.t / b.flight); b.x = b.sx + (b.tx - b.sx) * u; b.y = b.sy + (b.ty - b.sy) * u;
-      if (b.t >= b.fuse) { this.bombs.splice(i, 1); this.explode(b.x, b.y, false); }
+      if (b.t >= b.fuse) { this.bombs.splice(i, 1); if (b.type === 'flash') this.flashBang(b.x, b.y); else if (b.type === 'smoke') this.smokeBomb(b.x, b.y); else this.explode(b.x, b.y, false); }
     }
   }
+  /** 섬광탄: 시야가 있는 적을 2.5초 멈춰 세운다(보스는 0.5초). 소리는 크다 */
+  private flashBang(x: number, y: number): void {
+    const R = 420;
+    this.emit({ t: 'flashbang', x, y, r: R }); this.emit({ t: 'shake', v: 8 }); this.noise(x, y, 700);
+    for (const e of this.enemies) if (!e.dying && Math.hypot(e.x - x, e.y - y) < R && this.los(x, y, e.x, e.y, true)) { e.stunT = Math.max(e.stunT, e.kind === 'boss' ? 30 : f(2.5)); e.aimT = 0; e.hitPose = 0; }
+    const p = this.p; if (Math.hypot(p.x - x, p.y - y) < 160 && this.los(x, y, p.x, p.y, true)) p.hitFlash = 30;   // 가까이서 터뜨리면 나도 눈이 부시다(연출)
+  }
+  /** 연막탄: 8초 동안 구름이 시선을 가린다. 조용하다 */
+  private smokeBomb(x: number, y: number): void { this.smokes.push({ x, y, r: 150, t: 0, life: f(8) }); this.emit({ t: 'smoke', x, y, r: 150 }); this.noise(x, y, 150); }
+  private updateSmokes(): void { for (let i = this.smokes.length - 1; i >= 0; i--) { const s = this.smokes[i]; s.t++; if (s.t > s.life) this.smokes.splice(i, 1); else if (s.life - s.t < 60) s.r *= 0.99; } }
   /** 폭발: 시야가 있는 곳만 (유리창도 막는다) */
   private explode(x: number, y: number, small: boolean): void {
     const R = small ? 170 : 230;
@@ -505,6 +535,7 @@ export class GroundSim {
     this.combo++; this.comboT = GROUND.comboFrames; this.maxCombo = Math.max(this.maxCombo, this.combo);
     const mult = 1 + 0.2 * Math.min(this.combo - 1, 10), pts = Math.round(ENEMY_DEF[e.kind].pts * mult);
     this.score += pts;
+    if (e.state === 'idle' && e.kind !== 'boss' && e.kind !== 'drone') { const sp = Math.round(ENEMY_DEF[e.kind].pts * (w === 'melee' ? 1.2 : 0.6)); this.score += sp; this.stealthKills++; this.emit({ t: 'stealth', x: e.x, y: e.y, pts: sp, melee: w === 'melee' }); }   // 들키기 전에 처치(근접은 암살)
     const D = FEEL[w];
     e.deathAng = ang + (this.rng() - 0.5) * 0.5; const fd = Math.cos(e.ang - ang);
     e.fallF = fd > 0.35 ? true : fd < -0.35 ? false : this.rng() < 0.5;   // 등 뒤에서 맞으면 앞으로 엎어짐
@@ -514,7 +545,7 @@ export class GroundSim {
     this.emit({ t: 'hitstop', frames: boss ? 12 : D.dStop }); this.emit({ t: 'shake', v: boss ? 16 : D.dShake }); if (D.dSlow || boss) this.emit({ t: 'slowmo', ms: boss ? 900 : D.dSlow, scale: boss ? 0.25 : 0.4 });
     const dr = DROPS[e.kind];
     if (dr && this.rng() < dr.p) { const ammo = Math.ceil(WEAPONS[dr.w].ammo * (0.35 + this.rng() * 0.3)); this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: dr.w, ammo, x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: dr.w }); }
-    else if (BOMB_DROP[e.kind] && this.rng() < BOMB_DROP[e.kind]!) { this.pickups.push({ id: this.nextId++, kind: 'bomb', x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: 'pistol' }); }
+    else if (BOMB_DROP[e.kind] && this.rng() < BOMB_DROP[e.kind]!) { this.pickups.push({ id: this.nextId++, kind: 'bomb', bt: ((r) => r < 0.5 ? 'frag' : r < 0.8 ? 'flash' : 'smoke')(this.rng()) as BombType, x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: 'pistol' }); }
     if (boss) { this.enemies = this.enemies.filter(b => b.kind !== 'drone'); for (const b of this.bullets) if (!b.friendly) b.life = 1; }
     this.dying.push(e);
   }
@@ -552,7 +583,7 @@ export class GroundSim {
   private sees(e: GEnemy): boolean {
     const p = this.p, dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
     const view = e.kind === 'sniper' ? 900 : e.kind === 'turret' ? 700 : GROUND.viewDist;
-    if (!this.los(e.x, e.y, p.x, p.y)) return false;
+    if (!this.los(e.x, e.y, p.x, p.y) || this.smokeBlocks(e.x, e.y, p.x, p.y)) return false;
     if (d < GROUND.nearSee) return true;
     return d < view && Math.abs(norm(Math.atan2(dy, dx) - e.ang)) < GROUND.viewHalf;
   }
@@ -586,7 +617,7 @@ export class GroundSim {
     if (los) this.move(e, Math.cos(toP) * sp, Math.sin(toP) * sp, r, true); else this.stepFlow(e, this.playerFlow(), sp, r, true);
   }
   private combat(e: GEnemy, dist: number): void {
-    const p = this.p, los = this.los(e.x, e.y, p.x, p.y), toP = Math.atan2(p.y - e.y, p.x - e.x), D = ENEMY_DEF[e.kind];
+    const p = this.p, los = this.los(e.x, e.y, p.x, p.y) && !this.smokeBlocks(e.x, e.y, p.x, p.y), toP = Math.atan2(p.y - e.y, p.x - e.x), D = ENEMY_DEF[e.kind];
     switch (e.kind) {
       case 'rifle': case 'heavy': case 'sniper': {
         const range = e.kind === 'sniper' ? 880 : 380, hold = e.kind === 'sniper' ? 520 : 240;
@@ -671,7 +702,7 @@ export class GroundSim {
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const k = this.pickups[i]; k.t++;
       if (Math.hypot(p.x - k.x, p.y - k.y) > 54) continue;
-      if (k.kind === 'bomb') { if (p.grenades >= GROUND.grenadeMax) continue; p.grenades++; this.emit({ t: 'pickup', what: 'bomb', x: k.x, y: k.y }); this.pickups.splice(i, 1); continue; }
+      if (k.kind === 'bomb') { const bt = k.bt ?? 'frag'; if (this.bombCount(bt) >= (bt === 'frag' ? GROUND.grenadeMax : 3)) continue; if (bt === 'frag') p.grenades++; else if (bt === 'flash') p.flashes++; else p.smokes++; this.emit({ t: 'pickup', what: 'bomb', x: k.x, y: k.y }); this.pickups.splice(i, 1); continue; }
       if (k.kind === 'heart') { if (p.hp >= p.maxHp) continue; p.hp = Math.min(p.maxHp, p.hp + 2); this.emit({ t: 'pickup', what: 'heart', x: k.x, y: k.y }); this.pickups.splice(i, 1); continue; }
       if (p.pickCd > 0) continue;
       const free = p.weapon === 'pistol' || p.ammo <= 0;

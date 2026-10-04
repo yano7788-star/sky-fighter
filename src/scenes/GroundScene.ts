@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { H, STEP_MS, W } from '../core/config';
-import { FEEL, GroundSim, WEAPONS, type GBullet, type GDoor, type GEnemy, type GEvent, type GInput, type GKind, type WeaponId } from '../core/ground';
+import { BOMB_NAME, FEEL, GroundSim, type BombType, WEAPONS, type GBullet, type GDoor, type GEnemy, type GEvent, type GInput, type GKind, type WeaponId } from '../core/ground';
 import { ART, COLS, ROWS, SECTIONS, TILE, WORLD_H, WORLD_W, sectionOfRow } from '../core/groundmap';
 import type { Sim } from '../core/sim';
 import { textStyle } from '../render/hud';
@@ -98,7 +98,7 @@ export class GroundScene extends Phaser.Scene {
   private fireId = -1;
   private choosing = false;
   private fireBtn = { x: 0, y: 0, r: 46 };
-  private btns: { name: 'roll' | 'melee' | 'bomb' | 'pick'; x: number; y: number; r: number }[] = [];
+  private btns: { name: 'roll' | 'melee' | 'bomb' | 'pick' | 'swap'; x: number; y: number; r: number }[] = [];
   private pauseBtn = { x: 0, y: 0, r: 16 };
   private rotBtn = { x: 0, y: 0, r: 16 };
   private menuHit: { name: string; x: number; y: number; w: number; h: number }[] = [];
@@ -115,7 +115,7 @@ export class GroundScene extends Phaser.Scene {
   private mouse = { x: W / 2, y: H / 2, used: false, down: false };
   private moveStick = { id: -1, ax: 0, ay: 0, vx: 0, vy: 0 };
   private aimStick = { id: -1, ax: 0, ay: 0, vx: 0, vy: 0 };
-  private rollQ = false; private meleeQ = false; private bombQ = false; private pickQ = false;
+  private swapQ = false; private rollQ = false; private meleeQ = false; private bombQ = false; private pickQ = false;
   private touchMode = false;
   private acc = 0; private hitStop = 0; private shake = 0; private slowUntil = 0; private slowScale = 1;
   private paused = false; private quitArmed = false;
@@ -222,7 +222,7 @@ export class GroundScene extends Phaser.Scene {
     this.ui.add(this.hudG);
     const t = (size: number, color: string) => { const o = this.add.text(0, 0, '', textStyle(size, color)); o.setShadow(0, 1, '#000', 3, true, true); this.ui.add(o); return o; };
     this.hudText = { room: t(13, '#e2e8f0'), score: t(13, '#fde68a'), weapon: t(14, '#e2e8f0'), grenade: t(12, '#cbd5e1'), combo: t(18, '#fbbf24'), boss: t(12, '#fca5a5'), hint: t(13, '#e2e8f0'), left: t(11, '#94a3b8'),
-      fire: t(14, '#e2e8f0'), roll: t(10, '#94a3b8'), melee: t(10, '#94a3b8'), bomb: t(10, '#94a3b8'), pick: t(10, '#fde68a'), pause: t(14, '#e2e8f0') };
+      swap: t(10, '#94a3b8'), fire: t(14, '#e2e8f0'), roll: t(10, '#94a3b8'), melee: t(10, '#94a3b8'), bomb: t(10, '#94a3b8'), pick: t(10, '#fde68a'), pause: t(14, '#e2e8f0') };
     this.banner = this.add.text(0, 0, '', { ...textStyle(34, '#ffffff'), stroke: '#02060e', strokeThickness: 6 }).setOrigin(0.5).setAlpha(0);
     this.ui.add(this.banner);
     for (let i = 0; i < 6; i++) { const m = this.add.text(0, 0, '', { ...textStyle(16, '#ffffff'), align: 'center', lineSpacing: 4 }).setOrigin(0.5).setVisible(false); m.setShadow(0, 1, '#000', 3, true, true); this.ui.add(m); this.menuTexts.push(m); }
@@ -261,8 +261,9 @@ export class GroundScene extends Phaser.Scene {
     this.pauseBtn = { x: vw - 26, y: 52, r: 16 }; this.rotBtn = { x: vw - 26, y: 90, r: 16 };
     this.fireBtn = { x: -999, y: -999, r: 0 };   // 정밀 모드만 남김: 사격은 오른쪽 조준 스틱, 버튼은 그 옆 호 모양
     const F = L ? { x: vw - 95, y: vh - 92 } : { x: vw - 78, y: vh - 130 };
-    this.btns = L ? [{ name: 'roll', x: F.x - 102, y: F.y + 24, r: 32 }, { name: 'melee', x: F.x - 74, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x + 6, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 158, y: F.y - 30, r: 30 }]
-      : [{ name: 'roll', x: F.x - 92, y: F.y + 28, r: 32 }, { name: 'melee', x: F.x - 80, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 150, y: F.y - 24, r: 30 }];
+    this.btns = (L ? [{ name: 'roll', x: F.x - 102, y: F.y + 24, r: 32 }, { name: 'melee', x: F.x - 74, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x + 6, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 158, y: F.y - 30, r: 30 }]
+      : [{ name: 'roll', x: F.x - 92, y: F.y + 28, r: 32 }, { name: 'melee', x: F.x - 80, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 150, y: F.y - 24, r: 30 }]) as GroundScene['btns'];
+    const bb = this.btns.find(b => b.name === 'bomb')!; this.btns.push({ name: 'swap', x: bb.x + (L ? 58 : 54), y: bb.y + 6, r: 22 });   // 폭탄 종류 전환
   }
 
   // ---------------------------------------------------------------- 입력
@@ -281,6 +282,7 @@ export class GroundScene extends Phaser.Scene {
       if (k === 'shift' || k === ' ') this.rollQ = true;
       if (k === 'f') this.meleeQ = true;
       if (k === 'g' || k === 'q') this.bombQ = true;
+      if (k === 'v' || k === 'tab') this.swapQ = true;
       if (k === 'e') this.pickQ = true;
     });
     kb.on('keyup', (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase()));
@@ -324,7 +326,7 @@ export class GroundScene extends Phaser.Scene {
   }
   private lx(p: Phaser.Input.Pointer): number { return this.ptr(p)[0]; }
   private ly(p: Phaser.Input.Pointer): number { return this.ptr(p)[1]; }
-  private btnAt(x: number, y: number): 'roll' | 'melee' | 'bomb' | 'pick' | null {
+  private btnAt(x: number, y: number): 'roll' | 'melee' | 'bomb' | 'pick' | 'swap' | null {
     for (const b of this.btns) { if (b.name === 'pick' && !this.g.nearWeapon()) continue; if (Math.hypot(x - b.x, y - b.y) < b.r + 6) return b.name; }
     return null;
   }
@@ -350,7 +352,7 @@ export class GroundScene extends Phaser.Scene {
       if (Math.hypot(x - this.pauseBtn.x, y - this.pauseBtn.y) < this.pauseBtn.r + 10) { this.setPaused(true); return; }
       if (Math.hypot(x - this.rotBtn.x, y - this.rotBtn.y) < this.rotBtn.r + 10) { this.toggleLayout(); return; }
       const b = this.btnAt(x, y);
-      if (b) { if (b === 'roll') this.rollQ = true; else if (b === 'melee') this.meleeQ = true; else if (b === 'bomb') this.bombQ = true; else this.pickQ = true; return; }
+      if (b) { if (b === 'swap') this.swapQ = true; else if (b === 'roll') this.rollQ = true; else if (b === 'melee') this.meleeQ = true; else if (b === 'bomb') this.bombQ = true; else this.pickQ = true; return; }
       if (x < this.vw * 0.42 && this.moveStick.id < 0) this.moveStick = { id: p.id, ax: x, ay: y, vx: 0, vy: 0 };
       else if (x >= this.vw * 0.42) { if (this.ctl === 'simple') { if (this.fireId < 0) this.fireId = p.id; } else if (this.aimStick.id < 0) this.aimStick = { id: p.id, ax: x, ay: y, vx: 0, vy: 0 }; }   // 간편: 오른쪽 어디든 누르면 사격 / 정밀: 조준 스틱
     } else {
@@ -384,8 +386,8 @@ export class GroundScene extends Phaser.Scene {
         const a = this.aimStick.id >= 0 ? preciseAim(this.aimStick.vx, this.aimStick.vy) : null; if (a) { ax = Math.cos(a.aim); ay = Math.sin(a.aim); fire = fire || a.fire; }
       }
     } else if (this.mouse.used) { const wx = this.cam.x + this.mouse.x / Z, wy = this.cam.y + this.mouse.y / Z; ax = wx - p.x; ay = wy - p.y; aimDist = Math.hypot(ax, ay); if (aimDist < 24) { ax = 0; ay = 0; } if (this.mouse.down) fire = true; }
-    const inp: GInput = { mx, my, ax, ay, fire, roll: this.rollQ, melee: this.meleeQ, bomb: this.bombQ, pickup: this.pickQ || k.has('e'), aimDist };
-    this.rollQ = false; this.meleeQ = false; this.bombQ = false; this.pickQ = false;
+    const inp: GInput = { mx, my, ax, ay, fire, roll: this.rollQ, melee: this.meleeQ, bomb: this.bombQ, swap: this.swapQ, pickup: this.pickQ || k.has('e'), aimDist };
+    this.rollQ = false; this.meleeQ = false; this.bombQ = false; this.swapQ = false; this.pickQ = false;
     return inp;
   }
   private setPaused(v: boolean): void { if (this.stage !== 'PLAY' || this.choosing) return; this.paused = v; this.quitArmed = false; if (v) audio.suspend(); else audio.resume(); }
@@ -615,8 +617,13 @@ export class GroundScene extends Phaser.Scene {
       case 'crateHit': audio.sfx('gCrate'); break;
       case 'crateBreak': audio.sfx('gDoorBreak'); for (let i = 0; i < 12; i++) this.prt('wood', e.x, e.y, rnd(0, 6.28), rnd(120, 400), rnd(16, 30), 6, e.barrel ? 0xb8322a : 0x8a6a3e); break;
       case 'wallhit': for (let i = 0; i < 4; i++) this.prt('spark', e.x, e.y, e.ang + Math.PI + rnd(-0.9, 0.9), rnd(150, 420), rnd(6, 12), 3, 0xffe27a); this.prt('dust', e.x, e.y, e.ang + Math.PI, rnd(30, 90), 22, 8, 0xb0b8c4); this.stamp(e.x, e.y, 1, 1, 0x0b0f14, 0.7); break;
+      case 'flashbang': audio.sfx('boom'); this.whiteFlash.setAlpha(0.9); this.tweens.add({ targets: this.whiteFlash, alpha: 0, duration: 700 }); for (let i = 0; i < 16; i++) this.prt('spark', e.x, e.y, rnd(0, 6.28), rnd(200, 600), rnd(10, 22), 3, 0xffffff); break;
+      case 'smoke': audio.sfx('item'); for (let i = 0; i < 12; i++) this.prt('smoke', e.x, e.y, rnd(0, 6.28), rnd(60, 200), rnd(30, 60), 14, 0xb8c0cc); break;
+      case 'stealth': this.pop(e.x, e.y - 100, e.melee ? '암살 +' + e.pts : '무음 처치 +' + e.pts, '#a5f3fc', 16); break;
+      case 'ghost': this.say('GHOST CLEAR  +' + e.pts, 26); audio.sfx('item'); break;
+      case 'swap': audio.sfx('item'); this.pop(this.g.p.x, this.g.p.y - 110, BOMB_NAME[e.to], '#fde68a', 14); break;
       case 'alert': this.pop(e.x, e.y - 90, '!', '#ff4040', 22); audio.sfx('gEnemyShot'); break;
-      case 'pickup': audio.sfx(e.what === 'heart' ? 'heal' : 'item'); this.pop(e.x, e.y - 40, e.what === 'heart' ? '+♥' : e.what === 'bomb' ? '+폭탄' : 'WEAPON', '#ffffff', 12); break;
+      case 'pickup': audio.sfx(e.what === 'heart' ? 'heal' : 'item'); this.pop(e.x, e.y - 40, e.what === 'heart' ? '+♥' : e.what === 'bomb' ? '+폭탄류' : 'WEAPON', '#ffffff', 12); break;
       case 'drop': this.pop(e.x, e.y - 30, '▼', '#fde68a', 12); break;
       case 'gate': audio.sfx('item'); break;
       case 'section': if (e.n > 0 || this.stage === 'PLAY') this.say(e.name); break;
@@ -655,13 +662,17 @@ export class GroundScene extends Phaser.Scene {
     this.world.setPosition(-cx * Z, -cy * Z);
     const inView = (x: number, y: number) => x > cx - 200 && x < cx + this.viewW + 200 && y > cy - 200 && y < cy + this.viewH + 200;
     this.shadowG.clear(); this.objG.clear(); this.partG.clear(); this.bulletG.clear(); this.topG.clear();
+    for (const s of g.smokes) {   // 연막 구름: 겹친 회색 원이 천천히 흔들린다
+      const grow = Math.min(1, s.t / 40), fade = Math.min(1, (s.life - s.t) / 60), tt = this.time.now * 0.001;
+      for (let i = 0; i < 9; i++) { const a = i * 2.4 + tt * (i % 2 ? 0.3 : -0.25), d = s.r * 0.5 * grow * (0.4 + (i % 3) * 0.3); this.topG.fillStyle(0xaab3c0, 0.22 * fade); this.topG.fillCircle(s.x + Math.cos(a) * d, s.y + Math.sin(a) * d, s.r * 0.55 * grow); }
+    }
 
     this.renderObjects(inView);
     const livePk = new Set<number>(); let nearW = '';
     for (const k of g.pickups) {   // 바닥에 놓인 무기·구급상자
       livePk.add(k.id);
       let img = this.pickupImgs.get(k.id);
-      if (!img) { img = this.add.image(k.x, k.y, k.kind === 'weapon' ? `i_${k.weapon}` : k.kind === 'bomb' ? 'i_grenade' : 'i_medkit').setScale(ART * 0.7); this.pickupLayer.add(img); this.pickupImgs.set(k.id, img); }
+      if (!img) { img = this.add.image(k.x, k.y, k.kind === 'weapon' ? `i_${k.weapon}` : k.kind === 'bomb' ? 'i_grenade' : 'i_medkit').setScale(ART * 0.7); if (k.kind === 'bomb' && k.bt === 'flash') img.setTint(0xfde047); else if (k.kind === 'bomb' && k.bt === 'smoke') img.setTint(0x94a3b8); this.pickupLayer.add(img); this.pickupImgs.set(k.id, img); }
       const vis = inView(k.x, k.y); img.setVisible(vis).setPosition(Math.round(k.x), Math.round(k.y + Math.sin(k.t * 0.08) * 3)).setRotation(k.kind === 'weapon' ? ((k.id * 1.7) % 1.2) - 0.6 : 0);
       if (vis) { this.topG.lineStyle(3, k.kind === 'heart' ? 0xf87171 : 0xfde68a, 0.4 + 0.3 * Math.sin(k.t * 0.1)); this.topG.strokeCircle(k.x, k.y, 40); }
       if (k.kind === 'weapon' && Math.hypot(p.x - k.x, p.y - k.y) < 60) nearW = `E 줍기: ${WEAPONS[k.weapon!].name}${k.ammo !== undefined && k.ammo < 999 ? ' ' + k.ammo : ''}`;
@@ -839,7 +850,8 @@ export class GroundScene extends Phaser.Scene {
     T2.score.setText(String(Math.round(g.score)));
     const w = WEAPONS[p.weapon];
     T2.weapon.setText(p.weapon === 'pistol' ? w.name : `${w.name}  ${p.ammo}/${w.ammo}`).setColor(p.gunBlocked ? '#f87171' : p.weapon === 'pistol' ? '#cbd5e1' : '#fde68a');
-    T2.grenade.setText(`폭탄 ×${p.grenades}`);
+    const bn = (t: BombType, n: string) => `${p.gsel === t ? '▶' : ' '}${n} ×${g.bombCount(t)}`;
+    T2.grenade.setText(`${bn('frag', '파편')}  ${bn('flash', '섬광')}  ${bn('smoke', '연막')}${touch ? '' : '   (V: 전환)'}`);
     T2.combo.setText(g.combo >= 2 ? `${g.combo} COMBO  ×${(1 + 0.2 * Math.min(g.combo - 1, 10)).toFixed(1)}` : '').setAlpha(g.comboT > 0 ? Math.min(1, g.comboT / 30) : 0);
     const b = g.boss;
     if (b && b.state === 'alert') { T2.boss.setText('격납고 수문장'); h.fillStyle(0x0f172a, 0.8); h.fillRect(vw / 2 - 100, 56, 200, 8); h.fillStyle(0xef4444, 1); h.fillRect(vw / 2 - 100, 56, 200 * Math.max(0, b.hp / b.maxHp), 8); h.lineStyle(1, 0xffffff, 0.5); h.strokeRect(vw / 2 - 100, 56, 200, 8); } else T2.boss.setText('');
@@ -857,7 +869,7 @@ export class GroundScene extends Phaser.Scene {
       if (this.cross.hit > 0 || this.cross.kill > 0) { const k = this.cross.kill > 0, r = k ? 11 : 7, c2 = k ? 0xff3b3b : 0xffffff; h.lineStyle(k ? 3 : 2, c2, 1); h.beginPath(); h.moveTo(mx - r, my - r); h.lineTo(mx + r, my + r); h.moveTo(mx + r, my - r); h.lineTo(mx - r, my + r); h.strokePath(); }
     }
     // 모바일 컨트롤
-    for (const tx of [T2.fire, T2.roll, T2.melee, T2.bomb, T2.pick, T2.pause]) tx.setText('');
+    for (const tx of [T2.fire, T2.roll, T2.melee, T2.bomb, T2.pick, T2.pause, T2.swap]) tx.setText('');
     if (touch && this.stage === 'PLAY' && !this.choosing && !this.paused) {
       const pb = this.pauseBtn; h.fillStyle(0x0f172a, 0.5); h.fillCircle(pb.x, pb.y, pb.r); h.lineStyle(2, 0x94a3b8, 0.9); h.strokeCircle(pb.x, pb.y, pb.r); h.fillStyle(0xe2e8f0, 1); h.fillRect(pb.x - 5, pb.y - 6, 3, 12); h.fillRect(pb.x + 2, pb.y - 6, 3, 12);
       const rb = this.rotBtn; h.fillStyle(0x0f172a, 0.5); h.fillCircle(rb.x, rb.y, rb.r); h.lineStyle(2, 0x94a3b8, 0.9); h.strokeCircle(rb.x, rb.y, rb.r);
@@ -866,10 +878,10 @@ export class GroundScene extends Phaser.Scene {
         const F = this.fireBtn, on = this.fireId >= 0; h.fillStyle(on ? 0xb45309 : 0x0f172a, on ? 0.7 : 0.45); h.fillCircle(F.x, F.y, F.r); h.lineStyle(3, p.gunBlocked ? 0xf87171 : on ? 0xfde047 : 0x7dd3fc, 0.95); h.strokeCircle(F.x, F.y, F.r);
         T2.fire.setText('사격').setOrigin(0.5).setPosition(F.x, F.y);
       }
-      const labels: Record<string, [string, Phaser.GameObjects.Text]> = { roll: ['구르기', T2.roll], melee: ['근접', T2.melee], bomb: ['폭탄', T2.bomb], pick: ['줍기', T2.pick] };
+      const labels: Record<string, [string, Phaser.GameObjects.Text]> = { roll: ['구르기', T2.roll], melee: ['근접', T2.melee], bomb: [BOMB_NAME[p.gsel].slice(0, 2) + '\n' + g.bombCount(p.gsel), T2.bomb], pick: ['줍기', T2.pick], swap: ['⇄', T2.swap] };
       for (const bt of this.btns) {
         if (bt.name === 'pick' && !nearW) continue;
-        const on = bt.name === 'roll' ? p.rollCd <= 0 : bt.name === 'bomb' ? p.grenades > 0 : true;
+        const on = bt.name === 'roll' ? p.rollCd <= 0 : bt.name === 'bomb' ? g.bombCount(p.gsel) > 0 : true;
         h.fillStyle(0x0f172a, 0.5); h.fillCircle(bt.x, bt.y, bt.r); h.lineStyle(2, on ? 0x7dd3fc : 0x475569, 0.9); h.strokeCircle(bt.x, bt.y, bt.r);
         const [name, tx] = labels[bt.name]; tx.setText(name).setOrigin(0.5).setPosition(bt.x, bt.y);
       }

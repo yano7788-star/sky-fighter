@@ -6,7 +6,7 @@ import { H, MAX_TIER, PHASE_FRAMES, PLAYER, W, loopOf, tierIdx } from './config'
 import {
   BOMB, BOSS_CONFIGS, ULT_KIND, COMBO_WINDOW, COMPANION_FRAMES, DROP_BASE, DROP_EXTRA, ENEMY_DEFS, ENEMY_WEIGHTS, GRAZE_MARGIN, GRAZE_SCORE,
   FIGHT_FRAMES, HAZARD, HAZARDS, ON_SCREEN_Y, enemyHpScale, LIFESTEAL_CAP, LIFESTEAL_RATE, MID_BOSS_AT, MID_CONFIGS, SPAWN_INTERVAL, MOB_HIT_VALUE, SHIELD_R, ULT, comboMultiplier, companionDropChance,
-  fireBossPattern, rankFor, BOSS_HP_MULT, BOSS_SP, HYPER, HORDE, HORDES, SIDE_ENTRY_CHANCE, type HordeKind, BOSS_SPECIALS,
+  fireBossPattern, rankFor, BOSS_HP_MULT, BOSS_SP, HYPER, HORDE, HORDES, FORMATION, type FormKind, SIDE_ENTRY_CHANCE, type HordeKind, BOSS_SPECIALS,
 } from './data';
 import { NO_META, pilotOf, type MetaParams } from './meta';
 import { createRng, type Rng } from './rng';
@@ -84,6 +84,9 @@ export class Sim {
   route: RouteId | null = null;        // 이번 스테이지의 항로 (스테이지 사이에 고른다)
   get routeDef() { return this.route ? ROUTES[this.route] : null; }
   hordeWarn = 0;
+  /** 편대 예고(경고 표시용): pts 는 경고가 뜰 지점(x,y; 가장자리 좌표) */
+  formWarn: { kind: FormKind; t: number; pts: { x: number; y: number }[] } | null = null;
+  private formNext = FORMATION.first; private formSeq = 0; private formRec = new Map<number, { total: number; kills: number; x: number; y: number }>(); private formPlan: { kind: FormKind; cx: number; ys: number[] } | null = null;
   // 지상전(강하): 3스테이지 보스 격파 후 씬이 GroundSim 을 돌린다. 씬이 켜기 전(groundEnabled=false)에는 건너뛴다 (테스트·시뮬레이션)
   groundEnabled = false; groundRequest = false; groundActive = false; groundReturn = false; private groundOffered = false;
   groundResult: { win: boolean; score: number; rooms: number } | null = null;
@@ -284,6 +287,7 @@ export class Sim {
     if (this.midBoss) this.updateMidBoss();
     this.updateEnemyBullets();
     this.updateHorde();
+    this.updateFormation();
     this.updateEnemies();
     this.updateItems();
     this.updateGems();
@@ -371,7 +375,7 @@ export class Sim {
   private applyUltDamage(): void {
     const p = this.player;
     this.enemyBullets.length = 0;
-    for (const e of this.enemies) if (e.y >= 0) e.hp -= Math.max(1, Math.ceil(ULT.enemyPct * e.maxHp));
+    for (const e of this.enemies) if (e.y >= ON_SCREEN_Y) e.hp -= Math.max(1, Math.ceil(ULT.enemyPct * e.maxHp));
     if (this.midBoss && !this.midBoss.dying) {
       this.midBoss.hp -= Math.ceil(ULT.enemyPct * this.midBoss.maxHp);
       this.midBoss.state = 'MOVE'; this.midBoss.stateTimer = 0;   // 레이저 중단
@@ -623,7 +627,7 @@ export class Sim {
 
   private beginNextStage(): void {
     this.bossTier++;
-    this.stageFrames = 0; this.hordeDone = []; this.hordeWarn = 0;
+    this.stageFrames = 0; this.hordeDone = []; this.hordeWarn = 0; this.formWarn = null; this.formPlan = null; this.formNext = FORMATION.first; this.formRec.clear();
     this.stagePhase = 'INTRO'; this.phaseTimer = PHASE_FRAMES.INTRO;
     this.midDone = false; this.stageHits = 0; this.stageRank = null;
     this.route = null; this.groundOffered = false;
@@ -1150,6 +1154,7 @@ export class Sim {
         this.emit({ t: 'sfx', name: 'boom' }); this.boom(e.x, e.y, '#ef4444', 12);
         const pts = this.killScore(def.score);
         this.emit({ t: 'kill', x: e.x, y: e.y, pts, missile: e.lastHit === 'missile' });
+        if (e.form !== undefined) { const fr = this.formRec.get(e.form); if (fr) { fr.kills++; fr.x = e.x; fr.y = e.y; } }
         if (this.hasRelic('r_chain')) {   // 연쇄 폭발: 주변 적에게 폭발 피해
           this.emit({ t: 'ring', x: e.x, y: e.y, color: '#fb923c', max: 70 });
           for (const o of this.enemies) if (o !== e && o.hp > 0 && Math.hypot(o.x - e.x, o.y - e.y) < 70) { o.hp -= 6; o.flash = 6; }
@@ -1176,6 +1181,64 @@ export class Sim {
         continue;
       }
       if (e.y > H + 30 || (e.side && ((e.vx ?? 0) < 0 ? e.x < -60 : e.x > W + 60))) this.enemies.splice(i, 1);
+    }
+    this.resolveFormations();
+  }
+
+  /** 편대 신호: 일정 간격으로 가장자리에 경고를 띄우고(약 1.3초) 편대를 내보낸다 */
+  private updateFormation(): void {
+    if (this.timeStopped) return;
+    if (this.stagePhase !== 'FIGHT' || this.boss || this.midBoss || this.hordeWarn > 0) { this.formWarn = null; this.formPlan = null; return; }
+    if (this.formWarn) {
+      if (--this.formWarn.t <= 0) { this.spawnFormation(); this.formWarn = null; this.formNext = FORMATION.gap[1] + this.rng() * (FORMATION.gap[0] - FORMATION.gap[1]); }
+      return;
+    }
+    const dur = FIGHT_FRAMES[this.stageTier] ?? 3000, hordeSoon = this.enemies.some(e => e.type === 'drone');
+    if (this.stageFrames > dur - FORMATION.tail || hordeSoon) return;
+    if (--this.formNext > 0) return;
+    const kinds: FormKind[] = this.stageTier >= 2 ? ['vee', 'cross', 'dive'] : ['vee', 'dive'];
+    const kind = kinds[Math.floor(this.rng() * kinds.length)], cx = 90 + this.rng() * (W - 180);
+    const ys = [90 + this.rng() * 120, 250 + this.rng() * 120];
+    this.formPlan = { kind, cx, ys };
+    this.formWarn = { kind, t: FORMATION.warn, pts: kind === 'cross' ? [{ x: 0, y: ys[0] }, { x: W, y: ys[1] }] : [{ x: cx, y: 0 }] };
+    this.emit({ t: 'sfx', name: 'laserCharge' });
+  }
+
+  private spawnFormation(): void {
+    const plan = this.formPlan; if (!plan) return;
+    const id = ++this.formSeq, tier = this.stageTier, mut = this.meta.mut;
+    const hp = Math.max(1, Math.round(ENEMY_DEFS.scout.hp * enemyHpScale(this.bossTier) * mut.enemyHp));
+    let n = 0;
+    const add = (type: 'scout' | 'zigzag', x: number, y: number, speed: number, side?: { y: number; vx: number }) => {
+      n++;
+      this.enemies.push({ type, x, y, hp, maxHp: hp, speed: side ? 0 : speed * mut.enemySpeed, baseX: side ? side.y : x, age: 0, fireCd: 70 + n * 12 + this.rng() * 30, hold: 0, form: id, ...(side ? { vx: side.vx * mut.enemySpeed, side: true } : {}) });
+    };
+    if (plan.kind === 'vee') {
+      const k = tier >= 4 ? 3 : 2;
+      for (let i = -k; i <= k; i++) add('scout', plan.cx + i * 34, -30 - Math.abs(i) * 30, 3.2);
+    } else if (plan.kind === 'cross') {
+      const type = tier >= 3 ? 'zigzag' : 'scout';
+      for (let i = 0; i < 3; i++) { add(type, -34 - i * 40, plan.ys[0], 0, { y: plan.ys[0], vx: 3.4 }); add(type, W + 34 + i * 40, plan.ys[1], 0, { y: plan.ys[1], vx: -3.4 }); }
+    } else {
+      for (let i = 0; i < 4 + (tier >= 3 ? 1 : 0); i++) add('scout', plan.cx + (i % 2 ? 10 : -10), -30 - i * 46, 5);
+    }
+    this.formRec.set(id, { total: n, kills: 0, x: plan.cx, y: 120 });
+    this.formPlan = null;
+    this.emit({ t: 'sfx', name: 'enrage' });
+  }
+
+  /** 편대원이 모두 사라졌을 때: 전부 격추했으면 보너스 */
+  private resolveFormations(): void {
+    if (!this.formRec.size) return;
+    const alive = new Set<number>(); for (const e of this.enemies) if (e.form !== undefined) alive.add(e.form);
+    for (const [id, fr] of this.formRec) {
+      if (alive.has(id)) continue;
+      this.formRec.delete(id);
+      if (fr.kills < fr.total) continue;
+      const pts = Math.round(FORMATION.bonus * (1 + 0.25 * this.stageTier) * this.meta.mut.score); this.score += pts;
+      const y = Math.max(80, Math.min(H - 220, fr.y));
+      this.spawnGems(fr.x, y, 3, 3); if (this.rng() < 0.45) this.dropItem(fr.x, y);
+      this.emit({ t: 'formclear', x: fr.x, y, pts }); this.emit({ t: 'sfx', name: 'item' });
     }
   }
 
@@ -1315,7 +1378,7 @@ export class Sim {
     this.score += n;
     for (let i = 0; i < n; i += 3) this.boom(this.enemyBullets[i].x, this.enemyBullets[i].y, '#fde68a', 1);
     this.enemyBullets.length = 0;
-    for (const e of this.enemies) if (e.y >= 0) e.hp = 0;   // 화면 안의 적은 전부 파괴 (처치 점수/드랍/경험치 정상 처리)
+    for (const e of this.enemies) if (e.y >= ON_SCREEN_Y) e.hp = 0;   // 화면 안의 적은 전부 파괴 (처치 점수/드랍/경험치 정상 처리)
     if (this.boss && !this.boss.dying) {
       this.boss.hp -= Math.max(BOMB.minBurst, Math.ceil(this.boss.maxHp * BOMB.bossBurstPct));
       this.boom(this.boss.x, this.boss.y, '#ef4444', 30);
@@ -1337,7 +1400,7 @@ export class Sim {
       const b = this.enemyBullets[i];
       if (Math.hypot(b.x - this.bombX, b.y - this.bombY) < radius) { this.enemyBullets.splice(i, 1); this.score += 1; }
     }
-    for (const e of this.enemies) if (e.y >= 0 && Math.hypot(e.x - this.bombX, e.y - this.bombY) < radius) e.hp -= 1;
+    for (const e of this.enemies) if (e.y >= ON_SCREEN_Y && Math.hypot(e.x - this.bombX, e.y - this.bombY) < radius) e.hp -= 1;
     const tick = BOMB.fieldPctTotal / BOMB.fieldFrames;
     if (this.boss && !this.boss.dying && Math.hypot(this.boss.x - this.bombX, this.boss.y - this.bombY) < radius + this.boss.width / 2) this.boss.hp -= this.boss.maxHp * tick;
     if (this.midBoss && !this.midBoss.dying && Math.hypot(this.midBoss.x - this.bombX, this.midBoss.y - this.bombY) < radius + this.midBoss.width / 2) this.midBoss.hp -= this.midBoss.maxHp * tick;
