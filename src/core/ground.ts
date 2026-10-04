@@ -371,7 +371,7 @@ export class GroundSim {
       this.updateHostageMove(h); this.alarmT++;
       const waves = [120, 540, 960, 1380];   // 증원: 2~3명씩 좌우 계단에서 쏟아진다
       if (this.wave < waves.length && this.alarmT >= waves[this.wave]) this.spawnWave(this.wave++);
-      if (p.y < 2.2 * TILE && Math.abs(p.x - 9 * TILE) < 2.2 * TILE && Math.hypot(p.x - h.x, p.y - h.y) < 320) {
+      if (p.y < 3 * TILE && Math.abs(p.x - 9 * TILE) < 2.4 * TILE && Math.hypot(p.x - h.x, p.y - h.y) < 320) {
         h.state = 'safe'; this.state = 'WIN'; this.score += 1000;
         this.emit({ t: 'win' }); this.emit({ t: 'slowmo', ms: 800, scale: 0.3 });
       }

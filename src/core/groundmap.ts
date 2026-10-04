@@ -83,7 +83,7 @@ export function buildLevel(): Level {
   wp('smg', 15, 76); wp('shotgun', 2, 93);
 
   // 2층 (행 34~67)
-  interior(34, [5, 17, 25], [9, 14, 24], [8, 19], [3, 15], [14, 22], [11, 18], []);
+  interior(34, [5, 17, 25], [9, 14, 24], [8, 19], [3, 16], [14, 22], [11, 18], []);
   crate(2, 38); crate(3, 38); crate(4, 43); crate(1, 49); barrel(1, 50); crate(4, 52); crate(2, 58); crate(3, 58); crate(14, 39); crate(15, 44); barrel(16, 44); crate(15, 51); crate(13, 59);
   crate(7, 45); crate(8, 45); crate(9, 53); crate(10, 53); crate(8, 65); crate(14, 64); barrel(3, 64);
   en('sniper', 2, 42, { ang: 0 }); en('rifle', 4, 38, { ang: 0 }); en('rifle', 3, 50, { ang: 0 }); en('heavy', 4, 59, { ang: 0 });
@@ -148,9 +148,9 @@ export function buildRescueLevel(): Level {
   gapRow(96, 14, 16); gapRow(90, 1, 3); gapRow(84, 14, 16); gapRow(78, 1, 3); gapRow(72, 8, 9);
   for (const [c, r] of [[6, 96], [7, 96], [9, 90], [10, 90], [6, 84], [7, 84], [11, 78], [12, 78]] as [number, number][]) { set(c, r, T.FLOOR); }
   win(6, 96, 2, 1, 'h'); win(9, 90, 2, 1, 'h'); win(6, 84, 2, 1, 'h'); win(11, 78, 2, 1, 'h');
-  fill(8, 98, 8, 100, T.WALL); fill(4, 92, 4, 94, T.WALL); fill(11, 86, 11, 88, T.WALL); fill(7, 80, 7, 82, T.WALL); fill(13, 74, 13, 76, T.WALL);
-  crate(2, 99); crate(3, 99); crate(13, 99); crate(14, 98); crate(10, 93); crate(11, 93); crate(2, 87); crate(15, 87); crate(15, 81); crate(2, 75); crate(3, 75); crate(10, 76); barrel(16, 94); barrel(1, 82);
-  en('rifle', 4, 99, { ang: 0 }); en('rifle', 3, 93, { patrol: [[tc(2), tc(93)], [tc(13), tc(94)]] }); en('sniper', 15, 92, { ang: 180 }); en('charger', 3, 87, { ang: 0 }); en('rifle', 9, 86, { ang: 90 });
+  // (기둥은 두지 않는다: 벽·상자와 64px 이하의 틈이 생기면 반경 36 플레이어가 못 지나간다 — tools/clear-check.ts)
+  crate(4, 99); crate(5, 99); crate(12, 99); crate(13, 99); crate(9, 92); crate(10, 92); crate(6, 87); crate(7, 87); crate(12, 88); crate(15, 81); crate(8, 81); crate(9, 81); crate(4, 75); crate(5, 75); crate(11, 76); barrel(12, 94);
+  en('rifle', 3, 98, { ang: 0 }); en('rifle', 3, 94, { patrol: [[tc(2), tc(94)], [tc(13), tc(94)]] }); en('sniper', 15, 92, { ang: 180 }); en('charger', 3, 87, { ang: 0 }); en('rifle', 9, 86, { ang: 90 });
   en('rifle', 12, 81, { ang: 180 }); en('rifle', 14, 79, { ang: 180 }); en('dog', 5, 80, { patrol: [[tc(3), tc(81)], [tc(14), tc(82)]] }); en('heavy', 9, 75, { ang: 90 }); en('turret', 16, 74);
   wp('silenced', 2, 100); wp('smg', 15, 88);
   bp('smoke', 15, 98); bp('flash', 2, 82);
