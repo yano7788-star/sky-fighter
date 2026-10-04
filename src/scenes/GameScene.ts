@@ -154,19 +154,46 @@ export class GameScene extends Phaser.Scene {
   // ------------------------------------------------------------------ 지상전(강하)
   /** 3스테이지 보스 직후: 본편을 멈추고 GroundScene 을 위에 띄운다 (빌드·점수·유물은 그대로 이어진다) */
   private startGround(): void {
-    this.sim.startGround();
+    this.sim.startGround(); this.ejectG?.setVisible(false); this.ejectT?.setVisible(false);
     this.activeId = null; this.firing = false; this.fireGrace = 0; this.bombQueued = false; this.skillQueued = null; this.keys.clear();
-    this.scene.pause();
+    this.scene.setVisible(false); this.scene.pause();
     this.scene.launch('GroundScene', { sim: this.sim });
   }
   /** 지상전에서 돌아왔을 때: 줌아웃 + 번쩍임으로 이륙 */
   private onGroundBack(): void {
-    this.acc = 0; this.hitStop = 0; this.keys.clear();
+    this.scene.setVisible(true); this.acc = 0; this.hitStop = 0; this.keys.clear();
     const cam = this.cameras.main;
     cam.setZoom(2.4); cam.flash(520, 255, 255, 255);
     this.tweens.add({ targets: cam, zoom: 1, duration: 800, ease: 'Cubic.easeOut' });
     this.fx.ring(this.sim.player.x, this.sim.player.y, '#7dd3fc', 140);
     audio.resume();
+    if (matchMedia('(orientation: landscape)').matches && navigator.maxTouchPoints > 0) this.toast('기기를 세로로 돌려 주세요');
+  }
+
+  // ------------------------------------------------------------------ 탈출(EJECT)
+  private ejectG?: Phaser.GameObjects.Graphics; private ejectT?: Phaser.GameObjects.Text; private toastT?: Phaser.GameObjects.Text;
+  private static readonly EJECT_BTN = { x: W / 2 - 110, y: H * 0.6 - 32, w: 220, h: 64 };
+  private toast(msg: string): void {
+    if (!this.toastT) { this.toastT = this.add.text(W / 2, H * 0.5, '', { fontFamily: 'sans-serif', fontSize: '20px', color: '#fde68a', stroke: '#000', strokeThickness: 4, align: 'center' }).setOrigin(0.5); this.ui.add(this.toastT); }
+    this.toastT.setText(msg).setAlpha(1).setVisible(true); this.tweens.add({ targets: this.toastT, alpha: 0, delay: 1800, duration: 600 });
+  }
+  /** 보스 과부하 경고(붉은 맥동) + 탈출 버튼 */
+  private renderEject(): void {
+    const s = this.sim, ej = s.stagePhase === 'EJECT', ov = s.overload && s.stagePhase !== 'CLEAR';
+    if (!this.ejectG) {
+      this.ejectG = this.add.graphics(); this.ejectT = this.add.text(W / 2, H * 0.6, '', { fontFamily: 'sans-serif', fontSize: '26px', fontStyle: 'bold', color: '#ffffff', stroke: '#000', strokeThickness: 4, align: 'center' }).setOrigin(0.5);
+      this.ui.add([this.ejectG, this.ejectT]);
+    }
+    const g = this.ejectG, t = this.ejectT!; g.clear();
+    if (!ov) { t.setVisible(false); g.setVisible(false); return; }
+    g.setVisible(true); t.setVisible(true);
+    const pulse = 0.5 + 0.5 * Math.sin(this.time.now * (ej ? 0.02 : 0.012));
+    g.fillStyle(0xff1e1e, (ej ? 0.2 : 0.12) * pulse); g.fillRect(0, 0, W, H);
+    if (ej) {
+      const b = GameScene.EJECT_BTN; g.fillStyle(0xdc2626, 0.92); g.fillRoundedRect(b.x, b.y, b.w, b.h, 14); g.lineStyle(3, 0xfde047, 0.6 + 0.4 * pulse); g.strokeRoundedRect(b.x, b.y, b.w, b.h, 14);
+      t.setText(`EJECT!  ${Math.ceil(s.ejectLeft / 60)}`).setPosition(W / 2, H * 0.6);
+    } else t.setText('⚠ 보스 과부하 — 자폭 임박!').setFontSize(20).setPosition(W / 2, H * 0.3);
+    if (ej) t.setFontSize(26);
   }
 
   // ------------------------------------------------------------------ 초기화 / 재시작
@@ -236,6 +263,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.resultKind) { if (k === 'enter' || k === ' ') this.resultTap(); return; }
+    if (this.sim.stagePhase === 'EJECT' && (k === 'e' || k === 'enter' || k === ' ')) { this.sim.eject(); return; }
     if (k === 'b' || k === 'x' || k === 'shift') { this.bombQueued = true; return; }
     if (k === 'q') { this.skillQueued = 'cat'; return; }
     if (k === 'e') { this.skillQueued = 'dog'; return; }
@@ -250,6 +278,7 @@ export class GameScene extends Phaser.Scene {
       this.setPaused(false); return;
     }
     if (this.resultKind) { this.resultTap(x, y); return; }
+    if (this.sim.stagePhase === 'EJECT') { const b = GameScene.EJECT_BTN; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) this.sim.eject(); return; }
     if (this.sim.pending) { const i = this.levelup.hit(x, y); if (i >= 0) { this.levelup.select(i); this.pickCard(i); } return; }
     if (inZone(UI.sound, x, y)) { audio.toggleMute(); return; }
     if (inZone(UI.pause, x, y)) { this.setPaused(true); return; }
@@ -398,6 +427,7 @@ export class GameScene extends Phaser.Scene {
     for (const e of s.drainEvents()) this.handleEvent(e);
     if (s.midBoss && s.midBoss.state === 'FIRE') this.shake = Math.max(this.shake, 3);   // 레이저 발사 중 진동
     if (s.frame % 2 === 0) for (const m of s.missiles) this.fx.trail(m.x, m.y, '#ec4899');
+    if (s.damaged && s.frame % 3 === 0) { this.fx.trail(s.player.x + (Math.random() - 0.5) * 14, s.player.y + 12, s.frame % 6 === 0 ? '#fb923c' : '#475569'); }   // 피격 기체의 연기
     if (s.stagePhase === 'INTRO') this.bg.setTier(s.stageTier);
     if (this.overlay.stage() !== s.stageTier) this.overlay.setStage(s.stageTier);
   }
@@ -519,6 +549,9 @@ export class GameScene extends Phaser.Scene {
         audio.sfx('laserHit');
         break;
       }
+      case 'overload': this.shake = Math.max(this.shake, 6); this.hud.flash('hit', 0.5); break;
+      case 'selfdestruct': this.fx.explosion(e.x, e.y, '#ffffff', 60); this.fx.ring(e.x, e.y, '#fb923c', 220); this.shake = Math.max(this.shake, 14); break;
+      case 'eject': break;
       case 'gameover': case 'gameclear': this.finishRun(e.t === 'gameover' ? 'GAMEOVER' : 'GAMECLEAR'); break;
     }
   }
@@ -582,7 +615,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private render(): void {
-    const s = this.sim;
+    const s = this.sim; this.renderEject();
     // 화면 흔들림은 월드에만 적용 (HUD는 흔들리지 않음)
     const sh = this.paused ? 0 : this.shake;   // 일시정지 중에는 흔들림 정지
     this.world.setPosition(sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0, sh > 0.3 ? (Math.random() - 0.5) * sh * R : 0);

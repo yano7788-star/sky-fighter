@@ -244,7 +244,7 @@ describe('3스테이지 보스 자폭 → 탈출 → 지상전', () => {
     const s = mk(); s.groundEnabled = true; s.startAtTier(3); s.bossTier = 3; s.stagePhase = 'BOSS'; (s as any).spawnBoss(3); s.boss!.y = 135; s.boss!.hp = 1; s.player.invincible = 99999;
     s.step(idle(s)); const evs0 = s.drainEvents().map(e => e.t); s.boss!.hp = 0; s.step(idle(s));
     const evs = s.drainEvents().map(e => e.t); expect(evs).toContain('overload'); expect(s.overload).toBe(true); void evs0;
-    let n = 0; while (s.stagePhase === 'BOSS_DYING' && n++ < 400) s.step(idle(s));
+    let n = 0; while ((s.stagePhase as string) === 'BOSS_DYING' && n++ < 400) s.step(idle(s));
     expect(s.stagePhase).toBe('EJECT'); expect(s.damaged).toBe(true); expect(s.pending).toBeNull();
     expect(s.drainEvents().map(e => e.t)).toContain('selfdestruct');
   });
@@ -257,7 +257,7 @@ describe('3스테이지 보스 자폭 → 탈출 → 지상전', () => {
   });
   it('지상전이 꺼져 있으면(헤드리스) 기존 보스 처치 흐름 그대로', () => {
     const s = mk(); s.startAtTier(3); s.bossTier = 3; s.stagePhase = 'BOSS'; (s as any).spawnBoss(3); s.boss!.y = 135; s.boss!.hp = 0; s.player.invincible = 99999;
-    s.step(idle(s)); expect(s.overload).toBe(false); let n = 0; while (s.stagePhase === 'BOSS_DYING' && n++ < 400) s.step(idle(s));
+    s.step(idle(s)); expect(s.overload).toBe(false); let n = 0; while ((s.stagePhase as string) === 'BOSS_DYING' && n++ < 400) s.step(idle(s));
     expect(s.stagePhase).toBe('CLEAR'); expect(s.pending?.length).toBeGreaterThan(0);
   });
 });

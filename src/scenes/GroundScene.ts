@@ -7,11 +7,15 @@ import { textStyle } from '../render/hud';
 import { R } from '../render/textures';
 import { audio } from '../systems/audio';
 import type { GroundTest } from '../groundtest';
+import { newSimpleState, preciseAim, simpleControl, type ControlMode } from '../core/groundinput';
+
+const CTL_KEY = 'sf-ground-ctl';
+const loadCtl = (): ControlMode | null => { try { const v = localStorage.getItem(CTL_KEY); return v === 'simple' || v === 'precise' ? v : null; } catch { return null; } };
+const saveCtl = (m: ControlMode): void => { try { localStorage.setItem(CTL_KEY, m); } catch { /* 무시 */ } };
 
 const CUTS = ['cut_shotdown', 'cut_landing', 'cut_takeoff'];
 const Z = 0.5;   // 월드 px → 논리 px (R=2 와 곱해 월드 1px = 화면 1px, 도트 1개 = 화면 4px: 정수 배율)
 const HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
-const VIEW_W = W / Z, VIEW_H = H / Z;   // 한 화면에 보이는 월드 크기 (900 × 1600)
 
 /** 무기 시트의 행 번호 (오른쪽 한 열) */
 const ROW: Record<WeaponId, Record<string, number>> = {
@@ -79,7 +83,22 @@ export class GroundScene extends Phaser.Scene {
   private caps: Phaser.GameObjects.Text[] = [];
   private prts: Prt[] = [];
   private pops: Pop[] = [];
-  private cam = { x: 0, y: WORLD_H - VIEW_H };
+  // 화면 크기는 방향에 따라 달라진다: 세로 450×800 / 가로 800×450 (논리 px). 월드는 Z 배 해서 보인다
+  private vw = W; private vh = H; private landscape = false;
+  private get viewW(): number { return this.vw / Z; }
+  private get viewH(): number { return this.vh / Z; }
+  private cam = { x: 0, y: 0 };
+  private ctl: ControlMode = 'simple';
+  private simple = newSimpleState();
+  private fireId = -1;
+  private choosing = false;
+  private fireBtn = { x: 0, y: 0, r: 46 };
+  private btns: { name: 'roll' | 'melee' | 'bomb' | 'pick'; x: number; y: number; r: number }[] = [];
+  private pauseBtn = { x: 0, y: 0, r: 16 };
+  private menuHit: { name: string; x: number; y: number; w: number; h: number }[] = [];
+  private menuTexts: Phaser.GameObjects.Text[] = [];
+  private cutKey = '';
+  private resizeFn?: () => void;
   private kick = { x: 0, y: 0 };
   private cross = { spread: 0, hit: 0, kill: 0 };
   private glowT = 0; private glowBig = false;
@@ -103,7 +122,7 @@ export class GroundScene extends Phaser.Scene {
     this.sim = data.sim; this.test = data.test ?? null; this.stage = 'INTRO'; this.finished = false; this.paused = false; this.quitArmed = false; this.keys.clear();
     this.enemyImgs = new Map(); this.dyingImgs = new Map(); this.pickupImgs = new Map(); this.decals = []; this.boomSprites = []; this.popTexts = [];
     this.acc = 0; this.hitStop = 0; this.shake = 0; this.slowUntil = 0; this.slowScale = 1; this.deadTimer = 0; this.bannerT = 0; this.pixel = null; this.caps = [];
-    this.prts = []; this.pops = []; this.kick = { x: 0, y: 0 }; this.cross = { spread: 0, hit: 0, kill: 0 }; this.glowT = 0; this.cam = { x: 0, y: WORLD_H - VIEW_H };
+    this.prts = []; this.pops = []; this.kick = { x: 0, y: 0 }; this.cross = { spread: 0, hit: 0, kill: 0 }; this.glowT = 0; this.cam = { x: 0, y: WORLD_H - H / Z }; this.fireId = -1; this.choosing = false; this.menuTexts = []; this.cutKey = '';
     this.moveStick = { id: -1, ax: 0, ay: 0, vx: 0, vy: 0 }; this.aimStick = { id: -1, ax: 0, ay: 0, vx: 0, vy: 0 }; this.ovT = undefined;
   }
 
@@ -124,13 +143,17 @@ export class GroundScene extends Phaser.Scene {
     if (!this.anims.exists('gs_boom')) this.anims.create({ key: 'gs_boom', frames: this.anims.generateFrameNumbers('gs_explosion', { start: 0, end: 6 }), frameRate: 16, repeat: 0 });
     this.buildWorld();
     this.buildHud();
-    this.cutImg = this.add.image(0, 0, 'cut_shotdown').setOrigin(0, 0).setVisible(false);
+    this.cutImg = this.add.image(0, 0, 'cut_shotdown').setOrigin(0.5, 0.5).setVisible(false);
     this.root.add(this.cutImg);
     this.veil = this.add.rectangle(0, 0, W, H, 0x000000, 1).setOrigin(0, 0);
     this.redFlash = this.add.rectangle(0, 0, W, H, 0xff2222, 0).setOrigin(0, 0);
     this.whiteFlash = this.add.rectangle(0, 0, W, H, 0xffffff, 0).setOrigin(0, 0);
     this.root.add([this.veil, this.redFlash, this.whiteFlash]);
     this.bindInput();
+    const saved = loadCtl(); this.ctl = this.test?.ctl ?? saved ?? (this.isTouch() ? 'simple' : 'precise'); this.choosing = !this.test && this.isTouch() && saved === null;   // 터치 기기는 처음에 한 번 조작 방식을 고른다
+    this.applyLayout(true);
+    this.resizeFn = () => this.applyLayout(); window.addEventListener('resize', this.resizeFn); window.addEventListener('orientationchange', this.resizeFn);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { if (this.resizeFn) { window.removeEventListener('resize', this.resizeFn); window.removeEventListener('orientationchange', this.resizeFn); } this.scale.setGameSize(W * R, H * R); });   // 본편은 항상 세로
     this.world.setVisible(false); this.ui.setVisible(false);
     if (this.test?.skipIntro) { this.world.setVisible(true); this.ui.setVisible(true); this.veil.setAlpha(0); this.stage = 'PLAY'; this.tutorialT = 60 * 7; }
     else this.runIntro();
@@ -191,14 +214,45 @@ export class GroundScene extends Phaser.Scene {
   private buildHud(): void {
     this.hudG = this.add.graphics();
     this.ui.add(this.hudG);
-    const t = (x: number, y: number, size: number, color: string, ox = 0, oy = 0) => { const o = this.add.text(x, y, '', textStyle(size, color)).setOrigin(ox, oy); o.setShadow(0, 1, '#000', 3, true, true); this.ui.add(o); return o; };
-    this.hudText = {
-      room: t(W / 2, 12, 13, '#e2e8f0', 0.5, 0), score: t(W - 12, 12, 13, '#fde68a', 1, 0), weapon: t(12, H - 46, 14, '#e2e8f0', 0, 0), grenade: t(12, H - 26, 12, '#cbd5e1', 0, 0),
-      combo: t(W / 2, 100, 18, '#fbbf24', 0.5, 0.5), boss: t(W / 2, 40, 12, '#fca5a5', 0.5, 0), hint: t(W / 2, H - 120, 13, '#e2e8f0', 0.5, 0.5), left: t(W / 2, 28, 11, '#94a3b8', 0.5, 0),
-      roll: t(W - 46, H - 244, 10, '#94a3b8', 0.5, 0.5), melee: t(W - 46, H - 314, 10, '#94a3b8', 0.5, 0.5), bomb: t(W - 46, H - 384, 10, '#94a3b8', 0.5, 0.5), pick: t(W - 46, H - 454, 10, '#fde68a', 0.5, 0.5),
-    };
-    this.banner = this.add.text(W / 2, H * 0.4, '', { ...textStyle(34, '#ffffff'), stroke: '#02060e', strokeThickness: 6 }).setOrigin(0.5).setAlpha(0);
+    const t = (size: number, color: string) => { const o = this.add.text(0, 0, '', textStyle(size, color)); o.setShadow(0, 1, '#000', 3, true, true); this.ui.add(o); return o; };
+    this.hudText = { room: t(13, '#e2e8f0'), score: t(13, '#fde68a'), weapon: t(14, '#e2e8f0'), grenade: t(12, '#cbd5e1'), combo: t(18, '#fbbf24'), boss: t(12, '#fca5a5'), hint: t(13, '#e2e8f0'), left: t(11, '#94a3b8'),
+      fire: t(14, '#e2e8f0'), roll: t(10, '#94a3b8'), melee: t(10, '#94a3b8'), bomb: t(10, '#94a3b8'), pick: t(10, '#fde68a'), pause: t(14, '#e2e8f0') };
+    this.banner = this.add.text(0, 0, '', { ...textStyle(34, '#ffffff'), stroke: '#02060e', strokeThickness: 6 }).setOrigin(0.5).setAlpha(0);
     this.ui.add(this.banner);
+    for (let i = 0; i < 6; i++) { const m = this.add.text(0, 0, '', { ...textStyle(16, '#ffffff'), align: 'center', lineSpacing: 4 }).setOrigin(0.5).setVisible(false); m.setShadow(0, 1, '#000', 3, true, true); this.ui.add(m); this.menuTexts.push(m); }
+  }
+
+  private isTouch(): boolean { return this.touchMode || this.sys.game.device.input.touch; }
+  /** 화면 방향에 맞춰 논리 화면 크기(세로 450×800 / 가로 800×450)와 HUD·컨트롤 배치를 다시 잡는다 */
+  private applyLayout(force = false): void {
+    const wide = window.innerWidth > window.innerHeight * 1.1, land = this.test?.layout === 'landscape' ? true : this.test?.layout === 'portrait' ? false : wide;
+    const vw = land ? 800 : W, vh = land ? 450 : H, changed = vw !== this.vw || vh !== this.vh;
+    this.landscape = land; this.vw = vw; this.vh = vh;
+    if (changed || force) { this.scale.setGameSize(vw * R, vh * R); this.cameras.main.setSize(vw * R, vh * R); }
+    for (const r of [this.veil, this.redFlash, this.whiteFlash]) r.setSize(vw, vh).setPosition(0, 0);
+    this.layoutHud();
+    if (this.cutImg.visible && this.cutKey) this.cover2(this.cutKey, this.cutImg.alpha);
+    if (changed && this.cam) this.cam.y = Math.max(0, Math.min(WORLD_H - this.viewH, this.g.p.y - this.viewH * 0.6));
+  }
+  private layoutHud(): void {
+    const { vw, vh, landscape: L } = this, T = this.hudText;
+    T.room.setOrigin(0.5, 0).setPosition(vw / 2, 10); T.left.setOrigin(0.5, 0).setPosition(vw / 2, 26); T.score.setOrigin(1, 0).setPosition(vw - 12, 10);
+    T.combo.setOrigin(0.5, 0.5).setPosition(vw / 2, L ? 74 : 100); T.boss.setOrigin(0.5, 0).setPosition(vw / 2, 40); T.hint.setOrigin(0.5, 0.5).setPosition(vw / 2, vh - (L ? 64 : 120));
+    if (L) { T.weapon.setOrigin(0.5, 0).setPosition(vw / 2, vh - 42); T.grenade.setOrigin(0.5, 0).setPosition(vw / 2, vh - 22); }
+    else { T.weapon.setOrigin(0, 0).setPosition(12, vh - 46); T.grenade.setOrigin(0, 0).setPosition(12, vh - 26); }
+    this.banner.setPosition(vw / 2, vh * 0.4); this.ovT?.setPosition(vw / 2, vh / 2);
+    // 컨트롤 배치 (엄지가 닿는 오른쪽 아래에 사격 버튼을 크게, 나머지는 호 모양으로)
+    this.pauseBtn = { x: vw - 26, y: 52, r: 16 };
+    if (this.ctl === 'simple') {
+      const F = L ? { x: vw - 95, y: vh - 92, r: 48 } : { x: vw - 78, y: vh - 130, r: 46 };
+      this.fireBtn = F;
+      this.btns = L ? [{ name: 'roll', x: F.x - 102, y: F.y + 24, r: 32 }, { name: 'melee', x: F.x - 74, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x + 6, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 158, y: F.y - 30, r: 30 }]
+        : [{ name: 'roll', x: F.x - 92, y: F.y + 28, r: 32 }, { name: 'melee', x: F.x - 80, y: F.y - 78, r: 32 }, { name: 'bomb', x: F.x, y: F.y - 122, r: 32 }, { name: 'pick', x: F.x - 150, y: F.y - 24, r: 30 }];
+    } else {
+      this.fireBtn = { x: -999, y: -999, r: 0 };
+      const names: ('roll' | 'melee' | 'bomb' | 'pick')[] = ['roll', 'melee', 'bomb', 'pick'];
+      this.btns = names.map((name, i) => L ? { name, x: vw - 46, y: 118 + i * 66, r: 31 } : { name, x: vw - 46, y: vh - 244 - i * 70, r: 31 });
+    }
   }
 
   // ---------------------------------------------------------------- 입력
@@ -212,7 +266,8 @@ export class GroundScene extends Phaser.Scene {
       this.keys.add(k);
       if (k === 'p' || k === 'escape') { this.setPaused(!this.paused); return; }
       if (this.stage === 'DEAD' && (k === 'r' || k === 'enter' || k === ' ')) { this.deadConfirm(); return; }
-      if (this.paused) { if (k === 'enter') this.setPaused(false); else if (k === 't') this.pressQuit(); return; }
+      if (this.paused) { if (k === 'enter') this.setPaused(false); else if (k === 't') this.pressQuit(); else if (k === 'c') this.setCtl(this.ctl === 'simple' ? 'precise' : 'simple'); return; }
+      if (this.choosing) return;
       if (k === 'shift' || k === ' ') this.rollQ = true;
       if (k === 'f') this.meleeQ = true;
       if (k === 'g' || k === 'q') this.bombQ = true;
@@ -230,21 +285,32 @@ export class GroundScene extends Phaser.Scene {
   }
   private lx(p: Phaser.Input.Pointer): number { return p.x / R; }
   private ly(p: Phaser.Input.Pointer): number { return p.y / R; }
-  private inBtn(x: number, y: number, bx: number, by: number): boolean { return Math.hypot(x - bx, y - by) < 36; }
-  private btnPos(i: number): [number, number] { return [W - 46, H - 244 - i * 70]; }
+  private btnAt(x: number, y: number): 'roll' | 'melee' | 'bomb' | 'pick' | null {
+    for (const b of this.btns) { if (b.name === 'pick' && !this.g.nearWeapon()) continue; if (Math.hypot(x - b.x, y - b.y) < b.r + 6) return b.name; }
+    return null;
+  }
+  private menuAt(x: number, y: number): string | null { for (const m of this.menuHit) if (Math.abs(x - m.x) < m.w / 2 && Math.abs(y - m.y) < m.h / 2) return m.name; return null; }
+  private setCtl(m: ControlMode): void { this.ctl = m; saveCtl(m); this.simple = newSimpleState(this.g.p.aim); this.fireId = -1; this.aimStick.id = -1; this.layoutHud(); }
+  private menuAction(name: string): void {
+    if (name === 'simple' || name === 'precise') { this.setCtl(name); this.choosing = false; return; }
+    if (name === 'resume') this.setPaused(false);
+    else if (name === 'toggle') this.setCtl(this.ctl === 'simple' ? 'precise' : 'simple');
+    else if (name === 'quit') this.pressQuit();
+  }
 
   private pointerDown(p: Phaser.Input.Pointer): void {
     audio.unlock();
     const x = this.lx(p), y = this.ly(p);
     if (this.stage === 'DEAD') { this.deadConfirm(); return; }
-    if (this.paused) { this.setPaused(false); return; }
+    if (this.choosing || this.paused) { const a = this.menuAt(x, y); if (a) this.menuAction(a); else if (this.paused && !p.wasTouch) this.setPaused(false); return; }
     if (this.stage !== 'PLAY') return;
     if (p.wasTouch) {
-      this.touchMode = true;
-      const acts = [() => { this.rollQ = true; }, () => { this.meleeQ = true; }, () => { this.bombQ = true; }, () => { this.pickQ = true; }];
-      for (let i = 0; i < 4; i++) { const [bx, by] = this.btnPos(i); if (this.inBtn(x, y, bx, by)) { acts[i](); return; } }
-      if (x < W / 2 && this.moveStick.id < 0) this.moveStick = { id: p.id, ax: x, ay: y, vx: 0, vy: 0 };
-      else if (x >= W / 2 && this.aimStick.id < 0) this.aimStick = { id: p.id, ax: x, ay: y, vx: 0, vy: 0 };
+      this.touchMode = true; this.layoutHud();
+      if (Math.hypot(x - this.pauseBtn.x, y - this.pauseBtn.y) < this.pauseBtn.r + 10) { this.setPaused(true); return; }
+      const b = this.btnAt(x, y);
+      if (b) { if (b === 'roll') this.rollQ = true; else if (b === 'melee') this.meleeQ = true; else if (b === 'bomb') this.bombQ = true; else this.pickQ = true; return; }
+      if (x < this.vw * 0.42 && this.moveStick.id < 0) this.moveStick = { id: p.id, ax: x, ay: y, vx: 0, vy: 0 };
+      else if (x >= this.vw * 0.42) { if (this.ctl === 'simple') { if (this.fireId < 0) this.fireId = p.id; } else if (this.aimStick.id < 0) this.aimStick = { id: p.id, ax: x, ay: y, vx: 0, vy: 0 }; }   // 간편: 오른쪽 어디든 누르면 사격 / 정밀: 조준 스틱
     } else {
       this.mouse.used = true; this.mouse.x = x; this.mouse.y = y;
       if (p.rightButtonDown()) this.meleeQ = true; else this.mouse.down = true;
@@ -260,30 +326,39 @@ export class GroundScene extends Phaser.Scene {
     }
   }
   private pointerUp(p: Phaser.Input.Pointer): void {
-    if (p.wasTouch) { for (const s of [this.moveStick, this.aimStick]) if (s.id === p.id) { s.id = -1; s.vx = 0; s.vy = 0; } }
+    if (p.wasTouch) { for (const s of [this.moveStick, this.aimStick]) if (s.id === p.id) { s.id = -1; s.vx = 0; s.vy = 0; } if (this.fireId === p.id) this.fireId = -1; }
     else this.mouse.down = false;
   }
   private buildInput(): GInput {
     const k = this.keys, p = this.g.p;
-    const mx = (k.has('d') || k.has('arrowright') ? 1 : 0) - (k.has('a') || k.has('arrowleft') ? 1 : 0) + (this.moveStick.id >= 0 ? this.moveStick.vx : 0);
-    const my = (k.has('s') || k.has('arrowdown') ? 1 : 0) - (k.has('w') || k.has('arrowup') ? 1 : 0) + (this.moveStick.id >= 0 ? this.moveStick.vy : 0);
+    let mx = (k.has('d') || k.has('arrowright') ? 1 : 0) - (k.has('a') || k.has('arrowleft') ? 1 : 0), my = (k.has('s') || k.has('arrowdown') ? 1 : 0) - (k.has('w') || k.has('arrowup') ? 1 : 0);
     let ax = 0, ay = 0, fire = k.has('j') || k.has('z') || k.has('control'), aimDist: number | undefined;
-    if (this.aimStick.id >= 0) { const m = Math.hypot(this.aimStick.vx, this.aimStick.vy); if (m > 0.2) { ax = this.aimStick.vx; ay = this.aimStick.vy; if (m > 0.55) fire = true; } }   // 조준 스틱 0.55 이상이면 발사
-    else if (this.mouse.used && !this.touchMode) { const wx = this.cam.x + this.mouse.x / Z, wy = this.cam.y + this.mouse.y / Z; ax = wx - p.x; ay = wy - p.y; aimDist = Math.hypot(ax, ay); if (aimDist < 24) { ax = 0; ay = 0; } if (this.mouse.down) fire = true; }
+    if (this.touchMode) {
+      if (this.ctl === 'simple') {   // 이동 스틱 + 사격 버튼(조준 없음)
+        const o = simpleControl(this.simple, this.moveStick.vx, this.moveStick.vy, this.fireId >= 0);
+        mx += o.mx; my += o.my; ax = Math.cos(o.aim); ay = Math.sin(o.aim); fire = fire || o.fire;
+      } else {   // 정밀: 이동 스틱 + 조준 스틱 (살짝만 밀어도 발사)
+        mx += this.moveStick.vx; my += this.moveStick.vy;
+        const a = this.aimStick.id >= 0 ? preciseAim(this.aimStick.vx, this.aimStick.vy) : null; if (a) { ax = Math.cos(a.aim); ay = Math.sin(a.aim); fire = fire || a.fire; }
+      }
+    } else if (this.mouse.used) { const wx = this.cam.x + this.mouse.x / Z, wy = this.cam.y + this.mouse.y / Z; ax = wx - p.x; ay = wy - p.y; aimDist = Math.hypot(ax, ay); if (aimDist < 24) { ax = 0; ay = 0; } if (this.mouse.down) fire = true; }
     const inp: GInput = { mx, my, ax, ay, fire, roll: this.rollQ, melee: this.meleeQ, bomb: this.bombQ, pickup: this.pickQ || k.has('e'), aimDist };
     this.rollQ = false; this.meleeQ = false; this.bombQ = false; this.pickQ = false;
     return inp;
   }
-  private setPaused(v: boolean): void { if (this.stage !== 'PLAY') return; this.paused = v; this.quitArmed = false; if (v) audio.suspend(); else audio.resume(); }
+  private setPaused(v: boolean): void { if (this.stage !== 'PLAY' || this.choosing) return; this.paused = v; this.quitArmed = false; if (v) audio.suspend(); else audio.resume(); }
   private pressQuit(): void { if (!this.quitArmed) { this.quitArmed = true; return; } this.finish(false); }
 
   // ---------------------------------------------------------------- 연출 타임라인
-  private cover2(key: string): void { this.cutImg.setTexture(key).setVisible(true).setPosition(0, 0).setAlpha(1).setScale(W / this.cutImg.width, H / this.cutImg.height); }
+  private cover2(key: string, alpha = 1): void {
+    this.cutKey = key; this.cutImg.setTexture(key).setVisible(true).setAlpha(alpha).setPosition(this.vw / 2, this.vh / 2);
+    this.cutImg.setScale(Math.min(this.vw / this.cutImg.width, this.vh / this.cutImg.height));   // 세로 컷(9:16)을 가로 화면에서는 양옆을 검게 두고 맞춘다
+  }
   private addPixelate(amount: number): void { const fx = this.cameras.main.postFX; if (!fx || this.game.renderer.type !== Phaser.WEBGL) return; this.pixel = fx.addPixelate(amount); }
   private setPixel(v: number): void { if (this.pixel) this.pixel.amount = v; }
   private clearPixel(): void { this.cameras.main.postFX?.clear(); this.pixel = null; }
-  private caption(text: string, size = 22, y = H * 0.82): Phaser.GameObjects.Text {
-    const t = this.add.text(W / 2, y, text, { ...textStyle(size, '#ffffff'), stroke: '#02060e', strokeThickness: 5 }).setOrigin(0.5).setAlpha(0);
+  private caption(text: string, size = 22, y = this.vh * 0.82): Phaser.GameObjects.Text {
+    const t = this.add.text(this.vw / 2, y, text, { ...textStyle(size, '#ffffff'), stroke: '#02060e', strokeThickness: 5 }).setOrigin(0.5).setAlpha(0);
     this.root.add(t); this.caps.push(t); this.tweens.add({ targets: t, alpha: 1, duration: 260 }); return t;
   }
   private runIntro(): void {
@@ -292,7 +367,7 @@ export class GroundScene extends Phaser.Scene {
     this.cover2('cut_shotdown'); this.veil.setAlpha(1);
     this.tweens.add({ targets: this.veil, alpha: 0, duration: 350 });
     audio.sfx('boom'); audio.sfx('enrage');
-    const cap = this.caption('EJECT!', 40, H * 0.14);
+    const cap = this.caption('비상 탈출 — 낙하!', 30, this.vh * 0.14);
     this.tweens.add({ targets: this.cutImg, scale: this.cutImg.scale * 1.06, duration: 1500, ease: 'Sine.easeOut' });
     this.time.delayedCall(1500, () => {
       cap.destroy(); this.addPixelate(1); audio.sfx('missile');
@@ -306,6 +381,7 @@ export class GroundScene extends Phaser.Scene {
       this.tweens.add({ targets: cam, zoom: 1, duration: 900, ease: 'Cubic.easeOut' });
       this.tweens.add({ targets: this.cutImg, scale: this.cutImg.scale * 1.1, duration: 1800, ease: 'Sine.easeOut' });
       this.caption('옥상 착지 — 격납고까지 올라가라', 20);
+      if (this.isTouch() && !this.landscape) this.caption('📱 기기를 가로로 돌리면 더 넓게 플레이할 수 있어요', 14, this.vh * 0.1);
       audio.sfx('heal');
     });
     this.time.delayedCall(4300, () => {
@@ -363,7 +439,7 @@ export class GroundScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- 틱
   update(_t: number, delta: number): void {
-    if (this.stage === 'PLAY' && !this.paused) {
+    if (this.stage === 'PLAY' && !this.paused && !this.choosing) {
       const dt = Math.min(delta, 50) * (this.time.now < this.slowUntil ? this.slowScale : 1);
       this.acc += dt;
       while (this.acc >= STEP_MS) {
@@ -527,14 +603,15 @@ export class GroundScene extends Phaser.Scene {
     const g = this.g, p = g.p, t = this.time.now;
     // 카메라: 플레이어를 아래쪽 1/3 지점에 두고 조준 방향을 조금 내다본다 + 발사 킥 + 흔들림 (정수 좌표로 이음새 방지)
     let lookX = 0, lookY = 0;
-    if (this.aimStick.id >= 0) { lookX = this.aimStick.vx * 180; lookY = this.aimStick.vy * 220; }
-    else if (this.mouse.used && !this.touchMode) { const wx = this.cam.x + this.mouse.x / Z - p.x, wy = this.cam.y + this.mouse.y / Z - p.y; lookX = Math.max(-260, Math.min(260, wx * 0.25)); lookY = Math.max(-300, Math.min(300, wy * 0.25)); }
-    const wantX = Math.max(0, Math.min(WORLD_W - VIEW_W, p.x - VIEW_W / 2 + lookX)), wantY = Math.max(0, Math.min(WORLD_H - VIEW_H, p.y - VIEW_H * 0.62 + lookY));
+    if (this.aimStick.id >= 0 && this.ctl === 'precise') { lookX = this.aimStick.vx * 180; lookY = this.aimStick.vy * 220; }
+    else if (!this.touchMode && this.mouse.used) { const wx = this.cam.x + this.mouse.x / Z - p.x, wy = this.cam.y + this.mouse.y / Z - p.y; lookX = Math.max(-260, Math.min(260, wx * 0.25)); lookY = Math.max(-300, Math.min(300, wy * 0.25)); }
+    const vwW = this.viewW, vhH = this.viewH, maxX = WORLD_W - vwW;
+    const wantX = maxX <= 0 ? maxX / 2 : Math.max(0, Math.min(maxX, p.x - vwW / 2 + lookX)), wantY = Math.max(0, Math.min(WORLD_H - vhH, p.y - vhH * (this.landscape ? 0.56 : 0.62) + lookY));
     this.cam.x += (wantX - this.cam.x) * 0.16; this.cam.y += (wantY - this.cam.y) * 0.16;
     const sh = this.shake, sx = sh ? (Math.random() - 0.5) * sh * 2 : 0, sy = sh ? (Math.random() - 0.5) * sh * 2 : 0;
     const cx = Math.round(this.cam.x + this.kick.x + sx), cy = Math.round(this.cam.y + this.kick.y + sy);
     this.world.setPosition(-cx * Z, -cy * Z);
-    const inView = (x: number, y: number) => x > cx - 200 && x < cx + VIEW_W + 200 && y > cy - 200 && y < cy + VIEW_H + 200;
+    const inView = (x: number, y: number) => x > cx - 200 && x < cx + this.viewW + 200 && y > cy - 200 && y < cy + this.viewH + 200;
     this.shadowG.clear(); this.objG.clear(); this.partG.clear(); this.bulletG.clear(); this.topG.clear();
 
     this.renderObjects(inView);
@@ -690,7 +767,7 @@ export class GroundScene extends Phaser.Scene {
 
   /** 플레이어 포즈 우선순위: ① 시퀀스(구르기/던지기/근접/발사) ② 이동 중 걷기(walk_a→idle→walk_b→idle) ③ 대기. 총이 막혀 있으면 총을 내린 자세 */
   private playerPose(): { sheet: string; row: number; rot: number } {
-    const p = this.g.p, sq = p.seq, W = p.weapon, rows = ROW[W], sheet = `gs_${W}`;
+    const p = this.g.p, sq = p.seq, wk = p.weapon, rows = ROW[wk], sheet = `gs_${wk}`;
     if (sq && sq.kind === 'roll') return { sheet: 'gs_roll', row: sq.i, rot: p.rollAng };
     if (sq && sq.kind === 'throw') return { sheet: 'gs_throw', row: sq.i, rot: p.aim };
     if (sq && sq.kind === 'melee') return { sheet, row: rows[`melee_${sq.i + 1}`], rot: p.aim };
@@ -708,13 +785,13 @@ export class GroundScene extends Phaser.Scene {
   }
 
   private renderHud(nearW: string, cx: number, cy: number): void {
-    const g = this.g, p = g.p, h = this.hudG, T2 = this.hudText;
+    const g = this.g, p = g.p, h = this.hudG, T2 = this.hudText, vw = this.vw, vh = this.vh;
     h.clear();
     for (let i = 0; i < p.maxHp; i++) {   // 체력 하트
       const full = p.hp >= i + 1, half = !full && p.hp > i, x0 = 12 + i * 18, y0 = 34;
       HEART.forEach((row, ry) => { for (let rx = 0; rx < 7; rx++) if (row[rx] === 'X') { h.fillStyle(full || (half && rx < 4) ? 0xef4444 : 0x3b0d12, 1); h.fillRect(x0 + rx * 2, y0 + ry * 2, 2, 2); } });
     }
-    const sec = g.section;
+    const sec = g.section, touch = this.isTouch();
     T2.room.setText(`${SECTIONS[sec].name}  ${sec === 3 ? (g.exitOpen ? '— 출구!' : '— BOSS') : ''}`);
     T2.left.setText(g.cleared[sec] ? (sec === 3 ? '' : '▲ 위층으로 올라가라') : sec === 3 ? '' : `남은 적 ${g.remaining}`);
     T2.score.setText(String(Math.round(g.score)));
@@ -723,39 +800,71 @@ export class GroundScene extends Phaser.Scene {
     T2.grenade.setText(`폭탄 ×${p.grenades}`);
     T2.combo.setText(g.combo >= 2 ? `${g.combo} COMBO  ×${(1 + 0.2 * Math.min(g.combo - 1, 10)).toFixed(1)}` : '').setAlpha(g.comboT > 0 ? Math.min(1, g.comboT / 30) : 0);
     const b = g.boss;
-    if (b && b.state === 'alert') { T2.boss.setText('격납고 수문장'); h.fillStyle(0x0f172a, 0.8); h.fillRect(W / 2 - 100, 56, 200, 8); h.fillStyle(0xef4444, 1); h.fillRect(W / 2 - 100, 56, 200 * Math.max(0, b.hp / b.maxHp), 8); h.lineStyle(1, 0xffffff, 0.5); h.strokeRect(W / 2 - 100, 56, 200, 8); } else T2.boss.setText('');
-    const touch = this.touchMode || this.sys.game.device.input.touch;
+    if (b && b.state === 'alert') { T2.boss.setText('격납고 수문장'); h.fillStyle(0x0f172a, 0.8); h.fillRect(vw / 2 - 100, 56, 200, 8); h.fillStyle(0xef4444, 1); h.fillRect(vw / 2 - 100, 56, 200 * Math.max(0, b.hp / b.maxHp), 8); h.lineStyle(1, 0xffffff, 0.5); h.strokeRect(vw / 2 - 100, 56, 200, 8); } else T2.boss.setText('');
     if (nearW && p.weapon !== 'pistol' && !touch) T2.hint.setText(nearW).setAlpha(1);
     else if (p.gunBlocked && this.stage === 'PLAY') T2.hint.setText('총이 벽에 막혀 있다 — 물러서라').setAlpha(0.9);
-    else if (this.tutorialT > 0) T2.hint.setText(touch ? '왼쪽 스틱: 이동 · 오른쪽 스틱을 끝까지 밀면 사격 · 문은 몸으로 밀어서 연다' : 'WASD 이동 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
+    else if (this.tutorialT > 0) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 문은 몸으로 밀어서 연다') : 'WASD 이동 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
     else T2.hint.setAlpha(0);
-    if ((g.cleared[sec] && sec < 3) || (sec === 3 && g.exitOpen)) { const gy = (SECTIONS[sec].r0 + 1) * TILE; if (gy < cy) { const a = 0.6 + 0.4 * Math.sin(this.time.now * 0.008); h.fillStyle(0xfde68a, a); h.fillTriangle(W / 2, 74, W / 2 - 12, 92, W / 2 + 12, 92); } }   // 다음 구역 문 방향 화살표
+    if ((g.cleared[sec] && sec < 3) || (sec === 3 && g.exitOpen)) { const gy = (SECTIONS[sec].r0 + 1) * TILE; if (gy < cy) { const a = 0.6 + 0.4 * Math.sin(this.time.now * 0.008); h.fillStyle(0xfde68a, a); h.fillTriangle(vw / 2, 74, vw / 2 - 12, 92, vw / 2 + 12, 92); } }   // 다음 구역 문 방향 화살표
     this.popTexts.forEach(tx => tx.setVisible(false));   // 월드 → 화면 팝업 글자
     this.pops.forEach((pp, i) => { let tx = this.popTexts[i]; if (!tx) { tx = this.add.text(0, 0, '', textStyle(14, '#fff')).setOrigin(0.5); tx.setShadow(0, 0, '#000', 4, true, true); this.ui.add(tx); this.popTexts[i] = tx; } tx.setVisible(true).setText(pp.text).setColor(pp.color).setFontSize(pp.size).setPosition((pp.x - cx) * Z, (pp.y - cy) * Z).setAlpha(Math.min(1, pp.life / 14)); });
-    if (this.mouse.used && !this.touchMode && this.stage === 'PLAY') {   // 크로스헤어: 발사하면 벌어지고, 명중은 흰 X, 사살은 빨간 X, 총이 막히면 빨강
+    if (!touch && this.mouse.used && this.stage === 'PLAY' && !this.paused) {   // 크로스헤어: 발사하면 벌어지고, 명중은 흰 X, 사살은 빨간 X, 총이 막히면 빨강
       const mx = this.mouse.x, my = this.mouse.y, sp = 8 + this.cross.spread * 12, col = p.gunBlocked ? 0xf87171 : 0xffffff;
       h.lineStyle(1.5, col, 0.9); h.strokeCircle(mx, my, sp);
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { h.beginPath(); h.moveTo(mx + dx * (sp + 2), my + dy * (sp + 2)); h.lineTo(mx + dx * (sp + 8), my + dy * (sp + 8)); h.strokePath(); }
       if (this.cross.hit > 0 || this.cross.kill > 0) { const k = this.cross.kill > 0, r = k ? 11 : 7, c2 = k ? 0xff3b3b : 0xffffff; h.lineStyle(k ? 3 : 2, c2, 1); h.beginPath(); h.moveTo(mx - r, my - r); h.lineTo(mx + r, my + r); h.moveTo(mx + r, my - r); h.lineTo(mx - r, my + r); h.strokePath(); }
     }
-    const names = ['구르기', '근접', '폭탄', '줍기'];   // 모바일 버튼/스틱
-    [T2.roll, T2.melee, T2.bomb, T2.pick].forEach((tx, i) => tx.setText(touch && (i < 3 || nearW) ? names[i] : ''));
-    if (touch) {
-      for (let i = 0; i < 4; i++) {
-        if (i === 3 && !nearW) continue; const [bx, by] = this.btnPos(i), on = i === 0 ? p.rollCd <= 0 : i === 2 ? p.grenades > 0 : true;
-        h.fillStyle(0x0f172a, 0.5); h.fillCircle(bx, by, 31); h.lineStyle(2, on ? 0x7dd3fc : 0x475569, 0.9); h.strokeCircle(bx, by, 31);
+    // 모바일 컨트롤
+    for (const tx of [T2.fire, T2.roll, T2.melee, T2.bomb, T2.pick, T2.pause]) tx.setText('');
+    if (touch && this.stage === 'PLAY' && !this.choosing && !this.paused) {
+      const pb = this.pauseBtn; h.fillStyle(0x0f172a, 0.5); h.fillCircle(pb.x, pb.y, pb.r); h.lineStyle(2, 0x94a3b8, 0.9); h.strokeCircle(pb.x, pb.y, pb.r); h.fillStyle(0xe2e8f0, 1); h.fillRect(pb.x - 5, pb.y - 6, 3, 12); h.fillRect(pb.x + 2, pb.y - 6, 3, 12);
+      if (this.ctl === 'simple') {
+        const F = this.fireBtn, on = this.fireId >= 0; h.fillStyle(on ? 0xb45309 : 0x0f172a, on ? 0.7 : 0.45); h.fillCircle(F.x, F.y, F.r); h.lineStyle(3, p.gunBlocked ? 0xf87171 : on ? 0xfde047 : 0x7dd3fc, 0.95); h.strokeCircle(F.x, F.y, F.r);
+        T2.fire.setText('사격').setOrigin(0.5).setPosition(F.x, F.y);
       }
-      for (const s of [this.moveStick, this.aimStick]) if (s.id >= 0) { const fireOn = s === this.aimStick && Math.hypot(s.vx, s.vy) > 0.55; h.lineStyle(2, 0xffffff, 0.3); h.strokeCircle(s.ax, s.ay, 56); h.fillStyle(p.gunBlocked && s === this.aimStick ? 0xf87171 : fireOn ? 0xfde047 : 0xffffff, 0.4); h.fillCircle(s.ax + s.vx * 56, s.ay + s.vy * 56, 18); }
+      const labels: Record<string, [string, Phaser.GameObjects.Text]> = { roll: ['구르기', T2.roll], melee: ['근접', T2.melee], bomb: ['폭탄', T2.bomb], pick: ['줍기', T2.pick] };
+      for (const bt of this.btns) {
+        if (bt.name === 'pick' && !nearW) continue;
+        const on = bt.name === 'roll' ? p.rollCd <= 0 : bt.name === 'bomb' ? p.grenades > 0 : true;
+        h.fillStyle(0x0f172a, 0.5); h.fillCircle(bt.x, bt.y, bt.r); h.lineStyle(2, on ? 0x7dd3fc : 0x475569, 0.9); h.strokeCircle(bt.x, bt.y, bt.r);
+        const [name, tx] = labels[bt.name]; tx.setText(name).setOrigin(0.5).setPosition(bt.x, bt.y);
+      }
+      for (const st of [this.moveStick, this.aimStick]) if (st.id >= 0) { const fireOn = st === this.aimStick && Math.hypot(st.vx, st.vy) > 0.3; h.lineStyle(2, 0xffffff, 0.3); h.strokeCircle(st.ax, st.ay, 56); h.fillStyle(p.gunBlocked && st === this.aimStick ? 0xf87171 : fireOn ? 0xfde047 : 0xffffff, 0.4); h.fillCircle(st.ax + st.vx * 56, st.ay + st.vy * 56, 18); }
     }
     if (this.bannerT > 0) { this.bannerT--; if (this.bannerT < 30) this.banner.setAlpha(this.bannerT / 30); }
-    if (this.paused) { h.fillStyle(0x000000, 0.6); h.fillRect(0, 0, W, H); }
-    if (this.stage === 'DEAD') { h.fillStyle(0x000000, 0.55); h.fillRect(0, 0, W, H); }
+    this.drawMenu(h);
+    if (this.stage === 'DEAD') { h.fillStyle(0x000000, 0.55); h.fillRect(0, 0, vw, vh); }
     this.overlayText();
+    void vh;
+  }
+  /** 일시정지 / 조작 방식 선택 메뉴 (터치·마우스 모두 눌러서 고른다) */
+  private drawMenu(h: Phaser.GameObjects.Graphics): void {
+    const vw = this.vw, vh = this.vh, show = this.choosing || this.paused, T = this.menuTexts;
+    this.menuHit = []; T.forEach(t => t.setVisible(false));
+    if (!show) return;
+    h.fillStyle(0x000000, 0.72); h.fillRect(0, 0, vw, vh);
+    const bw = Math.min(vw - 60, 380), box = (name: string, y: number, hh: number, label: string, t: Phaser.GameObjects.Text, hot = false) => {
+      h.fillStyle(hot ? 0x7c2d12 : 0x0f172a, 0.92); h.fillRoundedRect(vw / 2 - bw / 2, y - hh / 2, bw, hh, 12); h.lineStyle(2, hot ? 0xfbbf24 : 0x7dd3fc, 0.9); h.strokeRoundedRect(vw / 2 - bw / 2, y - hh / 2, bw, hh, 12);
+      t.setVisible(true).setText(label).setPosition(vw / 2, y); this.menuHit.push({ name, x: vw / 2, y, w: bw, h: hh });
+    };
+    const land = this.landscape;
+    if (this.choosing) {
+      T[0].setVisible(true).setText('조작 방식을 고르세요').setFontSize(20).setPosition(vw / 2, vh * (land ? 0.14 : 0.2));
+      box('simple', vh * (land ? 0.38 : 0.4), land ? 78 : 100, '간편\n이동 스틱 + 사격 버튼 (조준 없음)\n방향은 이동 방향 · 사격 중에는 방향이 고정돼 뒷걸음질 사격', T[1], this.ctl === 'simple');
+      box('precise', vh * (land ? 0.62 : 0.6), land ? 78 : 100, '정밀\n이동 스틱 + 조준 스틱 (트윈스틱)\n스틱 방향으로 조준 · 살짝만 밀어도 발사', T[2], this.ctl === 'precise');
+      T[3].setVisible(true).setText('나중에 일시정지(II) 메뉴에서 바꿀 수 있어요').setFontSize(13).setPosition(vw / 2, vh * (land ? 0.84 : 0.76));
+    } else {
+      T[0].setVisible(true).setText('일시정지').setFontSize(22).setPosition(vw / 2, vh * (land ? 0.14 : 0.2));
+      box('resume', vh * (land ? 0.34 : 0.36), 52, '계속하기', T[1]);
+      box('toggle', vh * (land ? 0.54 : 0.5), 64, `조작: ${this.ctl === 'simple' ? '간편 (이동 + 사격 버튼)' : '정밀 (이동 + 조준 스틱)'}\n눌러서 바꾸기`, T[2]);
+      box('quit', vh * (land ? 0.74 : 0.64), 52, this.quitArmed ? '정말 포기? 한 번 더 누르세요' : '포기하고 본편으로', T[3], this.quitArmed);
+      T[4].setVisible(true).setText('키보드: Enter 계속 · C 조작 전환 · T 두 번 포기').setFontSize(12).setPosition(vw / 2, vh * (land ? 0.9 : 0.78));
+    }
   }
   private overlayText(): void {
-    if (!this.ovT) { this.ovT = this.add.text(W / 2, H / 2, '', { ...textStyle(20, '#ffffff'), align: 'center', lineSpacing: 10 }).setOrigin(0.5); this.ui.add(this.ovT); }
-    if (this.paused) this.ovT.setText(`일시정지\n\n탭 / Enter: 계속\nT 두 번: 포기하고 본편으로${this.quitArmed ? '\n\n한 번 더 T → 포기 확인' : ''}`).setVisible(true);
-    else if (this.stage === 'DEAD') this.ovT.setText(this.sim.lives > 0 ? `격추당했다…\n\n목숨 −1 · 이 구역 입구에서 바로 재시작\n(R / Enter / 탭)` : `격추당했다…\n\n더 이상 목숨이 없다\n(R / Enter / 탭)`).setVisible(true);
+    if (!this.ovT) { this.ovT = this.add.text(this.vw / 2, this.vh / 2, '', { ...textStyle(20, '#ffffff'), align: 'center', lineSpacing: 10 }).setOrigin(0.5); this.ui.add(this.ovT); }
+    if (this.stage === 'DEAD') this.ovT.setText(this.sim.lives > 0 ? `격추당했다…\n\n목숨 −1 · 이 구역 입구에서 바로 재시작\n(R / Enter / 탭)` : `격추당했다…\n\n더 이상 목숨이 없다\n(R / Enter / 탭)`).setVisible(true).setPosition(this.vw / 2, this.vh / 2);
     else this.ovT.setVisible(false);
   }
+
 }
