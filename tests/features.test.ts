@@ -195,3 +195,23 @@ describe('시선 끌기 · 순찰 멈춤', () => {
     expect(paused).toBe(true);
   });
 });
+
+describe('침입 경보 (구출 임무: 소란이 나면 경비병이 몰려온다)', () => {
+  const mk = () => { const g = new GroundSim({ seed: 5, mission: 'rescue', hostageWho: 1 }); g.enemies.length = 0; g.p.invuln = 99999; g.p.x = 10 * TILE; g.p.y = 129.4 * TILE; return g; };
+  it('들키면 경보 + 같은 구역 전원 경계 + 증원 무리가 온다', () => {
+    const g = mk(); const e = add(g, 'rifle', g.p.x, g.p.y - 100, Math.PI / 2); e.state = 'idle'; const far = add(g, 'rifle', g.p.x + 300, g.p.y - 300, 0); far.state = 'idle';
+    run(g, 5); expect(g.alarm).toBe(true); expect(g.drain().some(x => x.t === 'alarm')).toBe(true); expect(far.state).toBe('alert');
+    run(g, 120); expect(g.enemies.filter(x => x.reinf).length).toBeGreaterThanOrEqual(3);
+    run(g, 330); expect(g.enemies.filter(x => x.reinf).length).toBeGreaterThanOrEqual(6);
+  });
+  it('암살은 경보를 울리지 않지만, 소음기로 쏴서 안 죽으면 경보가 울린다', () => {
+    const a = mk(); const e = add(a, 'rifle', a.p.x, a.p.y - 70, -Math.PI / 2); e.state = 'idle'; const o = add(a, 'rifle', a.p.x + 300, a.p.y - 500, 0); o.state = 'idle';
+    a.step({ ...NO_INPUT, melee: true }); run(a, 30); expect(a.enemies.includes(e)).toBe(false); expect(a.alarm).toBe(false);
+    const b = mk(); b.p.weapon = 'silenced'; b.p.ammo = 24; const t = add(b, 'rifle', b.p.x, b.p.y - 300, Math.PI / 2 + 3.14); t.state = 'idle'; t.ang = -Math.PI / 2;
+    for (let i = 0; i < 12; i++) b.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(b.alarm).toBe(true);
+  });
+  it('인질을 풀기 전에 죽어서 재도전하면 경보가 해제된다', () => {
+    const g = mk(); const e = add(g, 'rifle', g.p.x, g.p.y - 100, Math.PI / 2); e.state = 'idle'; run(g, 130); expect(g.alarm).toBe(true);
+    g.p.hp = 0; g.p.invuln = 0; g.revive(); expect(g.alarm).toBe(false); expect(g.enemies.some(x => x.reinf)).toBe(false);
+  });
+});

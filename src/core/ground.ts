@@ -69,6 +69,7 @@ export interface GEnemy {
   dying: boolean; fallT: number; fallF: boolean; deathAng: number; smearD: number; w: FeelKey;
   /** 수상한 소리 조사 중(경계 전): 1=소리 난 곳으로 걸어감, 2=두리번, 3=제자리로 복귀 */
   inv?: { ph: 1 | 2 | 3; t: number; x: number; y: number; fl: Int16Array };
+  reinf?: boolean;   // 경보로 증원된 경비병 (재도전 시 제거)
   pauseT?: number; head?: number;   // 순찰 중 지점에서 멈춰 둘러보기
 }
 export interface GBullet { x: number; y: number; vx: number; vy: number; dmg: number; friendly: boolean; w: FeelKey; life: number; dist: number; pellet: boolean; first: boolean; pierce: number; hit: number[]; dodged: boolean; src?: GKind; kind?: 'normal' | 'sniper' }
@@ -95,6 +96,7 @@ export type GEvent =
   | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
   | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
   | { t: 'hostageFree'; x: number; y: number } | { t: 'reinforce'; x: number; y: number } | { t: 'hostageProgress'; k: number }
+  | { t: 'alarm'; x: number; y: number }
   | { t: 'suspicious'; x: number; y: number } | { t: 'tick'; x: number; y: number; r: number }
   | { t: 'assassinate'; x: number; y: number; ang: number } | { t: 'step'; x: number; y: number; r: number }
   | { t: 'flashbang'; x: number; y: number; r: number } | { t: 'smoke'; x: number; y: number; r: number } | { t: 'stealth'; x: number; y: number; pts: number; melee: boolean } | { t: 'ghost'; n: number; pts: number } | { t: 'swap'; to: BombType }
@@ -193,6 +195,7 @@ export class GroundSim {
     const s = this.section, def = this.secs[s];
     this.p.hp = Math.max(2, Math.ceil(this.p.maxHp / 2)); this.p.invuln = 120; this.combo = 0; this.comboT = 0; this.p.seq = null; this.p.rollI = 0;
     this.state = 'PLAY'; this.bullets.length = 0; this.bombs.length = 0;
+    if (this.opts.mission === 'rescue' && this.hostage?.state === 'caged') { this.alarm = false; this.wave = 0; this.enemies = this.enemies.filter(e => !e.reinf); }   // 구출 전 재도전: 경보 해제
     if (!this.cleared[s]) this.populate(s);
     this.p.x = s === 0 ? this.level.start.x : 9 * TILE; this.p.y = s === 0 ? this.level.start.y : (def.r1 - 1.5) * TILE;
     if (this.opts.mission === 'rescue') { this.p.weapon = 'silenced'; this.p.ammo = WEAPONS.silenced.ammo; if (this.hostage?.state === 'free') { this.hostage.x = this.p.x; this.hostage.y = this.p.y + 90; } }
@@ -309,7 +312,15 @@ export class GroundSim {
     const s = sectionOfRow(Math.floor(y / TILE));
     for (const e of this.enemies) if (e.state === 'idle' && e.section === s && Math.hypot(e.x - x, e.y - y) < radius) this.alertEnemy(e);
   }
-  private alertEnemy(e: GEnemy): void { if (e.state === 'alert' || e.dying) return; if (e.section >= 0 && e.section < 4) this.alerted[e.section] = true; e.inv = undefined; e.state = 'alert'; e.alertT = f(0.7); e.windT = 0; this.emit({ t: 'alert', x: e.x, y: e.y }); }
+  private alertEnemy(e: GEnemy, silent = false): void {
+    if (e.state === 'alert' || e.dying) return; if (e.section >= 0 && e.section < 4) this.alerted[e.section] = true; e.inv = undefined; e.state = 'alert'; e.alertT = f(0.7); e.windT = 0; this.emit({ t: 'alert', x: e.x, y: e.y });
+    if (!silent && this.opts.mission === 'rescue' && !this.alarm && this.hostage?.state !== 'safe') this.raiseAlarm(e);   // 들키면 경보 → 경비병이 몰려온다
+  }
+  /** 침입 경보(인질 구출 임무): 같은 구역 적이 모두 경계하고, 몇 초마다 경비병 무리가 증원된다. 조용히 처리해야 하는 이유 */
+  private raiseAlarm(src: GEnemy): void {
+    this.alarm = true; this.alarmT = 0; this.wave = 0; this.emit({ t: 'alarm', x: src.x, y: src.y }); this.emit({ t: 'shake', v: 6 });
+    for (const o of this.enemies) if (o.section === src.section && !o.dying && o.kind !== 'boss') this.alertEnemy(o, true);
+  }
 
   // ---------------------------------------------------------------- 틱
   step(inp: GInput): void {
@@ -366,15 +377,14 @@ export class GroundSim {
       if (this.reached < 2 && !this.alerted[this.reached]) { const gp = 400 + 300 * this.reached; this.score += gp; this.emit({ t: 'ghost', n: this.reached, pts: gp }); }   // 한 번도 들키지 않고 통과
       this.reached = s; this.emit({ t: 'section', n: s, name: this.secs[s].name }); this.score += 200;
     }
+    if (this.alarm && h.state !== 'safe') { this.alarmT++; const times = [100, 420, 740, 1060, 1380]; if (this.wave < times.length && this.alarmT >= times[this.wave]) this.spawnWave(this.wave++); }   // 증원: 약 5초마다 3~5명
     if (h.state === 'caged') {
       const near = Math.hypot(p.x - h.x, p.y - h.y) < 95;
       const was = h.freeT; h.freeT = near ? h.freeT + 1 : Math.max(0, h.freeT - 2);
       if (h.freeT !== was) this.emit({ t: 'hostageProgress', k: Math.min(1, h.freeT / 75) });
       if (h.freeT >= 75) this.freeHostage();
     } else if (h.state === 'free') {
-      this.updateHostageMove(h); this.alarmT++;
-      const waves = [120, 540, 960, 1380];   // 증원: 2~3명씩 좌우 계단에서 쏟아진다
-      if (this.wave < waves.length && this.alarmT >= waves[this.wave]) this.spawnWave(this.wave++);
+      this.updateHostageMove(h);
       if (p.y < 3 * TILE && Math.abs(p.x - 9 * TILE) < 2.4 * TILE && Math.hypot(p.x - h.x, p.y - h.y) < 320) {
         h.state = 'safe'; this.state = 'WIN'; this.score += 1000;
         this.emit({ t: 'win' }); this.emit({ t: 'slowmo', ms: 800, scale: 0.3 });
@@ -382,18 +392,21 @@ export class GroundSim {
     }
   }
   private freeHostage(): void {
-    const h = this.hostage!; h.state = 'free'; h.freeT = 75; this.alarm = true; this.alarmT = 0; this.wave = 0; this.score += 1500;
+    const h = this.hostage!; h.state = 'free'; h.freeT = 75; this.score += 1500;
+    if (!this.alarm) { this.alarm = true; this.alarmT = 0; this.wave = 0; } else this.spawnWave(Math.min(this.wave, 4));   // 이미 경보 중이면 즉시 한 무리 더
     if (!this.alerted[2]) { this.score += 1000; this.emit({ t: 'ghost', n: 2, pts: 1000 }); }   // 완전 잠입으로 구출
     this.emit({ t: 'hostageFree', x: h.x, y: h.y }); this.emit({ t: 'shake', v: 10 });
     this.unlock(2); this.unlock(3);
-    for (const e of this.enemies) if (e.section >= 2 && !e.dying) this.alertEnemy(e);
+    for (const e of this.enemies) if (e.section >= 2 && !e.dying) this.alertEnemy(e, true);
   }
   private spawnWave(i: number): void {
-    const pts = this.level.reinforce ?? [], kinds: GKind[][] = [['rifle', 'rifle'], ['rifle', 'charger', 'rifle'], ['rifle', 'rifle', 'charger'], ['charger', 'rifle', 'rifle']];
-    kinds[i].forEach((k, j) => {
-      const pt = pts[(i + j) % pts.length]; if (!pt) return;
-      const e = this.addEnemy(k, pt.x + (j - 1) * 40, pt.y, pt.x < 9 * TILE ? 0 : Math.PI); this.alertEnemy(e); this.emit({ t: 'reinforce', x: e.x, y: e.y });
-    });
+    const p = this.p, ps = this.section, all = (this.level.reinforce ?? []).filter(q => q.section === ps);
+    const sizes = [3, 3, 4, 4, 5], n = sizes[Math.min(i, 4)], pool: GKind[] = i === 2 || i >= 4 ? ['rifle', 'charger', 'heavy', 'rifle', 'rifle'] : ['rifle', 'charger', 'rifle', 'rifle', 'rifle'];
+    const far = all.filter(q => Math.hypot(q.x - p.x, q.y - p.y) > 480 && !this.los(q.x, q.y, p.x, p.y)), cand = far.length ? far : all.slice().sort((u, v) => Math.hypot(v.x - p.x, v.y - p.y) - Math.hypot(u.x - p.x, u.y - p.y)).slice(0, 2);
+    for (let j = 0; j < n && cand.length; j++) {
+      const pt = cand[(i + j) % cand.length], k = pool[j % pool.length], ox = ((j % 3) - 1) * 44;
+      const e = this.addEnemy(k, pt.x + ox, pt.y, Math.atan2(p.y - pt.y, p.x - pt.x)); e.reinf = true; this.alertEnemy(e, true); this.emit({ t: 'reinforce', x: e.x, y: e.y });
+    }
   }
   /** 풀려난 인질: 플레이어를 따라다닌다(가까우면 멈춤). 적의 표적이 되지는 않는다 */
   private updateHostageMove(h: GHostage): void {
@@ -515,6 +528,7 @@ export class GroundSim {
     const a = Math.atan2(e.y - p.y, e.x - p.x); p.aim = a;
     const tx = e.x - Math.cos(a) * 46, ty = e.y - Math.sin(a) * 46;   // 등 뒤로 파고든다 (막혀 있으면 제자리에서)
     if (!this.obstacleAt(tx, ty) && this.los(p.x, p.y, tx, ty)) { p.x = tx; p.y = ty; }
+    e.stunT = Math.max(e.stunT, 40);   // 찌르는 동안 적은 얼어붙는다 (등 뒤에 붙어도 눈치채지 못한다)
     p.stab = true; this.stabE = e; this.startSeq('melee', GROUND.meleeSteps); this.emit({ t: 'assassinate', x: e.x, y: e.y, ang: a });
     return true;
   }

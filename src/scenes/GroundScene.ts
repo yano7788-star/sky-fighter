@@ -438,7 +438,7 @@ export class GroundScene extends Phaser.Scene {
       mk(`[${me}] 4스테이지 전투 중, ${hn}의 기체가 격추되어 신호가 끊겼다.`, 15, '#e2e8f0'),
       mk(`적 지휘부는 ${hn}${who === 1 ? "를" : "을"} 야간 수용소에 가뒀다. 감시가 삼엄하다.`, 15, '#e2e8f0'),
       mk('임무: 외곽 잠입 → 지하 통로 → 감방동에서 구출 → 옥상 헬기장으로 탈출', 15, '#fde68a'),
-      mk('소음기 권총·섬광탄·연막탄 지급. 들키지 않는 게 최선이다 — 구출하는 순간 경보가 울린다.', 14, '#94a3b8'),
+      mk('소음기 권총·섬광탄·연막탄 지급. 총으로 쏴서 못 죽이면 들킨다 — 들키는 순간 경보가 울려 경비병이 계속 몰려온다. 암살과 시선 끌기로 조용히.', 14, '#94a3b8'),
       mk(owned ? '성공 시: 유물 보상 + 크레딧' : `성공 시: ${hn} 해금 + 유물 보상`, 15, '#86efac'),
       mk('작전 개시', 18, '#ffffff'), mk('건너뛰기 (보상 없음)', 14, '#cbd5e1'),
     ];
@@ -713,6 +713,7 @@ export class GroundScene extends Phaser.Scene {
       case 'style': audio.sfx('gStyle'); this.pop(e.x, e.y - 90, 'STYLE!', '#67e8f9', 18); break;
       case 'reset': this.decals[e.section]?.clear(); break;
       case 'win': audio.sfx('item'); this.runOutro(); break;
+      case 'alarm': audio.sfx('enrage'); this.say('경보! 침입자 발견', 30); this.pop(e.x, e.y - 100, '경보!', '#ff4040', 24); break;
       case 'hostageFree': audio.sfx('enrage'); audio.sfx('item'); this.say('구출! 경보 발령!', 30); this.pop(e.x, e.y - 90, '!!', '#ff4040', 26); this.alarmRect.setAlpha(0.1); break;
       case 'reinforce': this.pop(e.x, e.y - 90, '증원!', '#fca5a5', 16); audio.sfx('gEnemyShot'); break;
       case 'dead': this.stage = 'DEAD'; this.deadTimer = 25; audio.sfx('enrage'); break;
@@ -944,7 +945,7 @@ export class GroundScene extends Phaser.Scene {
     if (this.rescue) {
       const hs = g.hostage!, who = hs.who === 1 ? '언니' : '동생';
       T2.room.setText(g.secs[sec].name);
-      T2.left.setText(hs.state === 'caged' ? `목표: ${who} 구출 (감방동) — 곁에 서 있으면 풀어 준다` : hs.state === 'free' ? `${who}와 함께 옥상 헬기장으로! — 경보 발령, 증원 접근` : '');
+      T2.left.setText(hs.state === 'caged' ? (g.alarm ? '⚠ 경보 발령 — 경비병이 계속 몰려온다! 서둘러 구출하라' : `목표: ${who} 구출 (감방동) — 들키면 경비병이 몰려온다`) : hs.state === 'free' ? `${who}와 함께 옥상 헬기장으로! — 경보 발령, 증원 접근` : '');
     } else {
     T2.room.setText(`${g.secs[sec].name}  ${sec === 3 ? (g.exitOpen ? '— 출구!' : '— BOSS') : ''}`);
     T2.left.setText(g.cleared[sec] ? (sec === 3 ? '' : '▲ 위층으로 올라가라') : sec === 3 ? '' : `남은 적 ${g.remaining}`);
