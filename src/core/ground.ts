@@ -97,7 +97,7 @@ export type GEvent =
   | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
   | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
   | { t: 'hostageFree'; x: number; y: number } | { t: 'reinforce'; x: number; y: number } | { t: 'hostageProgress'; k: number }
-  | { t: 'alarm'; x: number; y: number }
+  | { t: 'alarm'; x: number; y: number } | { t: 'alarmOff' }
   | { t: 'suspicious'; x: number; y: number } | { t: 'tick'; x: number; y: number; r: number }
   | { t: 'stabhit'; x: number; y: number; ang: number }
   | { t: 'assassinate'; x: number; y: number; ang: number } | { t: 'step'; x: number; y: number; r: number }
@@ -379,7 +379,11 @@ export class GroundSim {
       if (this.reached < 2 && !this.alerted[this.reached]) { const gp = 400 + 300 * this.reached; this.score += gp; this.emit({ t: 'ghost', n: this.reached, pts: gp }); }   // 한 번도 들키지 않고 통과
       this.reached = s; this.emit({ t: 'section', n: s, name: this.secs[s].name }); this.score += 200;
     }
-    if (this.alarm && h.state !== 'safe') { this.alarmT++; const times = [100, 420, 740, 1060, 1380]; if (this.wave < times.length && this.alarmT >= times[this.wave]) this.spawnWave(this.wave++); }   // 증원: 약 5초마다 3~5명
+    if (this.alarm && h.state !== 'safe') {
+      this.alarmT++; const times = [110, 450, 790, 1130], cap = h.state === 'caged' ? 3 : 4;   // 증원: 약 5.5초마다 2~3명 (구출 전 3무리, 구출 후 4무리)
+      if (this.wave < cap && this.alarmT >= times[this.wave]) this.spawnWave(this.wave++);
+      if (h.state === 'caged' && this.alarmT > 90 && !this.enemies.some(e => e.state === 'alert' && !e.dying && e.kind !== 'boss')) { this.alarm = false; this.wave = 0; this.emit({ t: 'alarmOff' }); }   // 경계 중인 적을 모두 처치하면 경보 해제
+    }
     if (h.state === 'caged') {
       const near = Math.hypot(p.x - h.x, p.y - h.y) < 95;
       const was = h.freeT; h.freeT = near ? h.freeT + 1 : Math.max(0, h.freeT - 2);
@@ -395,7 +399,7 @@ export class GroundSim {
   }
   private freeHostage(): void {
     const h = this.hostage!; h.state = 'free'; h.freeT = 75; this.score += 1500;
-    if (!this.alarm) { this.alarm = true; this.alarmT = 0; this.wave = 0; } else this.spawnWave(Math.min(this.wave, 4));   // 이미 경보 중이면 즉시 한 무리 더
+    if (!this.alarm) { this.alarm = true; this.alarmT = 0; this.wave = 0; } else this.spawnWave(Math.min(this.wave, 3));   // 이미 경보 중이면 즉시 한 무리 더
     if (!this.alerted[2]) { this.score += 1000; this.emit({ t: 'ghost', n: 2, pts: 1000 }); }   // 완전 잠입으로 구출
     this.emit({ t: 'hostageFree', x: h.x, y: h.y }); this.emit({ t: 'shake', v: 10 });
     this.unlock(2); this.unlock(3);
@@ -403,7 +407,7 @@ export class GroundSim {
   }
   private spawnWave(i: number): void {
     const p = this.p, ps = this.section, all = (this.level.reinforce ?? []).filter(q => q.section === ps);
-    const sizes = [3, 3, 4, 4, 5], n = sizes[Math.min(i, 4)], pool: GKind[] = i === 2 || i >= 4 ? ['rifle', 'charger', 'heavy', 'rifle', 'rifle'] : ['rifle', 'charger', 'rifle', 'rifle', 'rifle'];
+    const sizes = [2, 3, 3, 3], n = sizes[Math.min(i, 3)], pool: GKind[] = i === 2 ? ['rifle', 'charger', 'heavy'] : ['rifle', 'charger', 'rifle'];
     const far = all.filter(q => Math.hypot(q.x - p.x, q.y - p.y) > 480 && !this.los(q.x, q.y, p.x, p.y)), cand = far.length ? far : all.slice().sort((u, v) => Math.hypot(v.x - p.x, v.y - p.y) - Math.hypot(u.x - p.x, u.y - p.y)).slice(0, 2);
     for (let j = 0; j < n && cand.length; j++) {
       const pt = cand[(i + j) % cand.length], k = pool[j % pool.length], ox = ((j % 3) - 1) * 44;
