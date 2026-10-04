@@ -650,8 +650,8 @@ export class GroundScene extends Phaser.Scene {
       }
       case 'kill': {
         const D = FEEL[e.w], robot = e.kind === 'turret' || e.kind === 'drone' || e.kind === 'boss';
-        audio.sfx('gKill'); if (e.w === 'shotgun' || e.w === 'bomb' || e.w === 'rail') audio.sfx('bossHeavy');
-        this.blood(e.x, e.y, e.ang, D.dBlood * (robot ? 0.5 : 1), Math.round(D.dBlood / 3), 0.6, D.dMist, D.dGibs, robot);
+        if (!e.quiet) audio.sfx('gKill'); if (e.w === 'shotgun' || e.w === 'bomb' || e.w === 'rail') audio.sfx('bossHeavy');
+        this.blood(e.x, e.y, e.ang, D.dBlood * (robot ? 0.5 : 1) * (e.quiet ? 0.35 : 1), Math.round(D.dBlood / (e.quiet ? 8 : 3)), 0.6, e.quiet ? 0 : D.dMist, e.quiet ? 0 : D.dGibs, robot);
         this.pop(e.x, e.y - 70, `+${e.pts}`, '#fde68a', 14); if (e.combo >= 3) this.pop(e.x, e.y - 100, `${e.combo} COMBO`, '#fbbf24', 12);
         break;
       }
@@ -690,7 +690,8 @@ export class GroundScene extends Phaser.Scene {
       case 'crateHit': audio.sfx('gCrate'); break;
       case 'crateBreak': audio.sfx('gDoorBreak'); for (let i = 0; i < 12; i++) this.prt('wood', e.x, e.y, rnd(0, 6.28), rnd(120, 400), rnd(16, 30), 6, e.barrel ? 0xb8322a : 0x8a6a3e); break;
       case 'wallhit': for (let i = 0; i < 4; i++) this.prt('spark', e.x, e.y, e.ang + Math.PI + rnd(-0.9, 0.9), rnd(150, 420), rnd(6, 12), 3, 0xffe27a); this.prt('dust', e.x, e.y, e.ang + Math.PI, rnd(30, 90), 22, 8, 0xb0b8c4); this.stamp(e.x, e.y, 1, 1, 0x0b0f14, 0.7); break;
-      case 'assassinate': audio.sfx('gSilenced'); this.pop(e.x, e.y - 100, '암살', '#a5f3fc', 18); for (let i = 0; i < 5; i++) this.prt('blood', e.x, e.y, e.ang + rnd(-0.6, 0.6), rnd(60, 200), rnd(10, 22), 4, 0x8b1a1a); break;
+      case 'assassinate': audio.sfx('gRustle'); break;
+      case 'stabhit': audio.sfx('gStab'); for (let i = 0; i < 4; i++) this.prt('blood', e.x, e.y, e.ang + rnd(-0.5, 0.5), rnd(40, 120), rnd(10, 20), 4, 0x8b1a1a); this.shake = Math.max(this.shake, 1.5); break;
       case 'step': this.stepRings.push({ x: e.x, y: e.y, r: e.r, t: 0 }); break;
       case 'tick': this.stepRings.push({ x: e.x, y: e.y, r: e.r, t: 0 }); audio.sfx('gCasing'); break;
       case 'suspicious': this.pop(e.x, e.y - 90, '?', '#fde047', 22); break;

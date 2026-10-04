@@ -161,7 +161,7 @@ describe('조심 접근 · 암살', () => {
   it('등 뒤에서 근접 → 암살: 경계 전·가까움·등 뒤일 때만, 소리 없이 즉사 + 보너스', () => {
     const g = setup(); const e = add(g, 'rifle', g.p.x, g.p.y - 70, -Math.PI / 2); e.state = 'idle';
     expect(g.stabTarget()).toBe(e);
-    const sc0 = g.score; g.step({ ...NO_INPUT, melee: true }); run(g, 30);
+    const sc0 = g.score; g.step({ ...NO_INPUT, melee: true }); run(g, 110);
     const evs = g.drain(); expect(evs.some(x => x.t === 'assassinate')).toBe(true); expect(g.enemies.includes(e)).toBe(false); expect(g.score).toBeGreaterThan(sc0 + 150);
     const f = setup(); const h = add(f, 'rifle', f.p.x, f.p.y - 70, Math.PI / 2); h.state = 'idle'; expect(f.stabTarget()).toBeNull();   // 정면
     const k = setup(); const hv = add(k, 'heavy', k.p.x, k.p.y - 70, -Math.PI / 2); hv.state = 'idle'; expect(k.stabTarget()).toBeNull();   // 헤비 제외
@@ -206,7 +206,7 @@ describe('침입 경보 (구출 임무: 소란이 나면 경비병이 몰려온�
   });
   it('암살은 경보를 울리지 않지만, 소음기로 쏴서 안 죽으면 경보가 울린다', () => {
     const a = mk(); const e = add(a, 'rifle', a.p.x, a.p.y - 70, -Math.PI / 2); e.state = 'idle'; const o = add(a, 'rifle', a.p.x + 300, a.p.y - 500, 0); o.state = 'idle';
-    a.step({ ...NO_INPUT, melee: true }); run(a, 30); expect(a.enemies.includes(e)).toBe(false); expect(a.alarm).toBe(false);
+    a.step({ ...NO_INPUT, melee: true }); run(a, 110); expect(a.enemies.includes(e)).toBe(false); expect(a.alarm).toBe(false);
     const b = mk(); b.p.weapon = 'silenced'; b.p.ammo = 24; const t = add(b, 'rifle', b.p.x, b.p.y - 300, Math.PI / 2 + 3.14); t.state = 'idle'; t.ang = -Math.PI / 2;
     for (let i = 0; i < 12; i++) b.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); expect(b.alarm).toBe(true);
   });

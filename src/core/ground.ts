@@ -44,6 +44,7 @@ export const GROUND = {
   hp: 4, hitR: 26, moveR: 36, speed: 265 / 60, enemyMoveR: 34, enemyHitR: 30,
   hurtInvuln: 45, comboFrames: 150, grenades: 2, grenadeMax: 4,
   rollSteps: [['roll_1', f(0.07)], ['roll_2', f(0.1)], ['roll_3', f(0.1)], ['roll_4', f(0.1)], ['roll_5', f(0.13)]] as Seq, rollSpeed: [420, 420, 380, 300, 150].map(v => v / 60), rollInvulnSteps: 4, rollCd: f(0.75),
+  stabSteps: [['stab_1', f(0.4)], ['stab_2', f(0.45)], ['stab_3', f(0.2)], ['stab_4', f(0.14), 'hit'], ['stab_5', f(0.5)]] as Seq,   // 암살: 접근 0.4 · 입 막기 0.45 · 칼 뒤로 0.2 · 찌름 · 거두기 0.5 (약 1.7초)
   meleeSteps: [['melee_1', f(0.1)], ['melee_2', f(0.07), 'hit'], ['melee_3', f(0.13)]] as Seq, throwSteps: [['throw_1', f(0.1)], ['throw_2', f(0.08)], ['throw_3', f(0.16), 'release']] as Seq,
   bombFuse: f(1.9), enemyBulletSpeed: 620 / 60, enemyBulletLife: f(1.3), viewDist: 520, viewHalf: 1.25, nearSee: 160, backSee: 55, backCone: 2.09, sneakMul: 0.55, stepNoise: 150, stepFrames: 18, stabRange: 105, allyAlert: 220, doorRate: 7, kickRate: 15,
 } as const;
@@ -88,7 +89,7 @@ export type GEvent =
   | { t: 'shot'; weapon: WeaponId; x: number; y: number; ang: number }
   | { t: 'casing'; x: number; y: number; ang: number; left: boolean; weapon: WeaponId }
   | { t: 'hit'; x: number; y: number; ang: number; w: FeelKey; kill: boolean; kind: GKind; dmg: number; armor: boolean }
-  | { t: 'kill'; x: number; y: number; ang: number; w: FeelKey; kind: GKind; pts: number; combo: number }
+  | { t: 'kill'; x: number; y: number; ang: number; w: FeelKey; kind: GKind; pts: number; combo: number; quiet?: boolean }
   | { t: 'smear'; x: number; y: number } | { t: 'pool'; x: number; y: number; r: number } | { t: 'stamp'; x: number; y: number; ang: number; fallF: boolean; kind: GKind }
   | { t: 'dodge'; x: number; y: number } | { t: 'hurt'; x: number; y: number; by?: GKind } | { t: 'roll'; x: number; y: number; ang: number } | { t: 'swing'; x: number; y: number; ang: number }
   | { t: 'throw' } | { t: 'release'; x: number; y: number } | { t: 'boom'; x: number; y: number; r: number }
@@ -98,6 +99,7 @@ export type GEvent =
   | { t: 'hostageFree'; x: number; y: number } | { t: 'reinforce'; x: number; y: number } | { t: 'hostageProgress'; k: number }
   | { t: 'alarm'; x: number; y: number }
   | { t: 'suspicious'; x: number; y: number } | { t: 'tick'; x: number; y: number; r: number }
+  | { t: 'stabhit'; x: number; y: number; ang: number }
   | { t: 'assassinate'; x: number; y: number; ang: number } | { t: 'step'; x: number; y: number; r: number }
   | { t: 'flashbang'; x: number; y: number; r: number } | { t: 'smoke'; x: number; y: number; r: number } | { t: 'stealth'; x: number; y: number; pts: number; melee: boolean } | { t: 'ghost'; n: number; pts: number } | { t: 'swap'; to: BombType }
   | { t: 'pickup'; what: 'heart' | 'weapon' | 'bomb'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
@@ -471,7 +473,11 @@ export class GroundSim {
     const sk = p.seq?.kind;
     p.moving = false; p.sneaking = false;
     if (sk === 'roll') { const sp = GROUND.rollSpeed[p.seq!.i]; this.move(p, Math.cos(p.rollAng) * sp, Math.sin(p.rollAng) * sp, GROUND.moveR, true); }
-    else if (m > 0.15) {
+    else if (p.stab) {   // 암살 중에는 이동 입력을 받지 않는다: 첫 동작에서 적 등 뒤로 조용히 미끄러져 붙는다
+      const e = this.stabE;
+      if (e && p.seq && p.seq.i === 0 && this.stabGoal) { const dx = this.stabGoal.x - p.x, dy = this.stabGoal.y - p.y, d = Math.hypot(dx, dy); if (d > 3) { const sp = Math.min(3.2, d); this.move(p, (dx / d) * sp, (dy / d) * sp, GROUND.moveR, false); p.moving = true; p.walk++; } }
+      if (e) p.aim = Math.atan2(e.y - p.y, e.x - p.x);
+    } else if (m > 0.15) {
       const W = WEAPONS[p.weapon], base = sk === 'fire' ? W.move : sk === 'melee' ? 150 / 60 : sk === 'throw' ? 130 / 60 : GROUND.speed, sneak = !!inp.sneak && !sk, k = Math.min(1, m * (m > 1 ? 1 : 1.3)) * (sneak ? GROUND.sneakMul : 1);
       p.sneaking = sneak;
       if (!sneak && sk !== 'melee' && sk !== 'throw' && ((p.stepT = (p.stepT ?? 0) + 1) % GROUND.stepFrames === 0)) { this.noise(p.x, p.y, GROUND.stepNoise); this.emit({ t: 'step', x: p.x, y: p.y, r: GROUND.stepNoise }); }   // 평소 걸음은 작은 소리가 난다 (조심 걷기는 소리 없음)
@@ -522,18 +528,18 @@ export class GroundSim {
     }
     return best;
   }
-  private stabE: GEnemy | null = null; private stabbing = false;
+  private stabE: GEnemy | null = null; private stabbing = false; private stabGoal: { x: number; y: number } | null = null;
   private tryAssassinate(): boolean {
     const e = this.stabTarget(), p = this.p; if (!e) return false;
     const a = Math.atan2(e.y - p.y, e.x - p.x); p.aim = a;
-    const tx = e.x - Math.cos(a) * 46, ty = e.y - Math.sin(a) * 46;   // 등 뒤로 파고든다 (막혀 있으면 제자리에서)
-    if (!this.obstacleAt(tx, ty) && this.los(p.x, p.y, tx, ty)) { p.x = tx; p.y = ty; }
-    e.stunT = Math.max(e.stunT, 40);   // 찌르는 동안 적은 얼어붙는다 (등 뒤에 붙어도 눈치채지 못한다)
-    p.stab = true; this.stabE = e; this.startSeq('melee', GROUND.meleeSteps); this.emit({ t: 'assassinate', x: e.x, y: e.y, ang: a });
+    const bx = e.x - Math.cos(e.ang) * 62, by = e.y - Math.sin(e.ang) * 62;   // 적 바로 뒤 (사각지대 55px 밖이라 안 들킨다)
+    this.stabGoal = !this.obstacleAt(bx, by) && this.los(p.x, p.y, bx, by) ? { x: bx, y: by } : { x: p.x, y: p.y };
+    e.stunT = Math.max(e.stunT, 220); e.moving = false;   // 암살이 끝날 때까지 적은 얼어붙는다 (눈치채지 못한다)
+    p.stab = true; this.stabE = e; this.startSeq('melee', GROUND.stabSteps); this.emit({ t: 'assassinate', x: e.x, y: e.y, ang: a });
     return true;
   }
   private meleeHit(): void {
-    if (this.p.stab) { const e = this.stabE; if (e && !e.dying && this.enemies.includes(e)) { this.stabbing = true; this.killEnemy(e, 'melee', this.p.aim); this.stabbing = false; } return; }   // 암살: 소리 없이 한 방, 주변은 건드리지 않는다
+    if (this.p.stab) { const e = this.stabE; if (e && !e.dying && this.enemies.includes(e)) { this.emit({ t: 'stabhit', x: e.x, y: e.y, ang: this.p.aim }); this.emit({ t: 'slowmo', ms: 600, scale: 0.3 }); this.stabbing = true; this.killEnemy(e, 'melee', this.p.aim); this.stabbing = false; } return; }   // 암살: 소리 없이 한 방, 주변은 건드리지 않는다
     const p = this.p, sector = (x: number, y: number, rng: number, half: number): boolean => Math.hypot(x - p.x, y - p.y) < rng && Math.abs(norm(Math.atan2(y - p.y, x - p.x) - p.aim)) < half;
     for (const e of this.enemies.slice()) if (sector(e.x, e.y, 165, 1.05) && this.los(p.x, p.y, e.x, e.y)) this.hitEnemy(e, 'melee', p.aim, 1, p.x, p.y);
     for (const c of this.crates) if (!c.broken && sector(c.x, c.y, 135, 1.0)) this.hurtCrate(c, 2);
@@ -658,9 +664,9 @@ export class GroundSim {
     e.deathAng = ang + (this.rng() - 0.5) * 0.5; const fd = Math.cos(e.ang - ang);
     e.fallF = fd > 0.35 ? true : fd < -0.35 ? false : this.rng() < 0.5;   // 등 뒤에서 맞으면 앞으로 엎어짐
     const boss = e.kind === 'boss';
-    if (!boss) { e.vx = Math.cos(ang) * D.dKnock * (e.kind === 'heavy' ? 0.4 : 1); e.vy = Math.sin(ang) * D.dKnock * (e.kind === 'heavy' ? 0.4 : 1); } else { e.vx = 0; e.vy = 0; }
-    this.emit({ t: 'kill', x: e.x, y: e.y, ang, w, kind: e.kind, pts, combo: this.combo });
-    this.emit({ t: 'hitstop', frames: boss ? 12 : D.dStop }); this.emit({ t: 'shake', v: boss ? 16 : D.dShake }); if (D.dSlow || boss) this.emit({ t: 'slowmo', ms: boss ? 900 : D.dSlow, scale: boss ? 0.25 : 0.4 });
+    if (!boss && !this.stabbing) { e.vx = Math.cos(ang) * D.dKnock * (e.kind === 'heavy' ? 0.4 : 1); e.vy = Math.sin(ang) * D.dKnock * (e.kind === 'heavy' ? 0.4 : 1); } else { e.vx = 0; e.vy = 0; }   // 암살당한 적은 튕기지 않고 그 자리에서 무너진다
+    this.emit({ t: 'kill', x: e.x, y: e.y, ang, w, kind: e.kind, pts, combo: this.combo, quiet: this.stabbing });
+    if (!this.stabbing) this.emit({ t: 'hitstop', frames: boss ? 12 : D.dStop }); this.emit({ t: 'shake', v: boss ? 16 : D.dShake }); if (D.dSlow || boss) this.emit({ t: 'slowmo', ms: boss ? 900 : D.dSlow, scale: boss ? 0.25 : 0.4 });
     const dr = DROPS[e.kind];
     if (dr && this.rng() < dr.p) { const ammo = Math.ceil(WEAPONS[dr.w].ammo * (0.35 + this.rng() * 0.3)); this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: dr.w, ammo, x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: dr.w }); }
     else if (BOMB_DROP[e.kind] && this.rng() < BOMB_DROP[e.kind]!) { this.pickups.push({ id: this.nextId++, kind: 'bomb', bt: ((r) => r < 0.5 ? 'frag' : r < 0.8 ? 'flash' : 'smoke')(this.rng()) as BombType, x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: 'pistol' }); }
@@ -685,6 +691,7 @@ export class GroundSim {
 
   // ---------------------------------------------------------------- 플레이어 피해
   hurt(dmg: number, x: number, y: number, by?: GKind): void {
+    if (this.p.stab) return;   // 암살 동작 중에는 맞지 않는다
     const p = this.p; if (p.invuln > 0 || p.rollI > 0 || (this.state as string) === 'DEAD') return;
     p.hp -= dmg; p.invuln = GROUND.hurtInvuln; p.hitFlash = 18; this.combo = 0; this.comboT = 0;
     this.emit({ t: 'hurt', x, y, by }); this.emit({ t: 'shake', v: 8 }); this.emit({ t: 'hitstop', frames: 4 });
