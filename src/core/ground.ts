@@ -667,6 +667,7 @@ export class GroundSim {
     const mult = 1 + 0.2 * Math.min(this.combo - 1, 10), pts = Math.round(ENEMY_DEF[e.kind].pts * mult);
     this.score += pts;
     if (e.state === 'idle' && e.kind !== 'boss' && e.kind !== 'drone') { const sp = Math.round(ENEMY_DEF[e.kind].pts * (this.stabbing ? 1.8 : w === 'melee' ? 1.2 : 0.6)); this.score += sp; this.stealthKills++; this.emit({ t: 'stealth', x: e.x, y: e.y, pts: sp, melee: w === 'melee' }); }   // 들키기 전에 처치(근접은 암살)
+    for (const o of this.enemies) if (o.state === 'idle' && !o.dying && o.kind !== 'boss' && o.kind !== 'drone' && this.seesSpot(o, e.x, e.y)) this.alertEnemy(o);   // 동료가 죽는 걸 본 적은 경계한다 (시야 밖에서 죽으면 모른다)
     const D = FEEL[w];
     e.deathAng = ang + (this.rng() - 0.5) * 0.5; const fd = Math.cos(e.ang - ang);
     e.fallF = fd > 0.35 ? true : fd < -0.35 ? false : this.rng() < 0.5;   // 등 뒤에서 맞으면 앞으로 엎어짐
@@ -712,10 +713,12 @@ export class GroundSim {
     this.bullets.push({ x: mx, y: my, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, dmg: 1, friendly: false, w: 'rifle', life: GROUND.enemyBulletLife, dist: 0, pellet: false, first: false, pierce: 0, hit: [], dodged: false, src: e.kind, kind });
     e.shotT = f(0.1); e.fire = 6;
   }
-  private sees(e: GEnemy): boolean {
-    const p = this.p, dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
+  private sees(e: GEnemy): boolean { return this.seesSpot(e, this.p.x, this.p.y); }
+  /** 적 e 의 시야(정면 부채꼴 + 가까운 곳, 등 뒤는 55px)에 지점 (x,y)가 들어오고 가려지지 않았는가 — 플레이어 발견·동료 시체 발견에 쓴다 */
+  private seesSpot(e: GEnemy, x: number, y: number): boolean {
+    const dx = x - e.x, dy = y - e.y, d = Math.hypot(dx, dy);
     const view = e.kind === 'sniper' ? 900 : e.kind === 'turret' ? 700 : GROUND.viewDist;
-    if (!this.los(e.x, e.y, p.x, p.y) || this.smokeBlocks(e.x, e.y, p.x, p.y)) return false;
+    if (!this.los(e.x, e.y, x, y) || this.smokeBlocks(e.x, e.y, x, y)) return false;
     const ang = Math.atan2(dy, dx), behind = Math.abs(norm(ang - e.ang)) > GROUND.backCone;   // 적 등 뒤 약 120°
     if (d < GROUND.nearSee) return behind ? d < GROUND.backSee : true;
     return d < view && Math.abs(norm(Math.atan2(dy, dx) - e.ang)) < GROUND.viewHalf;
