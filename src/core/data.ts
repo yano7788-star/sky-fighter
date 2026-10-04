@@ -131,6 +131,9 @@ export const HORDES: Record<number, { at: number; kind: HordeKind }[]> = {
   4: [{ at: 0.3, kind: 'flank' }, { at: 0.8, kind: 'pincer' }],
   5: [{ at: 0.25, kind: 'diag' }, { at: 0.55, kind: 'flank' }, { at: 0.85, kind: 'wall' }],
 };
+/** 적 편대 신호: 편대가 오기 전에 가장자리에 경고가 뜨고, 전멸시키면 보너스 (v 자 / 좌우 교차 / 급강하) */
+export type FormKind = 'vee' | 'cross' | 'dive';
+export const FORMATION = { warn: 80, first: 420, gap: [560, 340] as [number, number], bonus: 300, tail: 420 };
 export const HORDE = { warn: 100, speed: 2.5, contactDmg: 18 };
 /** 옆에서 날아오는 적: 2스테이지부터, 비행기류가 이 확률로 측면에서 등장 */
 export const SIDE_ENTRY_CHANCE = 0.22;
