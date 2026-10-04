@@ -86,7 +86,10 @@ export class Sim {
   hordeWarn = 0;
   // 지상전(강하): 3스테이지 보스 격파 후 씬이 GroundSim 을 돌린다. 씬이 켜기 전(groundEnabled=false)에는 건너뛴다 (테스트·시뮬레이션)
   groundEnabled = false; groundRequest = false; groundActive = false; groundReturn = false; private groundOffered = false;
-  groundResult: { win: boolean; score: number; rooms: number } | null = null;                       // 인해전술 예고 남은 프레임 (HUD 경고 표시)
+  groundResult: { win: boolean; score: number; rooms: number } | null = null;
+  overload = false;      // 3스테이지 보스가 쓰러진 뒤 자폭 카운트다운 중 (지상전 연결 연출)
+  damaged = false;       // 자폭에 휘말려 기체가 불타는 중
+  ejectLeft = 0;         // 탈출 버튼이 떠 있는 남은 틱 (0 이면 자동 탈출)                       // 인해전술 예고 남은 프레임 (HUD 경고 표시)
   private hordeKind: HordeKind = 'wall';
   private hordeDone: boolean[] = [];
   run = { kills: 0, maxCombo: 0, hits: 0, bombs: 0, ults: 0, hypers: 0 };
@@ -219,18 +222,18 @@ export class Sim {
   /** 지상전에 넘길 옵션: 현재 빌드의 화력·연사·체력을 반영 */
   groundOpts(seed: number): GroundOpts {
     const st = this.stats, pilot = this.meta.pilot === 'sister1' ? 1 : this.meta.pilot === 'sister2' ? 2 : 0;
-    return { seed, pilot, dmgMult: Math.min(2, st.dmgMult), rateMult: Math.min(1.8, st.rateMult), maxHp: GROUND.hp + (st.maxEnergyBonus > 0 ? 1 : 0), grenades: 2 + (this.hasRelic('r_bombpack') ? 1 : 0), assist: true };
+    return { seed, pilot, dmgMult: Math.min(2, st.dmgMult), rateMult: Math.min(1.8, st.rateMult), maxHp: GROUND.hp + (st.maxEnergyBonus > 0 ? 1 : 0), grenades: 2 + (this.hasRelic('r_bombpack') ? 1 : 0), assist: false };
   }
   startGround(): void { this.groundRequest = false; this.groundActive = true; }
   /** 지상전 중 사망 시 목숨 하나로 이어하기. 없으면 false → 본편 게임오버 */
   useGroundLife(): boolean { if (this.lives > 0) { this.lives--; return true; } return false; }
   groundFail(): void {
-    this.groundActive = false; this.state = 'GAMEOVER';
+    this.groundActive = false; this.overload = false; this.damaged = false; this.state = 'GAMEOVER';
     this.emit({ t: 'gameover' }); this.emit({ t: 'vibrate', pattern: [120, 60, 220] });
   }
   /** 지상전 클리어: 점수·체력 회복·유물 보상을 반영하고 다음 스테이지로 이어간다 */
   finishGround(r: { score: number; rooms: number }): void {
-    this.groundActive = false; this.groundResult = { win: true, score: r.score, rooms: r.rooms };
+    this.groundActive = false; this.groundResult = { win: true, score: r.score, rooms: r.rooms }; this.overload = false; this.damaged = false;
     this.score += r.score;
     const p = this.player; p.energy = Math.min(p.maxEnergy, p.energy + p.maxEnergy * 0.4); p.invincible = Math.max(p.invincible, 200);
     this.enemyBullets.length = 0; this.vacuum = 0;
@@ -276,7 +279,7 @@ export class Sim {
     this.updateBullets();
     this.updateMissiles();
     this.updateBombField();
-    if (!this.timeStopped || this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'CLEAR') this.updateStagePhase();   // 시간 정지 중에도 보스 폭발·클리어 연출은 계속 진행
+    if (!this.timeStopped || this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'EJECT' || this.stagePhase === 'CLEAR') this.updateStagePhase();   // 시간 정지 중에도 보스 폭발·클리어 연출은 계속 진행
     if (this.boss) this.updateBoss();
     if (this.midBoss) this.updateMidBoss();
     this.updateEnemyBullets();
@@ -303,7 +306,7 @@ export class Sim {
   // 스킬 버튼: 동료 / 궁극기
   // ---------------------------------------------------------------------
   private canUseSkill(): boolean {
-    return this.state === 'PLAYING' && this.stagePhase !== 'BOSS_DYING' && this.stagePhase !== 'CLEAR';
+    return this.state === 'PLAYING' && this.stagePhase !== 'BOSS_DYING' && this.stagePhase !== 'EJECT' && this.stagePhase !== 'CLEAR';
   }
   activateSkill(key: SkillKey): void {
     if (!this.canUseSkill()) return;
@@ -561,7 +564,14 @@ export class Sim {
         if (--this.phaseTimer <= 0) { this.spawnBoss(this.stageTier); this.stagePhase = 'BOSS'; }
         break;
       case 'BOSS_DYING':
+        if (this.overload && this.phaseTimer === 120 && this.boss) { this.emit({ t: 'sfx', name: 'laserCharge' }); }
         if (--this.phaseTimer <= 0) {
+          if (this.overload) {   // 자폭: 아군 기체가 폭발에 휘말려 불타고, 탈출 버튼이 뜬다
+            const b = this.boss; if (b) { this.boom(b.x, b.y, '#ffffff', 60); this.boom(b.x, b.y, '#ff4d4d', 50); }
+            this.emit({ t: 'selfdestruct', x: b?.x ?? this.player.x, y: b?.y ?? 120 }); this.emit({ t: 'sfx', name: 'boom' }); this.emit({ t: 'flash', kind: 'bossDeath', v: 1 }); this.emit({ t: 'shake', v: 22 }); this.emit({ t: 'vibrate', pattern: [200, 80, 300] });
+            this.boss = null; this.enemyBullets.length = 0; this.damaged = true; this.stagePhase = 'EJECT'; this.phaseTimer = 150; this.ejectLeft = 150;
+            break;
+          }
           if (this.boss) {
             this.boom(this.boss.x, this.boss.y, '#ffffff', 40);
             this.boom(this.boss.x, this.boss.y, this.boss.subColor, 50);
@@ -577,6 +587,10 @@ export class Sim {
           }
         }
         break;
+      case 'EJECT':   // 비상 탈출 대기: 버튼을 누르면 즉시, 아니면 시간이 다 되면 자동으로
+        this.ejectLeft = Math.max(0, this.phaseTimer);
+        if (--this.phaseTimer <= 0) this.eject();
+        break;
       case 'CLEAR':
         if (--this.phaseTimer <= 0) {
           if (this.bossTier >= MAX_TIER && !this.endless) { this.state = 'GAMECLEAR'; this.emit({ t: 'gameclear' }); }
@@ -589,6 +603,13 @@ export class Sim {
         break;
       default: break;
     }
+  }
+
+  /** 비상 탈출 (씬이 버튼/키에서 호출, 시간이 다 되면 자동 호출): 곧바로 강하 요청으로 이어진다 */
+  eject(): void {
+    if (this.stagePhase !== 'EJECT') return;
+    this.emit({ t: 'eject' }); this.emit({ t: 'sfx', name: 'item' });
+    this.stagePhase = 'CLEAR'; this.phaseTimer = 1; this.ejectLeft = 0;
   }
 
   /** GAMECLEAR 이후 '무한 모드 계속'을 고른 경우: 다음 스테이지(6~)로 이어서 진행 */
@@ -702,6 +723,7 @@ export class Sim {
     if (!b.dying && b.hp <= 0) {
       b.dying = true; b.deathTimer = 0; b.hp = 0; b.phase2Alert = 0; b.phase3Alert = 0; b.sp = undefined; b.stun = 0;
       this.stagePhase = 'BOSS_DYING'; this.phaseTimer = PHASE_FRAMES.BOSS_DYING;
+      if (this.groundEnabled && !this.groundOffered && this.stageTier === 3) { this.overload = true; this.phaseTimer = 200; this.enemyBullets.length = 0; this.emit({ t: 'overload' }); this.emit({ t: 'sfx', name: 'enrage' }); }   // 코어 과부하: 곧 자폭
       const { rank, bonus } = rankFor(this.stageHits);
       this.stageRank = rank;
       this.clearBonus = 200 * this.bossTier + bonus; this.score += this.clearBonus;   // 무한 모드에서는 루프가 돌수록 보너스도 커진다
@@ -1278,7 +1300,7 @@ export class Sim {
   fireBomb(): void {
     if (this.bombs <= 0 || this.state !== 'PLAYING') return;
     if (this.pending || this.ult.phase === 'CUTIN' || this.ult.phase === 'FALL') return;   // 카드 선택·궁극기 연출 중 낭비 방지
-    if (this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'CLEAR') return;   // 연출 중 폭탄 낭비 방지
+    if (this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'EJECT' || this.stagePhase === 'CLEAR') return;   // 연출 중 폭탄 낭비 방지
     if (this.frame - this.lastBombFrame < 20) return;
     this.lastBombFrame = this.frame;
     this.bombs--; this.run.bombs++;
@@ -1324,7 +1346,7 @@ export class Sim {
   applyDamage(dmg: number): void {
     const p = this.player;
     if (p.invincible > 0 || this.state !== 'PLAYING') return;
-    if (this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'CLEAR') return;   // 전환 연출 중에는 피해 없음
+    if (this.stagePhase === 'BOSS_DYING' || this.stagePhase === 'EJECT' || this.stagePhase === 'CLEAR') return;   // 전환 연출 중에는 피해 없음
 
     if (p.shield > 0) {   // 방벽이 피격 1회를 흡수
       p.shield = 0; p.invincible = 30;
