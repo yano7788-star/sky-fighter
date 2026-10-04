@@ -714,6 +714,7 @@ export class GroundScene extends Phaser.Scene {
       case 'style': audio.sfx('gStyle'); this.pop(e.x, e.y - 90, 'STYLE!', '#67e8f9', 18); break;
       case 'reset': this.decals[e.section]?.clear(); break;
       case 'win': audio.sfx('item'); this.runOutro(); break;
+      case 'alarmOff': this.say('경보 해제', 28); audio.sfx('heal'); break;
       case 'alarm': audio.sfx('enrage'); this.say('경보! 침입자 발견', 30); this.pop(e.x, e.y - 100, '경보!', '#ff4040', 24); break;
       case 'hostageFree': audio.sfx('enrage'); audio.sfx('item'); this.say('구출! 경보 발령!', 30); this.pop(e.x, e.y - 90, '!!', '#ff4040', 26); this.alarmRect.setAlpha(0.1); break;
       case 'reinforce': this.pop(e.x, e.y - 90, '증원!', '#fca5a5', 16); audio.sfx('gEnemyShot'); break;
