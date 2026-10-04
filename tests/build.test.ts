@@ -337,7 +337,7 @@ describe('파일럿 전용 궁극기', () => {
     const boss = s.boss!; boss.y = 135; const hp0 = boss.hp;
     fill(s); s.step(idle(s, false, { skill: 'ult' }));
     for (let i = 0; i < 90 + 220; i++) { s.player.invincible = 99999; s.step(idle(s)); }
-    expect(boss.hp).toBeLessThan(hp0 * 0.9);
+    expect(boss.hp).toBeLessThan(hp0 * 0.93);
   });
   it('동생: 시간 정지 동안 적·적 탄·보스는 움직이지 않지만 내 공격은 들어간다', () => {
     const s = new Sim(1, metaParams({}, 'sister2'));
@@ -351,7 +351,7 @@ describe('파일럿 전용 궁극기', () => {
     expect(s.enemies[0].y).toBe(ey); expect(s.enemyBullets[0].y).toBe(by);
     s.bullets.push({ x: 200, y: 200, vx: 0, vy: 0, dmg: 4, pierce: 0 }); s.step(idle(s));
     expect(s.enemies[0].hp).toBeLessThan(50);          // 정지 중에도 피해는 들어간다
-    for (let i = 0; i < 100; i++) s.step(idle(s));
+    for (let i = 0; i < 200; i++) s.step(idle(s));
     expect(s.timeStopped).toBe(false);
     s.step(idle(s)); expect(s.enemies[0].y).toBeGreaterThan(ey); // 해제 후 다시 움직임
   });

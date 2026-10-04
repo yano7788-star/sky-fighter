@@ -371,7 +371,7 @@ export class Sim {
   private applyUltDamage(): void {
     const p = this.player;
     this.enemyBullets.length = 0;
-    for (const e of this.enemies) if (e.y >= 0) e.hp -= Math.max(1, Math.ceil(ULT.enemyPct * e.maxHp));
+    for (const e of this.enemies) if (e.y >= ON_SCREEN_Y) e.hp -= Math.max(1, Math.ceil(ULT.enemyPct * e.maxHp));
     if (this.midBoss && !this.midBoss.dying) {
       this.midBoss.hp -= Math.ceil(ULT.enemyPct * this.midBoss.maxHp);
       this.midBoss.state = 'MOVE'; this.midBoss.stateTimer = 0;   // 레이저 중단
@@ -1315,7 +1315,7 @@ export class Sim {
     this.score += n;
     for (let i = 0; i < n; i += 3) this.boom(this.enemyBullets[i].x, this.enemyBullets[i].y, '#fde68a', 1);
     this.enemyBullets.length = 0;
-    for (const e of this.enemies) if (e.y >= 0) e.hp = 0;   // 화면 안의 적은 전부 파괴 (처치 점수/드랍/경험치 정상 처리)
+    for (const e of this.enemies) if (e.y >= ON_SCREEN_Y) e.hp = 0;   // 화면 안의 적은 전부 파괴 (처치 점수/드랍/경험치 정상 처리)
     if (this.boss && !this.boss.dying) {
       this.boss.hp -= Math.max(BOMB.minBurst, Math.ceil(this.boss.maxHp * BOMB.bossBurstPct));
       this.boom(this.boss.x, this.boss.y, '#ef4444', 30);
@@ -1337,7 +1337,7 @@ export class Sim {
       const b = this.enemyBullets[i];
       if (Math.hypot(b.x - this.bombX, b.y - this.bombY) < radius) { this.enemyBullets.splice(i, 1); this.score += 1; }
     }
-    for (const e of this.enemies) if (e.y >= 0 && Math.hypot(e.x - this.bombX, e.y - this.bombY) < radius) e.hp -= 1;
+    for (const e of this.enemies) if (e.y >= ON_SCREEN_Y && Math.hypot(e.x - this.bombX, e.y - this.bombY) < radius) e.hp -= 1;
     const tick = BOMB.fieldPctTotal / BOMB.fieldFrames;
     if (this.boss && !this.boss.dying && Math.hypot(this.boss.x - this.bombX, this.boss.y - this.bombY) < radius + this.boss.width / 2) this.boss.hp -= this.boss.maxHp * tick;
     if (this.midBoss && !this.midBoss.dying && Math.hypot(this.midBoss.x - this.bombX, this.midBoss.y - this.bombY) < radius + this.midBoss.width / 2) this.midBoss.hp -= this.midBoss.maxHp * tick;
