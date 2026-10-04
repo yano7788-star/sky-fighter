@@ -17,11 +17,11 @@ const f = (sec: number): number => Math.round(sec * 60);   // 초 → 틱
 type Seq = [string, number, string?][];
 export interface WeaponDef { name: string; dmg: number; cd: number; speed: number; spread: number; pellets: number; life: number; noise: number; move: number; muzzle: [number, number]; ammo: number; pierce: number; seq: Seq }
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
-  pistol:  { name: '권총',       dmg: 34,  cd: f(0.26),  speed: 1050 / 60, spread: 0.02, pellets: 1, life: 90, noise: 600, move: 230 / 60, muzzle: [13, 2], ammo: Infinity, pierce: 0, seq: [['shoot', f(0.1)]] },
-  rifle:   { name: '소총',       dmg: 20,  cd: f(0.11),  speed: 1200 / 60, spread: 0.03, pellets: 1, life: 90, noise: 700, move: 230 / 60, muzzle: [14, 0], ammo: 60,       pierce: 0, seq: [['shoot', f(0.07)]] },
-  smg:     { name: 'SMG',        dmg: 13,  cd: f(0.075), speed: 1100 / 60, spread: 0.07, pellets: 1, life: 90, noise: 700, move: 170 / 60, muzzle: [21, 0], ammo: 90,       pierce: 0, seq: [['shoot_a', f(0.06)], ['aim', f(0.3)]] },
-  shotgun: { name: '샷건',       dmg: 22,  cd: 0,        speed: 870 / 60,  spread: 0.2,  pellets: 6, life: 25, noise: 800, move: 110 / 60, muzzle: [20, 1], ammo: 8,        pierce: 0, seq: [['shoot', f(0.09)], ['pump_back', f(0.14), 'casing'], ['pump_fwd', f(0.14)], ['aim', f(0.32)]] },
-  rail:    { name: '레일 라이플', dmg: 140, cd: f(0.97),  speed: 1800 / 60, spread: 0,    pellets: 1, life: 60, noise: 800, move: 200 / 60, muzzle: [14, 0], ammo: 8,        pierce: 6, seq: [['shoot', f(0.13)]] },
+  pistol:  { name: '권총',       dmg: 34,  cd: f(0.26),  speed: 1050 / 60, spread: 0.02, pellets: 1, life: 90, noise: 600, move: 255 / 60, muzzle: [13, 2], ammo: Infinity, pierce: 0, seq: [['shoot', f(0.1)]] },
+  rifle:   { name: '소총',       dmg: 20,  cd: f(0.11),  speed: 1200 / 60, spread: 0.03, pellets: 1, life: 90, noise: 700, move: 255 / 60, muzzle: [14, 0], ammo: 60,       pierce: 0, seq: [['shoot', f(0.07)]] },
+  smg:     { name: 'SMG',        dmg: 13,  cd: f(0.075), speed: 1100 / 60, spread: 0.07, pellets: 1, life: 90, noise: 700, move: 190 / 60, muzzle: [21, 0], ammo: 90,       pierce: 0, seq: [['shoot_a', f(0.06)], ['aim', f(0.3)]] },
+  shotgun: { name: '샷건',       dmg: 22,  cd: 0,        speed: 870 / 60,  spread: 0.2,  pellets: 6, life: 25, noise: 800, move: 125 / 60, muzzle: [20, 1], ammo: 8,        pierce: 0, seq: [['shoot', f(0.09)], ['pump_back', f(0.14), 'casing'], ['pump_fwd', f(0.14)], ['aim', f(0.32)]] },
+  rail:    { name: '레일 라이플', dmg: 140, cd: f(0.97),  speed: 1800 / 60, spread: 0,    pellets: 1, life: 60, noise: 800, move: 225 / 60, muzzle: [14, 0], ammo: 8,        pierce: 6, seq: [['shoot', f(0.13)]] },
 };
 /** 피격 효과표: dmg·knock(px/s)·stun·hitPose·flash(틱)·blood[앞,뒤]·spread·mist·stamp·shake·stop(틱) / 사망 */
 export interface Feel { dmg: number; knock: number; stun: number; pose: number; flash: number; blood: [number, number]; spread: number; mist: number; stamp: number; shake: number; stop: number;
@@ -39,8 +39,8 @@ export const FEEL: Record<FeelKey, Feel> = {
 
 // ---------------------------------------------------------------- 상수
 export const GROUND = {
-  hp: 4, hitR: 26, moveR: 36, speed: 230 / 60, enemyMoveR: 34, enemyHitR: 30,
-  hurtInvuln: 45, comboFrames: 150, grenades: 2,
+  hp: 4, hitR: 26, moveR: 36, speed: 265 / 60, enemyMoveR: 34, enemyHitR: 30,
+  hurtInvuln: 45, comboFrames: 150, grenades: 2, grenadeMax: 4,
   rollSteps: [['roll_1', f(0.07)], ['roll_2', f(0.1)], ['roll_3', f(0.1)], ['roll_4', f(0.1)], ['roll_5', f(0.13)]] as Seq, rollSpeed: [420, 420, 380, 300, 150].map(v => v / 60), rollInvulnSteps: 4, rollCd: f(0.75),
   meleeSteps: [['melee_1', f(0.1)], ['melee_2', f(0.07), 'hit'], ['melee_3', f(0.13)]] as Seq, throwSteps: [['throw_1', f(0.1)], ['throw_2', f(0.08)], ['throw_3', f(0.16), 'release']] as Seq,
   bombFuse: f(1.9), enemyBulletSpeed: 620 / 60, enemyBulletLife: f(1.3), viewDist: 520, viewHalf: 1.25, nearSee: 160, allyAlert: 220, doorRate: 7, kickRate: 15,
@@ -70,7 +70,7 @@ export interface GBullet { x: number; y: number; vx: number; vy: number; dmg: nu
 export interface GDoor { id: number; c: number; r: number; w: number; h: number; o: 'v' | 'h'; kind: 'door' | 'gate' | 'exit'; section: number; hp: number; phi: number; target: number; rate: number; broken: boolean; locked: boolean; x0: number; y0: number; x1: number; y1: number }
 export interface GWindow { id: number; c: number; r: number; w: number; h: number; o: 'v' | 'h'; section: number; hp: number; broken: boolean; x0: number; y0: number; x1: number; y1: number }
 export interface GCrate { id: number; kind: 'crate' | 'barrel'; x: number; y: number; hp: number; broken: boolean; section: number; hitT: number; hs: number }
-export interface GPickup { id: number; kind: 'heart' | 'weapon'; weapon?: WeaponId; ammo?: number; x: number; y: number; t: number; section: number; dropped?: boolean }
+export interface GPickup { id: number; kind: 'heart' | 'weapon' | 'bomb'; weapon?: WeaponId; ammo?: number; x: number; y: number; t: number; section: number; dropped?: boolean }
 export interface GBomb { x: number; y: number; sx: number; sy: number; tx: number; ty: number; t: number; flight: number; fuse: number; bounce: number }
 type Obj = { t: 'door'; o: GDoor } | { t: 'window'; o: GWindow } | { t: 'crate'; o: GCrate };
 
@@ -85,7 +85,7 @@ export type GEvent =
   | { t: 'doorKick'; x: number; y: number } | { t: 'doorOpen'; x: number; y: number } | { t: 'doorHit'; x: number; y: number } | { t: 'doorBreak'; x: number; y: number; o: 'v' | 'h' }
   | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
   | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
-  | { t: 'pickup'; what: 'heart' | 'weapon'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
+  | { t: 'pickup'; what: 'heart' | 'weapon' | 'bomb'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
   | { t: 'gate'; section: number } | { t: 'section'; n: number; name: string } | { t: 'cleared'; n: number } | { t: 'exitopen' } | { t: 'reset'; section: number }
   | { t: 'shake'; v: number } | { t: 'hitstop'; frames: number } | { t: 'slowmo'; ms: number; scale: number } | { t: 'bossPhase'; phase: number } | { t: 'style'; x: number; y: number }
   | { t: 'win' } | { t: 'dead' };
@@ -97,6 +97,8 @@ const ENEMY_DEF: Record<GKind, { hp: number; pts: number; speed: number }> = {
 /** 총알 종류별 피해 배율: 중장갑(헤비·포탑)은 소구경탄에 강하다 */
 const ARMOR: Partial<Record<GKind, Partial<Record<FeelKey, number>>>> = { heavy: { pistol: 0.55, rifle: 0.55, smg: 0.55, shotgun: 0.8 }, turret: { pistol: 0.6, rifle: 0.6, smg: 0.6, shotgun: 0.8 }, boss: {} };
 const DROPS: Partial<Record<GKind, { w: WeaponId; p: number }>> = { rifle: { w: 'smg', p: 0.35 }, heavy: { w: 'shotgun', p: 0.7 }, sniper: { w: 'rail', p: 0.4 }, charger: { w: 'rifle', p: 0.3 } };
+/** 폭탄 드랍 확률(적 종류별, 아주 낮게). 소지 한도는 GROUND.grenadeMax */
+const BOMB_DROP: Partial<Record<GKind, number>> = { rifle: 0.07, charger: 0.1, sniper: 0.12, heavy: 0.25, turret: 0.12 };
 const BODY_R: Record<GKind, number> = { rifle: 34, charger: 36, sniper: 34, heavy: 46, dog: 28, turret: 60, drone: 22, boss: 96 };
 const HIT_R: Record<GKind, number> = { rifle: 30, charger: 32, sniper: 30, heavy: 42, dog: 26, turret: 58, drone: 22, boss: 92 };
 
@@ -351,7 +353,7 @@ export class GroundSim {
     // 조준: 조준 입력 > (발사 중) 가장 가까운 적 > 이동 방향
     const hasAim = Math.hypot(inp.ax, inp.ay) > 0.2, m = Math.hypot(inp.mx, inp.my);
     if (p.seq?.kind !== 'roll') {
-      if (hasAim) { p.aim = Math.atan2(inp.ay, inp.ax); if (o.assist && !inp.aimDist) { const t = this.nearestInCone(p.aim, 0.2); if (t) p.aim = Math.atan2(t.y - p.y, t.x - p.x); } }
+      if (hasAim) { p.aim = Math.atan2(inp.ay, inp.ax); if (o.assist && !inp.aimDist) { const t = this.nearestInCone(p.aim, 0.26); if (t) p.aim += norm(Math.atan2(t.y - p.y, t.x - p.x) - p.aim) * 0.5; } }
       else if (inp.fire) { const t = this.nearestEnemy(); if (t) p.aim = Math.atan2(t.y - p.y, t.x - p.x); else if (m > 0.15) p.aim = Math.atan2(inp.my, inp.mx); }
       else if (m > 0.15) p.aim = Math.atan2(inp.my, inp.mx);
     }
@@ -512,6 +514,7 @@ export class GroundSim {
     this.emit({ t: 'hitstop', frames: boss ? 12 : D.dStop }); this.emit({ t: 'shake', v: boss ? 16 : D.dShake }); if (D.dSlow || boss) this.emit({ t: 'slowmo', ms: boss ? 900 : D.dSlow, scale: boss ? 0.25 : 0.4 });
     const dr = DROPS[e.kind];
     if (dr && this.rng() < dr.p) { const ammo = Math.ceil(WEAPONS[dr.w].ammo * (0.35 + this.rng() * 0.3)); this.pickups.push({ id: this.nextId++, kind: 'weapon', weapon: dr.w, ammo, x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: dr.w }); }
+    else if (BOMB_DROP[e.kind] && this.rng() < BOMB_DROP[e.kind]!) { this.pickups.push({ id: this.nextId++, kind: 'bomb', x: e.x, y: e.y, t: 0, section: e.section, dropped: true }); this.emit({ t: 'drop', x: e.x, y: e.y, weapon: 'pistol' }); }
     if (boss) { this.enemies = this.enemies.filter(b => b.kind !== 'drone'); for (const b of this.bullets) if (!b.friendly) b.life = 1; }
     this.dying.push(e);
   }
@@ -668,6 +671,7 @@ export class GroundSim {
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const k = this.pickups[i]; k.t++;
       if (Math.hypot(p.x - k.x, p.y - k.y) > 54) continue;
+      if (k.kind === 'bomb') { if (p.grenades >= GROUND.grenadeMax) continue; p.grenades++; this.emit({ t: 'pickup', what: 'bomb', x: k.x, y: k.y }); this.pickups.splice(i, 1); continue; }
       if (k.kind === 'heart') { if (p.hp >= p.maxHp) continue; p.hp = Math.min(p.maxHp, p.hp + 2); this.emit({ t: 'pickup', what: 'heart', x: k.x, y: k.y }); this.pickups.splice(i, 1); continue; }
       if (p.pickCd > 0) continue;
       const free = p.weapon === 'pistol' || p.ammo <= 0;

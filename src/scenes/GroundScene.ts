@@ -13,6 +13,9 @@ const CTL_KEY = 'sf-ground-ctl';
 const LAY_KEY = 'sf-ground-lay';
 const loadLay = (): 'land' | 'port' | null => { try { const v = localStorage.getItem(LAY_KEY); return v === 'land' || v === 'port' ? v : null; } catch { return null; } };
 const saveLay = (v: 'land' | 'port'): void => { try { localStorage.setItem(LAY_KEY, v); } catch { /* 무시 */ } };
+const ASSIST_KEY = 'sf-ground-assist';
+const loadAssist = (): boolean => { try { return localStorage.getItem(ASSIST_KEY) !== '0'; } catch { return true; } };   // 기본 켜짐(약한 보정)
+const saveAssist = (v: boolean): void => { try { localStorage.setItem(ASSIST_KEY, v ? '1' : '0'); } catch { /* 무시 */ } };
 const saveCtl = (m: ControlMode): void => { try { localStorage.setItem(CTL_KEY, m); } catch { /* 무시 */ } };
 
 const CUTS = ['cut_shotdown', 'cut_landing', 'cut_takeoff'];
@@ -136,7 +139,7 @@ export class GroundScene extends Phaser.Scene {
 
   create(): void {
     const seed = (Math.floor(this.sim.score) * 31 + this.sim.frame) >>> 0;
-    this.g = new GroundSim({ ...this.sim.groundOpts(seed), ...(this.test ? { pilot: this.test.pilot } : {}) });
+    this.g = new GroundSim({ ...this.sim.groundOpts(seed), assist: loadAssist(), ...(this.test ? { pilot: this.test.pilot } : {}) });
     if (this.test && (this.test.section > 0 || this.test.weapon !== 'pistol')) this.g.debugStart(this.test.section, this.test.weapon);
     this.cameras.main.setBackgroundColor('#000000');
     this.root = this.add.container(0, 0).setScale(R);
@@ -333,6 +336,7 @@ export class GroundScene extends Phaser.Scene {
     else if (name === 'toggle') this.setCtl(this.ctl === 'simple' ? 'precise' : 'simple');
     else if (name === 'quit') this.pressQuit();
     else if (name === 'rotate') this.toggleLayout();
+    else if (name === 'assist') { this.g.opts.assist = !this.g.opts.assist; saveAssist(this.g.opts.assist); }
   }
 
   private pointerDown(p: Phaser.Input.Pointer): void {
@@ -612,7 +616,7 @@ export class GroundScene extends Phaser.Scene {
       case 'crateBreak': audio.sfx('gDoorBreak'); for (let i = 0; i < 12; i++) this.prt('wood', e.x, e.y, rnd(0, 6.28), rnd(120, 400), rnd(16, 30), 6, e.barrel ? 0xb8322a : 0x8a6a3e); break;
       case 'wallhit': for (let i = 0; i < 4; i++) this.prt('spark', e.x, e.y, e.ang + Math.PI + rnd(-0.9, 0.9), rnd(150, 420), rnd(6, 12), 3, 0xffe27a); this.prt('dust', e.x, e.y, e.ang + Math.PI, rnd(30, 90), 22, 8, 0xb0b8c4); this.stamp(e.x, e.y, 1, 1, 0x0b0f14, 0.7); break;
       case 'alert': this.pop(e.x, e.y - 90, '!', '#ff4040', 22); audio.sfx('gEnemyShot'); break;
-      case 'pickup': audio.sfx(e.what === 'heart' ? 'heal' : 'item'); this.pop(e.x, e.y - 40, e.what === 'heart' ? '+♥' : 'WEAPON', '#ffffff', 12); break;
+      case 'pickup': audio.sfx(e.what === 'heart' ? 'heal' : 'item'); this.pop(e.x, e.y - 40, e.what === 'heart' ? '+♥' : e.what === 'bomb' ? '+폭탄' : 'WEAPON', '#ffffff', 12); break;
       case 'drop': this.pop(e.x, e.y - 30, '▼', '#fde68a', 12); break;
       case 'gate': audio.sfx('item'); break;
       case 'section': if (e.n > 0 || this.stage === 'PLAY') this.say(e.name); break;
@@ -657,7 +661,7 @@ export class GroundScene extends Phaser.Scene {
     for (const k of g.pickups) {   // 바닥에 놓인 무기·구급상자
       livePk.add(k.id);
       let img = this.pickupImgs.get(k.id);
-      if (!img) { img = this.add.image(k.x, k.y, k.kind === 'weapon' ? `i_${k.weapon}` : 'i_medkit').setScale(ART * 0.7); this.pickupLayer.add(img); this.pickupImgs.set(k.id, img); }
+      if (!img) { img = this.add.image(k.x, k.y, k.kind === 'weapon' ? `i_${k.weapon}` : k.kind === 'bomb' ? 'i_grenade' : 'i_medkit').setScale(ART * 0.7); this.pickupLayer.add(img); this.pickupImgs.set(k.id, img); }
       const vis = inView(k.x, k.y); img.setVisible(vis).setPosition(Math.round(k.x), Math.round(k.y + Math.sin(k.t * 0.08) * 3)).setRotation(k.kind === 'weapon' ? ((k.id * 1.7) % 1.2) - 0.6 : 0);
       if (vis) { this.topG.lineStyle(3, k.kind === 'heart' ? 0xf87171 : 0xfde68a, 0.4 + 0.3 * Math.sin(k.t * 0.1)); this.topG.strokeCircle(k.x, k.y, 40); }
       if (k.kind === 'weapon' && Math.hypot(p.x - k.x, p.y - k.y) < 60) nearW = `E 줍기: ${WEAPONS[k.weapon!].name}${k.ammo !== undefined && k.ammo < 999 ? ' ' + k.ammo : ''}`;
@@ -897,8 +901,9 @@ export class GroundScene extends Phaser.Scene {
     } else {
       T[0].setVisible(true).setText('일시정지').setFontSize(22).setPosition(vw / 2, vh * (land ? 0.14 : 0.2));
       box('resume', vh * (land ? 0.3 : 0.32), 48, '계속하기', T[1]);
-      box('rotate', vh * (land ? 0.5 : 0.46), 48, `화면: ${land ? '가로' : '세로'} → ${land ? '세로' : '가로'}로 바꾸기`, T[5]);
-      box('quit', vh * (land ? 0.68 : 0.6), 48, this.quitArmed ? '정말 포기? 한 번 더 누르세요' : '포기하고 본편으로', T[3], this.quitArmed);
+      box('rotate', vh * (land ? 0.48 : 0.44), 48, `화면: ${land ? '가로' : '세로'} → ${land ? '세로' : '가로'}로 바꾸기`, T[5]);
+      box('assist', vh * (land ? 0.63 : 0.52), 48, `약한 자동 조준: ${this.g.opts.assist ? 'ON' : 'OFF'}`, T[2]);
+      box('quit', vh * (land ? 0.76 : 0.6), 48, this.quitArmed ? '정말 포기? 한 번 더 누르세요' : '포기하고 본편으로', T[3], this.quitArmed);
       T[4].setVisible(true).setText('키보드: Enter 계속 · T 두 번 포기').setFontSize(12).setPosition(vw / 2, vh * (land ? 0.93 : 0.78));
     }
   }
