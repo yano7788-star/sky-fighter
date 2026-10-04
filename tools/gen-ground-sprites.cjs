@@ -153,12 +153,13 @@ function rifleIcon() { const p = new Pix(38, 10); p.rect(0, 3, 9, 7, '#5c3a1e');
   });
   await writeSheet('gs_silenced', supFrames, 48);
   // 암살 동작: 권총 근접 프레임(4~6) 위에 단검을 붙이고, 가운데 프레임은 몸을 앞으로 내민다(돌진 찌르기)
-  const stabFrames = [4, 5, 6].map((fi, k) => {
-    const src = pistol[fi], p = new Pix(48, 48), shift = k === 1 ? 3 : k === 0 ? -1 : 1; let maxX = 0, my = 24;
+  // 5프레임: 0 웅크려 접근(걷기 자세) · 1 한 손으로 입을 막음 · 2 단검을 뒤로 · 3 찌름(몸을 내밈) · 4 거두기
+  const STAB = [[1, -2, 0], [4, 0, 0], [5, -1, 7], [5, 3, 12], [6, 1, 5]];
+  const stabFrames = STAB.map(([fi, shift, len]) => {
+    const src = pistol[fi], p = new Pix(48, 48); let maxX = 0, my = 24;
     for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) { const i = (y * 48 + x) * 4; if (!src.d[i + 3]) continue; p.set(x + shift, y, [src.d[i], src.d[i + 1], src.d[i + 2]]); if (x + shift > maxX) { maxX = x + shift; my = y; } }
-    const len = k === 1 ? 10 : k === 0 ? 4 : 6;
     for (let x = maxX + 1; x <= Math.min(47, maxX + len); x++) { p.set(x, my, [214, 222, 236]); p.set(x, my - 1, [96, 104, 120]); }
-    p.set(Math.min(47, maxX + len + 1), my, [255, 255, 255]); p.set(maxX, my + 1, [70, 50, 30]); p.set(maxX, my - 2, [70, 50, 30]);   // 손잡이/날 받침
+    if (len > 0) { p.set(Math.min(47, maxX + len + 1), my, [255, 255, 255]); p.set(maxX, my + 1, [70, 50, 30]); p.set(maxX, my - 2, [70, 50, 30]); }   // 손잡이/날 받침
     return p;
   });
   await writeSheet('gs_stab', stabFrames, 48);

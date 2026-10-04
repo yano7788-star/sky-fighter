@@ -128,7 +128,9 @@ export function buildRescueLevel(): Level {
   fill(3, 28, 7, 28, T.WALL); fill(11, 24, 15, 24, T.WALL); fill(5, 17, 5, 21, T.WALL); fill(12, 11, 12, 15, T.WALL); fill(2, 8, 6, 8, T.WALL); fill(14, 5, 16, 5, T.WALL); fill(9, 14, 10, 14, T.WALL);
   crate(8, 30); crate(14, 29); crate(2, 24); crate(3, 24); crate(15, 18); crate(16, 18); crate(9, 20); crate(13, 8); crate(7, 12); barrel(4, 14); barrel(15, 10); barrel(10, 26);
   en('sniper', 15, 9, { ang: 0 }); en('heavy', 3, 22, { ang: 180 }); en('rifle', 3, 13, { ang: 180 }); en('rifle', 13, 21, { ang: 0 }); en('turret', 2, 4);
-  const reinforce = [{ x: tc(2), y: tc(17), section: 3 }, { x: tc(15), y: tc(19), section: 3 }, { x: tc(2), y: tc(27), section: 3 }];
+  const R = (c: number, r: number) => ({ x: tc(c), y: tc(r), section: sectionOfRow(r) });
+  // 경보 증원 지점 (구역마다 가장자리 계단·문 쪽, 플레이어에게서 멀고 안 보이는 곳이 골라진다)
+  const reinforce = [R(2, 17), R(15, 19), R(2, 27), R(8, 4), R(2, 40), R(8, 37), R(15, 64), R(9, 66), R(15, 60), R(2, 73), R(15, 77), R(2, 83), R(15, 89), R(2, 95), R(15, 99), R(2, 106), R(16, 110), R(2, 126), R(15, 126), R(9, 106)];
 
   // ---------------------------------------------------------------- 감방동 (행 34~67): 가운데 복도, 왼쪽 경비실, 오른쪽 감방 4칸
   fill(11, 37, 16, 37, T.WALL); fill(11, 38, 11, 61, T.WALL); for (const r of [43, 49, 55]) fill(12, r, 16, r, T.WALL); fill(12, 61, 16, 61, T.WALL);
