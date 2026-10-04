@@ -146,3 +146,25 @@ describe('인질 구출 임무 (4스테이지 뒤)', () => {
     expect(t.state).toBe('PLAYING'); expect(t.stageTier).toBe(5); expect(t.rescueActive).toBe(false);
   });
 });
+
+describe('조심 접근 · 암살', () => {
+  const setup = (seed = 8) => { const g = new GroundSim({ seed }); clean(g); g.p.invuln = 99999; return g; };
+  it('적 등 뒤 사각지대: 정면 80px에서는 들키지만 등 뒤 80px에서는 안 들키고, 55px 안에서는 들킨다', () => {
+    const front = setup(); const a = add(front, 'rifle', front.p.x, front.p.y - 80, Math.PI / 2); a.state = 'idle'; run(front, 40); expect(a.state).toBe('alert');   // 적이 아래(플레이어 쪽)를 본다
+    const back = setup(); const b = add(back, 'rifle', back.p.x, back.p.y - 80, -Math.PI / 2); b.state = 'idle'; run(back, 40); expect(b.state).toBe('idle');      // 적이 위(반대쪽)를 본다
+    const close = setup(); const c = add(close, 'rifle', close.p.x, close.p.y - 40, -Math.PI / 2); c.state = 'idle'; run(close, 40); expect(c.state).toBe('alert');
+  });
+  it('평소 걸음은 소리가 나고(150px) 조심 걷기는 소리가 없다', () => {
+    const walk = (sneak: boolean) => { const g = setup(); const e = add(g, 'rifle', g.p.x + 110, g.p.y, 0); e.state = 'idle'; for (let i = 0; i < 70; i++) g.step({ ...NO_INPUT, mx: 0, my: -1, sneak }); return e.state; };   // 적은 오른쪽(바깥)을 보고 있어 등 뒤 110px
+    expect(walk(false)).toBe('alert'); expect(walk(true)).toBe('idle');
+  });
+  it('등 뒤에서 근접 → 암살: 경계 전·가까움·등 뒤일 때만, 소리 없이 즉사 + 보너스', () => {
+    const g = setup(); const e = add(g, 'rifle', g.p.x, g.p.y - 70, -Math.PI / 2); e.state = 'idle';
+    expect(g.stabTarget()).toBe(e);
+    const sc0 = g.score; g.step({ ...NO_INPUT, melee: true }); run(g, 30);
+    const evs = g.drain(); expect(evs.some(x => x.t === 'assassinate')).toBe(true); expect(g.enemies.includes(e)).toBe(false); expect(g.score).toBeGreaterThan(sc0 + 150);
+    const f = setup(); const h = add(f, 'rifle', f.p.x, f.p.y - 70, Math.PI / 2); h.state = 'idle'; expect(f.stabTarget()).toBeNull();   // 정면
+    const k = setup(); const hv = add(k, 'heavy', k.p.x, k.p.y - 70, -Math.PI / 2); hv.state = 'idle'; expect(k.stabTarget()).toBeNull();   // 헤비 제외
+    const m = setup(); const al = add(m, 'rifle', m.p.x, m.p.y - 70, -Math.PI / 2); al.state = 'alert'; expect(m.stabTarget()).toBeNull();   // 경계 중
+  });
+});

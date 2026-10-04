@@ -45,21 +45,21 @@ export const GROUND = {
   hurtInvuln: 45, comboFrames: 150, grenades: 2, grenadeMax: 4,
   rollSteps: [['roll_1', f(0.07)], ['roll_2', f(0.1)], ['roll_3', f(0.1)], ['roll_4', f(0.1)], ['roll_5', f(0.13)]] as Seq, rollSpeed: [420, 420, 380, 300, 150].map(v => v / 60), rollInvulnSteps: 4, rollCd: f(0.75),
   meleeSteps: [['melee_1', f(0.1)], ['melee_2', f(0.07), 'hit'], ['melee_3', f(0.13)]] as Seq, throwSteps: [['throw_1', f(0.1)], ['throw_2', f(0.08)], ['throw_3', f(0.16), 'release']] as Seq,
-  bombFuse: f(1.9), enemyBulletSpeed: 620 / 60, enemyBulletLife: f(1.3), viewDist: 520, viewHalf: 1.25, nearSee: 160, allyAlert: 220, doorRate: 7, kickRate: 15,
+  bombFuse: f(1.9), enemyBulletSpeed: 620 / 60, enemyBulletLife: f(1.3), viewDist: 520, viewHalf: 1.25, nearSee: 160, backSee: 55, backCone: 2.09, sneakMul: 0.55, stepNoise: 150, stepFrames: 18, stabRange: 105, allyAlert: 220, doorRate: 7, kickRate: 15,
 } as const;
 export const SECTION_COUNT = SECTIONS.length;
 
 export interface GroundOpts { seed: number; pilot: 0 | 1 | 2; dmgMult: number; rateMult: number; maxHp: number; grenades: number; assist: boolean; mission: MissionKind; hostageWho: 1 | 2 }
 export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: GROUND.grenades, assist: false, mission: 'assault', hostageWho: 2 };
 
-export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; melee: boolean; bomb: boolean; swap?: boolean; pickup?: boolean; aimDist?: number }
+export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; melee: boolean; bomb: boolean; swap?: boolean; sneak?: boolean; pickup?: boolean; aimDist?: number }
 export const NO_INPUT: GInput = { mx: 0, my: 0, ax: 0, ay: 0, fire: false, roll: false, melee: false, bomb: false };
 
 interface Seqn { kind: 'fire' | 'melee' | 'throw' | 'roll'; steps: Seq; i: number; t: number }
 export interface GPlayer {
   x: number; y: number; hp: number; maxHp: number; aim: number; invuln: number;
   weapon: WeaponId; ammo: number; grenades: number; flashes: number; smokes: number; gsel: BombType; seq: Seqn | null; cd: number; rollCd: number; rollAng: number; rollI: number;
-  moving: boolean; walk: number; gunBlocked: boolean; kick: number; pickCd: number; smgAlt: number; combatT: number; hitFlash: number;
+  moving: boolean; walk: number; stab?: boolean; sneaking?: boolean; stepT?: number; gunBlocked: boolean; kick: number; pickCd: number; smgAlt: number; combatT: number; hitFlash: number;
 }
 export interface GEnemy {
   id: number; kind: GKind; x: number; y: number; hp: number; maxHp: number; section: number;
@@ -92,6 +92,7 @@ export type GEvent =
   | { t: 'windowHit'; x: number; y: number } | { t: 'windowBreak'; x: number; y: number; o: 'v' | 'h' } | { t: 'crateHit'; x: number; y: number } | { t: 'crateBreak'; x: number; y: number; barrel: boolean }
   | { t: 'wallhit'; x: number; y: number; ang: number } | { t: 'alert'; x: number; y: number }
   | { t: 'hostageFree'; x: number; y: number } | { t: 'reinforce'; x: number; y: number } | { t: 'hostageProgress'; k: number }
+  | { t: 'assassinate'; x: number; y: number; ang: number } | { t: 'step'; x: number; y: number; r: number }
   | { t: 'flashbang'; x: number; y: number; r: number } | { t: 'smoke'; x: number; y: number; r: number } | { t: 'stealth'; x: number; y: number; pts: number; melee: boolean } | { t: 'ghost'; n: number; pts: number } | { t: 'swap'; to: BombType }
   | { t: 'pickup'; what: 'heart' | 'weapon' | 'bomb'; x: number; y: number } | { t: 'drop'; x: number; y: number; weapon: WeaponId }
   | { t: 'gate'; section: number } | { t: 'section'; n: number; name: string } | { t: 'cleared'; n: number } | { t: 'exitopen' } | { t: 'reset'; section: number }
@@ -441,19 +442,22 @@ export class GroundSim {
     }
     p.gunBlocked = this.gunBlockedNow(p.weapon, p.aim);
     // 시퀀스 진행
-    if (p.seq) { const sq = p.seq; if (++sq.t >= sq.steps[sq.i][1]) { sq.i++; sq.t = 0; if (sq.i >= sq.steps.length) p.seq = null; else this.seqEvent(sq.steps[sq.i][2]); } }
+    if (p.seq) { const sq = p.seq; if (++sq.t >= sq.steps[sq.i][1]) { sq.i++; sq.t = 0; if (sq.i >= sq.steps.length) { p.seq = null; p.stab = false; this.stabE = null; } else this.seqEvent(sq.steps[sq.i][2]); } }
     const sq = p.seq, canCancel = !sq || sq.kind === 'fire';
     // 구르기 / 근접 / 폭탄은 발사 시퀀스를 끊고 들어갈 수 있다
     if (inp.roll && p.rollCd <= 0 && canCancel) {
-      p.rollAng = m > 0.15 ? Math.atan2(inp.my, inp.mx) : p.aim; p.rollCd = GROUND.rollCd; p.rollI = f(0.37); this.startSeq('roll', GROUND.rollSteps); this.emit({ t: 'roll', x: p.x, y: p.y, ang: p.rollAng });
+      p.rollAng = m > 0.15 ? Math.atan2(inp.my, inp.mx) : p.aim; p.rollCd = GROUND.rollCd; p.rollI = f(0.37); this.noise(p.x, p.y, 210); this.startSeq('roll', GROUND.rollSteps); this.emit({ t: 'roll', x: p.x, y: p.y, ang: p.rollAng });
+    } else if (inp.melee && canCancel && this.tryAssassinate()) { /* 암살 시작 */
     } else if (inp.melee && canCancel && !this.wallAhead(p.aim, 85)) { this.startSeq('melee', GROUND.meleeSteps); this.emit({ t: 'swing', x: p.x, y: p.y, ang: p.aim }); this.noise(p.x, p.y, 260); }
     else if (inp.bomb && canCancel && this.bombCount(p.gsel) > 0 && !this.wallAhead(p.aim, 64)) { this.bombDist = inp.aimDist ?? 300; this.startSeq('throw', GROUND.throwSteps); this.emit({ t: 'throw' }); }
     // 이동
     const sk = p.seq?.kind;
-    p.moving = false;
+    p.moving = false; p.sneaking = false;
     if (sk === 'roll') { const sp = GROUND.rollSpeed[p.seq!.i]; this.move(p, Math.cos(p.rollAng) * sp, Math.sin(p.rollAng) * sp, GROUND.moveR, true); }
     else if (m > 0.15) {
-      const W = WEAPONS[p.weapon], base = sk === 'fire' ? W.move : sk === 'melee' ? 150 / 60 : sk === 'throw' ? 130 / 60 : GROUND.speed, k = Math.min(1, m * (m > 1 ? 1 : 1.3));
+      const W = WEAPONS[p.weapon], base = sk === 'fire' ? W.move : sk === 'melee' ? 150 / 60 : sk === 'throw' ? 130 / 60 : GROUND.speed, sneak = !!inp.sneak && !sk, k = Math.min(1, m * (m > 1 ? 1 : 1.3)) * (sneak ? GROUND.sneakMul : 1);
+      p.sneaking = sneak;
+      if (!sneak && sk !== 'melee' && sk !== 'throw' && ((p.stepT = (p.stepT ?? 0) + 1) % GROUND.stepFrames === 0)) { this.noise(p.x, p.y, GROUND.stepNoise); this.emit({ t: 'step', x: p.x, y: p.y, r: GROUND.stepNoise }); }   // 평소 걸음은 작은 소리가 난다 (조심 걷기는 소리 없음)
       this.move(p, (inp.mx / (m || 1)) * base * k, (inp.my / (m || 1)) * base * k, GROUND.moveR, true); p.moving = true; p.walk += 1;
     }
     // 사격
@@ -489,7 +493,29 @@ export class GroundSim {
   }
 
   // ---------------------------------------------------------------- 근접 · 폭탄
+  /** 암살 가능한 적: 경계 전 · 등 뒤 · 가까움 · 시야 있음 (헤비·개·포탑·드론·보스 제외). 씬이 머리 위 아이콘에 쓴다 */
+  stabTarget(): GEnemy | null {
+    const p = this.p; let best: GEnemy | null = null, bd = 1e9;
+    for (const e of this.enemies) {
+      if (e.dying || e.state !== 'idle' || (e.kind !== 'rifle' && e.kind !== 'charger' && e.kind !== 'sniper')) continue;
+      const d = Math.hypot(p.x - e.x, p.y - e.y); if (d > GROUND.stabRange || d >= bd) continue;
+      if (Math.abs(norm(Math.atan2(p.y - e.y, p.x - e.x) - e.ang)) <= GROUND.backCone) continue;   // 등 뒤가 아니다
+      if (!this.los(p.x, p.y, e.x, e.y)) continue;
+      best = e; bd = d;
+    }
+    return best;
+  }
+  private stabE: GEnemy | null = null; private stabbing = false;
+  private tryAssassinate(): boolean {
+    const e = this.stabTarget(), p = this.p; if (!e) return false;
+    const a = Math.atan2(e.y - p.y, e.x - p.x); p.aim = a;
+    const tx = e.x - Math.cos(a) * 46, ty = e.y - Math.sin(a) * 46;   // 등 뒤로 파고든다 (막혀 있으면 제자리에서)
+    if (!this.obstacleAt(tx, ty) && this.los(p.x, p.y, tx, ty)) { p.x = tx; p.y = ty; }
+    p.stab = true; this.stabE = e; this.startSeq('melee', GROUND.meleeSteps); this.emit({ t: 'assassinate', x: e.x, y: e.y, ang: a });
+    return true;
+  }
   private meleeHit(): void {
+    if (this.p.stab) { const e = this.stabE; if (e && !e.dying && this.enemies.includes(e)) { this.stabbing = true; this.killEnemy(e, 'melee', this.p.aim); this.stabbing = false; } return; }   // 암살: 소리 없이 한 방, 주변은 건드리지 않는다
     const p = this.p, sector = (x: number, y: number, rng: number, half: number): boolean => Math.hypot(x - p.x, y - p.y) < rng && Math.abs(norm(Math.atan2(y - p.y, x - p.x) - p.aim)) < half;
     for (const e of this.enemies.slice()) if (sector(e.x, e.y, 165, 1.05) && this.los(p.x, p.y, e.x, e.y)) this.hitEnemy(e, 'melee', p.aim, 1, p.x, p.y);
     for (const c of this.crates) if (!c.broken && sector(c.x, c.y, 135, 1.0)) this.hurtCrate(c, 2);
@@ -608,7 +634,7 @@ export class GroundSim {
     this.combo++; this.comboT = GROUND.comboFrames; this.maxCombo = Math.max(this.maxCombo, this.combo);
     const mult = 1 + 0.2 * Math.min(this.combo - 1, 10), pts = Math.round(ENEMY_DEF[e.kind].pts * mult);
     this.score += pts;
-    if (e.state === 'idle' && e.kind !== 'boss' && e.kind !== 'drone') { const sp = Math.round(ENEMY_DEF[e.kind].pts * (w === 'melee' ? 1.2 : 0.6)); this.score += sp; this.stealthKills++; this.emit({ t: 'stealth', x: e.x, y: e.y, pts: sp, melee: w === 'melee' }); }   // 들키기 전에 처치(근접은 암살)
+    if (e.state === 'idle' && e.kind !== 'boss' && e.kind !== 'drone') { const sp = Math.round(ENEMY_DEF[e.kind].pts * (this.stabbing ? 1.8 : w === 'melee' ? 1.2 : 0.6)); this.score += sp; this.stealthKills++; this.emit({ t: 'stealth', x: e.x, y: e.y, pts: sp, melee: w === 'melee' }); }   // 들키기 전에 처치(근접은 암살)
     const D = FEEL[w];
     e.deathAng = ang + (this.rng() - 0.5) * 0.5; const fd = Math.cos(e.ang - ang);
     e.fallF = fd > 0.35 ? true : fd < -0.35 ? false : this.rng() < 0.5;   // 등 뒤에서 맞으면 앞으로 엎어짐
@@ -657,7 +683,8 @@ export class GroundSim {
     const p = this.p, dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
     const view = e.kind === 'sniper' ? 900 : e.kind === 'turret' ? 700 : GROUND.viewDist;
     if (!this.los(e.x, e.y, p.x, p.y) || this.smokeBlocks(e.x, e.y, p.x, p.y)) return false;
-    if (d < GROUND.nearSee) return true;
+    const ang = Math.atan2(dy, dx), behind = Math.abs(norm(ang - e.ang)) > GROUND.backCone;   // 적 등 뒤 약 120°
+    if (d < GROUND.nearSee) return behind ? d < GROUND.backSee : true;
     return d < view && Math.abs(norm(Math.atan2(dy, dx) - e.ang)) < GROUND.viewHalf;
   }
   private updateEnemies(): void {

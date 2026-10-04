@@ -132,6 +132,7 @@ export class GroundScene extends Phaser.Scene {
   private tutorialT = 0; private deadTimer = 0; private finished = false;
   private ovT?: Phaser.GameObjects.Text;
 
+  private stepRings: { x: number; y: number; r: number; t: number }[] = [];
   private rescue = false; private siren = 0; private hostageImg?: Phaser.GameObjects.Image; private alarmRect!: Phaser.GameObjects.Rectangle;
   private brief: { objs: Phaser.GameObjects.GameObject[]; btns: { name: string; x: number; y: number; w: number; h: number }[]; g: Phaser.GameObjects.Graphics; texts: Phaser.GameObjects.Text[]; portrait: Phaser.GameObjects.Image } | null = null;
   constructor() { super('GroundScene'); }
@@ -404,7 +405,8 @@ export class GroundScene extends Phaser.Scene {
         const a = this.aimStick.id >= 0 ? preciseAim(this.aimStick.vx, this.aimStick.vy) : null; if (a) { ax = Math.cos(a.aim); ay = Math.sin(a.aim); fire = fire || a.fire; }
       }
     } else if (this.mouse.used) { const wx = this.cam.x + this.mouse.x / Z, wy = this.cam.y + this.mouse.y / Z; ax = wx - p.x; ay = wy - p.y; aimDist = Math.hypot(ax, ay); if (aimDist < 24) { ax = 0; ay = 0; } if (this.mouse.down) fire = true; }
-    const inp: GInput = { mx, my, ax, ay, fire, roll: this.rollQ, melee: this.meleeQ, bomb: this.bombQ, swap: this.swapQ, pickup: this.pickQ || k.has('e'), aimDist };
+    const sneak = k.has('c') || (this.touchMode && this.moveStick.id >= 0 && Math.hypot(this.moveStick.vx, this.moveStick.vy) < 0.5);   // C 키 / 스틱을 살짝 밀면 조심 걷기
+    const inp: GInput = { sneak, mx, my, ax, ay, fire, roll: this.rollQ, melee: this.meleeQ, bomb: this.bombQ, swap: this.swapQ, pickup: this.pickQ || k.has('e'), aimDist };
     this.rollQ = false; this.meleeQ = false; this.bombQ = false; this.swapQ = false; this.pickQ = false;
     return inp;
   }
@@ -688,6 +690,8 @@ export class GroundScene extends Phaser.Scene {
       case 'crateHit': audio.sfx('gCrate'); break;
       case 'crateBreak': audio.sfx('gDoorBreak'); for (let i = 0; i < 12; i++) this.prt('wood', e.x, e.y, rnd(0, 6.28), rnd(120, 400), rnd(16, 30), 6, e.barrel ? 0xb8322a : 0x8a6a3e); break;
       case 'wallhit': for (let i = 0; i < 4; i++) this.prt('spark', e.x, e.y, e.ang + Math.PI + rnd(-0.9, 0.9), rnd(150, 420), rnd(6, 12), 3, 0xffe27a); this.prt('dust', e.x, e.y, e.ang + Math.PI, rnd(30, 90), 22, 8, 0xb0b8c4); this.stamp(e.x, e.y, 1, 1, 0x0b0f14, 0.7); break;
+      case 'assassinate': audio.sfx('gSilenced'); this.pop(e.x, e.y - 100, '암살', '#a5f3fc', 18); for (let i = 0; i < 5; i++) this.prt('blood', e.x, e.y, e.ang + rnd(-0.6, 0.6), rnd(60, 200), rnd(10, 22), 4, 0x8b1a1a); break;
+      case 'step': this.stepRings.push({ x: e.x, y: e.y, r: e.r, t: 0 }); break;
       case 'flashbang': audio.sfx('boom'); this.whiteFlash.setAlpha(0.9); this.tweens.add({ targets: this.whiteFlash, alpha: 0, duration: 700 }); for (let i = 0; i < 16; i++) this.prt('spark', e.x, e.y, rnd(0, 6.28), rnd(200, 600), rnd(10, 22), 3, 0xffffff); break;
       case 'smoke': audio.sfx('item'); for (let i = 0; i < 12; i++) this.prt('smoke', e.x, e.y, rnd(0, 6.28), rnd(60, 200), rnd(30, 60), 14, 0xb8c0cc); break;
       case 'stealth': this.pop(e.x, e.y - 100, e.melee ? '암살 +' + e.pts : '무음 처치 +' + e.pts, '#a5f3fc', 16); break;
@@ -752,6 +756,9 @@ export class GroundScene extends Phaser.Scene {
     }
     for (const [id, img] of this.pickupImgs) if (!livePk.has(id)) { img.destroy(); this.pickupImgs.delete(id); }
     this.renderEnemies(inView); this.renderHostage(t);
+    const st = g.stabTarget();
+    if (st) { const a = 0.7 + 0.3 * Math.sin(t * 0.012), x = st.x, y = st.y - 74; this.topG.fillStyle(0xe2e8f0, a); this.topG.fillTriangle(x - 8, y - 14, x + 8, y - 14, x, y + 10); this.topG.lineStyle(3, 0xa5f3fc, a); this.topG.strokeTriangle(x - 8, y - 14, x + 8, y - 14, x, y + 10); this.topG.strokeCircle(st.x, st.y, 36 + 4 * Math.sin(t * 0.012)); }   // 암살 가능 표시(칼날 ▼ + 링)
+    for (let i = this.stepRings.length - 1; i >= 0; i--) { const s = this.stepRings[i]; s.t += 1; if (s.t > 22) { this.stepRings.splice(i, 1); continue; } this.topG.lineStyle(2, 0xffffff, 0.22 * (1 - s.t / 22)); this.topG.strokeCircle(s.x, s.y, s.r * (0.25 + 0.75 * (s.t / 22))); }   // 발소리 파문
     this.renderBullets(inView);
     this.renderPlayer(t);
     for (const q of this.prts) {   // 입자
@@ -896,6 +903,7 @@ export class GroundScene extends Phaser.Scene {
     const p = this.g.p, sq = p.seq, wk = p.weapon, rows = ROW[wk], sheet = `gs_${wk}`;
     if (sq && sq.kind === 'roll') return { sheet: 'gs_roll', row: sq.i, rot: p.rollAng };
     if (sq && sq.kind === 'throw') return { sheet: 'gs_throw', row: sq.i, rot: p.aim };
+    if (sq && sq.kind === 'melee' && p.stab) return { sheet: 'gs_stab', row: sq.i, rot: p.aim };
     if (sq && sq.kind === 'melee') return { sheet, row: rows[`melee_${sq.i + 1}`], rot: p.aim };
     if (sq && sq.kind === 'fire' && !p.gunBlocked) return { sheet, row: rows[sq.steps[sq.i][0]] ?? rows.idle, rot: p.aim };
     const walk = p.moving ? [rows.walk_a, rows.idle, rows.walk_b, rows.idle][Math.floor(p.walk / 8) % 4] : rows.idle;
@@ -949,7 +957,7 @@ export class GroundScene extends Phaser.Scene {
     if (b && b.state === 'alert') { T2.boss.setText('격납고 수문장'); h.fillStyle(0x0f172a, 0.8); h.fillRect(vw / 2 - 100, 56, 200, 8); h.fillStyle(0xef4444, 1); h.fillRect(vw / 2 - 100, 56, 200 * Math.max(0, b.hp / b.maxHp), 8); h.lineStyle(1, 0xffffff, 0.5); h.strokeRect(vw / 2 - 100, 56, 200, 8); } else T2.boss.setText('');
     if (nearW && p.weapon !== 'pistol' && !touch) T2.hint.setText(nearW).setAlpha(1);
     else if (p.gunBlocked && this.stage === 'PLAY') T2.hint.setText('총이 벽에 막혀 있다 — 물러서라').setAlpha(0.9);
-    else if (this.tutorialT > 0 && !this.choosing && !this.paused) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 문은 몸으로 밀어서 연다') : 'WASD 이동 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
+    else if (this.tutorialT > 0 && !this.choosing && !this.paused) T2.hint.setText(touch ? (this.ctl === 'simple' ? '왼쪽 스틱: 이동 · 오른쪽 화면을 누르면 사격(누른 방향 고정) · 문은 몸으로 밀어서 연다' : '왼쪽 스틱: 이동 · 오른쪽 스틱: 조준(살짝 밀면 발사) · 왼쪽 스틱을 살짝 밀면 조심 걷기 · 적 등 뒤에서 근접 = 암살') : 'WASD 이동 · C 조심 걷기(소리 없음) · 적 등 뒤에서 F = 암살 · 마우스 조준/클릭 사격 · Shift 구르기(무적) · F/우클릭 근접 · G 폭탄 · E 줍기').setAlpha(Math.min(1, this.tutorialT / 30));
     else T2.hint.setAlpha(0);
     if (!this.rescue && ((g.cleared[sec] && sec < 3) || (sec === 3 && g.exitOpen))) { const gy = (this.g.secs[sec].r0 + 1) * TILE; if (gy < cy) { const a = 0.6 + 0.4 * Math.sin(this.time.now * 0.008); h.fillStyle(0xfde68a, a); h.fillTriangle(vw / 2, 74, vw / 2 - 12, 92, vw / 2 + 12, 92); } }   // 다음 구역 문 방향 화살표
     this.popTexts.forEach(tx => tx.setVisible(false));   // 월드 → 화면 팝업 글자
