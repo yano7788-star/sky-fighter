@@ -1,5 +1,5 @@
 export type GameState = 'PLAYING' | 'GAMEOVER' | 'GAMECLEAR';
-export type StagePhase = 'FIGHT' | 'WARNING' | 'BOSS' | 'BOSS_DYING' | 'CLEAR' | 'INTRO';
+export type StagePhase = 'FIGHT' | 'WARNING' | 'BOSS' | 'BOSS_DYING' | 'EJECT' | 'CLEAR' | 'INTRO';
 /** P 파워업 · M 유도미사일 · E 에너지 · B 폭탄 · G 자석 · L 목숨 · C 동료(고양이) · D 동료(강아지) */
 export type ItemType = 'P' | 'M' | 'E' | 'B' | 'G' | 'L' | 'C' | 'D';
 export type SkillKey = 'cat' | 'dog' | 'ult';
@@ -109,6 +109,9 @@ export type SimEvent =
   | { t: 'heal'; x: number; y: number }
   | { t: 'gem'; x: number; y: number }
   | { t: 'gameover' }
+  | { t: 'overload' }        // 3스테이지 보스 코어 과부하(자폭 카운트다운 시작)
+  | { t: 'selfdestruct'; x: number; y: number }   // 자폭 폭발이 아군 기체를 덮침
+  | { t: 'eject' }           // 비상 탈출
   | { t: 'gameclear' };
 
 /** 한 틱에 시뮬레이션에 전달되는 입력 (포인터/키보드/패드를 씬이 합쳐서 만든다) */

@@ -48,7 +48,7 @@ export const GROUND = {
 export const SECTION_COUNT = SECTIONS.length;
 
 export interface GroundOpts { seed: number; pilot: 0 | 1 | 2; dmgMult: number; rateMult: number; maxHp: number; grenades: number; assist: boolean }
-export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: GROUND.grenades, assist: true };
+export const DEFAULT_GROUND_OPTS: GroundOpts = { seed: 1, pilot: 0, dmgMult: 1, rateMult: 1, maxHp: GROUND.hp, grenades: GROUND.grenades, assist: false };
 
 export interface GInput { mx: number; my: number; ax: number; ay: number; fire: boolean; roll: boolean; melee: boolean; bomb: boolean; pickup?: boolean; aimDist?: number }
 export const NO_INPUT: GInput = { mx: 0, my: 0, ax: 0, ay: 0, fire: false, roll: false, melee: false, bomb: false };

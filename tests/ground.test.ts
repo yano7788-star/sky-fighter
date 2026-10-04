@@ -213,3 +213,51 @@ describe('지상전 ↔ 본편 연동', () => {
     const o = s.groundOpts(1); expect(o.dmgMult).toBeGreaterThan(1.2);
   });
 });
+
+import { newSimpleState, preciseAim, simpleControl } from '../src/core/groundinput';
+
+describe('지상전 조작 모드', () => {
+  it('간편: 이동하면 몸이 이동 방향을 보고, 데드존 안에서는 가만히 있는다', () => {
+    const st = newSimpleState(); let o = simpleControl(st, 0, 0, false); expect(o.mx).toBe(0);
+    o = simpleControl(st, 1, 0, false); expect(o.mx).toBeGreaterThan(0.9); expect(o.aim).toBeCloseTo(0);
+    o = simpleControl(st, 0, -1, false); expect(o.aim).toBeCloseTo(-Math.PI / 2);
+  });
+  it('간편: 사격 버튼을 누르는 동안 방향이 잠겨 뒷걸음질 사격이 된다', () => {
+    const st = newSimpleState(); simpleControl(st, 1, 0, false);   // 오른쪽을 보고
+    let o = simpleControl(st, 1, 0, true); expect(o.fire).toBe(true); expect(o.aim).toBeCloseTo(0);
+    o = simpleControl(st, -1, 0, true); expect(o.mx).toBeLessThan(-0.9); expect(o.aim).toBeCloseTo(0);   // 왼쪽으로 물러나며 오른쪽으로 쏜다
+    o = simpleControl(st, -1, 0, false); expect(o.aim).toBeCloseTo(Math.PI);   // 버튼을 떼면 다시 이동 방향
+  });
+  it('간편: 제자리 회전 구역은 이동 없이 방향만 바꾼다 (사격 중에도)', () => {
+    const st = newSimpleState(); let o = simpleControl(st, 0.25, 0, false); expect(o.mx).toBe(0); expect(o.aim).toBeCloseTo(0);
+    o = simpleControl(st, 0, 0.25, true); expect(o.mx).toBe(0); expect(o.my).toBe(0); expect(o.aim).toBeCloseTo(Math.PI / 2);
+  });
+  it('정밀: 조준 스틱을 살짝만 밀어도 발사하고, 놓으면 조준이 없다', () => {
+    expect(preciseAim(0.1, 0)).toBeNull();
+    expect(preciseAim(0.25, 0)?.fire).toBe(false); expect(preciseAim(0.35, 0)?.fire).toBe(true); expect(preciseAim(0, 1)?.aim).toBeCloseTo(Math.PI / 2);
+  });
+});
+
+describe('3스테이지 보스 자폭 → 탈출 → 지상전', () => {
+  const mk = () => new Sim(3, metaParams({} as any, 'ace', null));
+  it('지상전이 켜져 있으면 보스가 쓰러질 때 과부하 → 자폭 → 탈출 대기 (유물은 아직 안 나온다)', () => {
+    const s = mk(); s.groundEnabled = true; s.startAtTier(3); s.bossTier = 3; s.stagePhase = 'BOSS'; (s as any).spawnBoss(3); s.boss!.y = 135; s.boss!.hp = 1; s.player.invincible = 99999;
+    s.step(idle(s)); const evs0 = s.drainEvents().map(e => e.t); s.boss!.hp = 0; s.step(idle(s));
+    const evs = s.drainEvents().map(e => e.t); expect(evs).toContain('overload'); expect(s.overload).toBe(true); void evs0;
+    let n = 0; while ((s.stagePhase as string) === 'BOSS_DYING' && n++ < 400) s.step(idle(s));
+    expect(s.stagePhase).toBe('EJECT'); expect(s.damaged).toBe(true); expect(s.pending).toBeNull();
+    expect(s.drainEvents().map(e => e.t)).toContain('selfdestruct');
+  });
+  it('탈출 버튼(또는 시간 초과)으로 탈출하면 강하 요청이 나가고, 지상전 클리어 뒤 유물을 준다', () => {
+    const s = mk(); s.groundEnabled = true; s.startAtTier(3); s.bossTier = 3; s.stagePhase = 'EJECT'; s.phaseTimer = 100; s.player.invincible = 99999;
+    s.eject(); expect(s.stagePhase).toBe('CLEAR'); s.step(idle(s)); s.step(idle(s)); expect(s.groundRequest).toBe(true);
+    const t = mk(); t.groundEnabled = true; t.startAtTier(3); t.bossTier = 3; t.stagePhase = 'EJECT'; t.phaseTimer = 5; t.player.invincible = 99999;   // 자동 탈출
+    for (let i = 0; i < 12; i++) t.step(idle(t)); expect(t.groundRequest).toBe(true);
+    s.startGround(); s.finishGround({ score: 100, rooms: 4 }); expect(s.pending?.length).toBeGreaterThan(0); expect(s.overload).toBe(false); expect(s.damaged).toBe(false);
+  });
+  it('지상전이 꺼져 있으면(헤드리스) 기존 보스 처치 흐름 그대로', () => {
+    const s = mk(); s.startAtTier(3); s.bossTier = 3; s.stagePhase = 'BOSS'; (s as any).spawnBoss(3); s.boss!.y = 135; s.boss!.hp = 0; s.player.invincible = 99999;
+    s.step(idle(s)); expect(s.overload).toBe(false); let n = 0; while ((s.stagePhase as string) === 'BOSS_DYING' && n++ < 400) s.step(idle(s));
+    expect(s.stagePhase).toBe('CLEAR'); expect(s.pending?.length).toBeGreaterThan(0);
+  });
+});
