@@ -26,6 +26,7 @@ const HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...']
 const ROW: Record<WeaponId, Record<string, number>> = {
   shotgun: { idle: 0, walk_a: 1, walk_b: 2, aim: 3, shoot: 4, pump_back: 5, pump_fwd: 6, melee_1: 7, melee_2: 8, melee_3: 9 },
   pistol: { idle: 0, walk_a: 1, walk_b: 2, shoot: 3, melee_1: 4, melee_2: 5, melee_3: 6 },
+  silenced: { idle: 0, walk_a: 1, walk_b: 2, shoot: 3, melee_1: 4, melee_2: 5, melee_3: 6 },
   rifle: { idle: 0, walk_a: 1, walk_b: 2, shoot: 3, melee_1: 4, melee_2: 5, melee_3: 6 },
   rail: { idle: 0, walk_a: 1, walk_b: 2, shoot: 3, melee_1: 4, melee_2: 5, melee_3: 6 },
   smg: { idle: 0, walk_a: 1, walk_b: 2, aim: 3, shoot_a: 4, shoot_b: 5, melee_1: 6, melee_2: 7, melee_3: 8 },
@@ -553,11 +554,11 @@ export class GroundScene extends Phaser.Scene {
     const g = this.g, p = g.p;
     switch (e.t) {
       case 'shot': {
-        const w = e.weapon, F = w === 'shotgun' ? 14 : w === 'rail' ? 16 : w === 'pistol' ? 7 : w === 'rifle' ? 4 : 3;
-        audio.sfx(w === 'pistol' ? 'gPistol' : w === 'shotgun' ? 'gShotgun' : w === 'smg' ? 'gSmg' : w === 'rail' ? 'gRail' : 'gRifle');
+        const w = e.weapon, F = w === 'shotgun' ? 14 : w === 'rail' ? 16 : w === 'pistol' ? 7 : w === 'silenced' ? 4 : w === 'rifle' ? 4 : 3;
+        audio.sfx(w === 'silenced' ? 'gSilenced' : w === 'pistol' ? 'gPistol' : w === 'shotgun' ? 'gShotgun' : w === 'smg' ? 'gSmg' : w === 'rail' ? 'gRail' : 'gRifle');
         this.kick.x -= Math.cos(e.ang) * F; this.kick.y -= Math.sin(e.ang) * F; this.cross.spread = Math.min(1, this.cross.spread + (w === 'shotgun' ? 0.9 : 0.35));
-        this.shake = Math.max(this.shake, w === 'shotgun' ? 5 : w === 'rail' ? 6 : 1.5); this.glowT = 3; this.glowBig = w === 'shotgun' || w === 'rail';
-        for (let i = 0; i < (w === 'shotgun' ? 8 : 3); i++) this.prt('smoke', e.x, e.y, e.ang + rnd(-0.5, 0.5), rnd(30, 110), rnd(20, 34), 8, 0xb0b8c4);
+        this.shake = Math.max(this.shake, w === 'shotgun' ? 5 : w === 'rail' ? 6 : 1.5); if (w !== 'silenced') this.glowT = 3; this.glowBig = w === 'shotgun' || w === 'rail';
+        for (let i = 0; i < (w === 'shotgun' ? 8 : w === 'silenced' ? 1 : 3); i++) this.prt('smoke', e.x, e.y, e.ang + rnd(-0.5, 0.5), rnd(30, 110), rnd(20, 34), 8, 0xb0b8c4);
         break;
       }
       case 'casing': {

@@ -1,6 +1,6 @@
 import { store } from './storage';
 
-export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak' | 'gPistol' | 'gShotgun' | 'gSmg' | 'gRail' | 'gRoll' | 'gHurt' | 'gEnemyShot' | 'gHit' | 'gKill' | 'gStyle' | 'gThrow' | 'gRifle' | 'gSwing' | 'gMelee' | 'gDoor' | 'gDoorKick' | 'gDoorBreak' | 'gGlass' | 'gCrate' | 'gCasing' | 'gPump' | 'gBeep' | 'gDodge' | 'gBombLand';
+export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak' | 'gPistol' | 'gSilenced' | 'gShotgun' | 'gSmg' | 'gRail' | 'gRoll' | 'gHurt' | 'gEnemyShot' | 'gHit' | 'gKill' | 'gStyle' | 'gThrow' | 'gRifle' | 'gSwing' | 'gMelee' | 'gDoor' | 'gDoorKick' | 'gDoorBreak' | 'gGlass' | 'gCrate' | 'gCasing' | 'gPump' | 'gBeep' | 'gDodge' | 'gBombLand';
 export type BgmName = 'normal' | 'solar' | 'boss';
 
 const BASE = import.meta.env.BASE_URL;
@@ -127,6 +127,7 @@ class AudioSystem {
       }
       // ---- 지상전 효과음 (합성): 총마다 소리 성격을 달리하고 피치를 살짝 비튼다
       case 'gPistol': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'square', 900 * pr, 240, 0.06, 0.09, t); this.noise(ctx, 0.05, 0.16, 4200, t); break; }
+      case 'gSilenced': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'triangle', 360 * pr, 130, 0.05, 0.05, t); this.noise(ctx, 0.035, 0.05, 1600, t); this.layer(ctx, 'square', 2300, 1500, 0.012, 0.022, t + 0.012); break; }   // 소음기: 낮고 작은 "퓻" + 슬라이드 철컥
       case 'gShotgun': { this.noise(ctx, 0.16, 0.42, 3200, t); this.layer(ctx, 'sine', 150, 46, 0.22, 0.4, t); this.layer(ctx, 'sawtooth', 520, 120, 0.1, 0.12, t); break; }
       case 'gSmg': { const pr = 0.92 + Math.random() * 0.16; this.layer(ctx, 'square', 760 * pr, 280, 0.04, 0.06, t); this.noise(ctx, 0.03, 0.1, 5000, t); break; }
       case 'gRail': { this.layer(ctx, 'sawtooth', 2000, 220, 0.3, 0.18, t); this.layer(ctx, 'sine', 100, 38, 0.35, 0.45, t); this.noise(ctx, 0.2, 0.2, 6000, t); this.duck(200, 0.5); break; }

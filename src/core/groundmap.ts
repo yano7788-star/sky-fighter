@@ -89,7 +89,7 @@ export function buildLevel(): Level {
   en('rifle', 5, 107, { ang: 90 }); en('rifle', 12, 107, { ang: 90 }); en('rifle', 4, 114, { ang: 90 }); en('rifle', 13, 114, { ang: 90 });
   en('rifle', 8, 117, { patrol: [[tc(3), tc(117)], [tc(14), tc(119)]] }); en('charger', 9, 110, { ang: 90 });
   fill(12, 113, 15, 113, T.WALL); fill(12, 113, 12, 115, T.WALL);   // 옥상 오른쪽 환기구 엄폐벽
-  wp('smg', 2, 121);
+  wp('smg', 2, 121); wp('silenced', 7, 124);   // 시작 지점 근처: 소음기 권총
   return { tiles, doors, windows, crates, spawns, pickups, start: { x: tc(9), y: tc(128) } };
 }
 

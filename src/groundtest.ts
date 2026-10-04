@@ -31,7 +31,7 @@ function mountPanel(init: GroundTest, run: (t: GroundTest) => void): void {
   const sel = (id: string, opts: [string, string][], v: string) => `<select id="${id}" style="width:100%;margin:2px 0 6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:3px">${opts.map(([k, l]) => `<option value="${k}"${k === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
   el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><b>지상전 테스트</b><button id="gt-fold" style="background:none;border:0;color:#94a3b8;cursor:pointer">–</button></div><div id="gt-body">
     시작 구역${sel('gt-sec', [['0', '옥상'], ['1', '건물 1층'], ['2', '건물 2층'], ['3', '격납고(보스)']], String(init.section))}
-    무기${sel('gt-w', [['pistol', '권총'], ['rifle', '소총'], ['smg', 'SMG'], ['shotgun', '샷건'], ['rail', '레일 라이플']], init.weapon)}
+    무기${sel('gt-w', [['pistol', '권총'], ['silenced', '소음기 권총'], ['rifle', '소총'], ['smg', 'SMG'], ['shotgun', '샷건'], ['rail', '레일 라이플']], init.weapon)}
     파일럿${sel('gt-p', [['0', '에이스'], ['1', '언니(화력 ×1.2)'], ['2', '동생(관통+탄속)']], String(init.pilot))}
     화면${sel('gt-lay', [['auto', '자동(기기 방향)'], ['portrait', '세로'], ['landscape', '가로']], init.layout ?? 'auto')}
     <label style="display:block;margin:2px 0"><input id="gt-god" type="checkbox"${init.god ? ' checked' : ''}> 무적</label>

@@ -74,3 +74,25 @@ describe('지상전: 폭탄 종류 · 무음 처치 · 연막', () => {
     expect(g.drain().some(x => x.t === 'ghost')).toBe(true);
   });
 });
+
+describe('소음기 권총 · 유리창 투척', () => {
+  it('소음기 권총은 근처(300px)의 적도 깨우지 않지만 일반 권총은 깨운다', () => {
+    const shoot = (weapon: 'pistol' | 'silenced') => {
+      const g = new GroundSim({ seed: 6 }); clean(g); g.p.weapon = weapon; g.p.ammo = weapon === 'pistol' ? Infinity : 24;
+      const e = add(g, 'rifle', g.p.x + 300, g.p.y); e.state = 'idle'; e.ang = 0;
+      for (let i = 0; i < 20; i++) g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 });
+      return e.state;
+    };
+    expect(shoot('pistol')).toBe('alert'); expect(shoot('silenced')).toBe('idle');
+  });
+  it('폭탄류는 유리창을 깨고 지나가 반대쪽에 떨어진다 (깨질 때 소리가 난다)', () => {
+    const g = new GroundSim({ seed: 6 }); clean(g); for (const w of g.windows) w.broken = false;
+    const w = g.windows.find(x => x.o === 'v' && x.section === 1)!;
+    const wy = (w.y0 + w.y1) / 2; g.p.x = w.x0 - 120; g.p.y = wy; g.p.aim = 0; g.p.gsel = 'smoke';
+    const foe = add(g, 'rifle', w.x1 + 200, wy); foe.state = 'idle';
+    g.step({ ...NO_INPUT, bomb: true, ax: 1, ay: 0, aimDist: 300 }); for (let i = 0; i < 90; i++) g.step(NO_INPUT);
+    expect(w.broken).toBe(true);
+    expect(g.smokes.length).toBe(1); expect(g.smokes[0].x).toBeGreaterThan(w.x1);
+    expect(foe.state).toBe('alert');   // 유리 깨지는 소리
+  });
+});

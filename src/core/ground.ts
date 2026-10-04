@@ -8,7 +8,7 @@ import { COLS, ROWS, SECTIONS, TILE, WORLD_H, WORLD_W, buildLevel, flowField, se
  * 우리 게임에 맞춘 부분: 플레이어 체력 4칸, 구역 정리 → 위층 문 해제, 격납고 보스, 무기 줍기/탄약, 점수·콤보.
  */
 export const GW = WORLD_W, GH = WORLD_H;
-export type WeaponId = 'pistol' | 'smg' | 'rifle' | 'shotgun' | 'rail';
+export type WeaponId = 'pistol' | 'silenced' | 'smg' | 'rifle' | 'shotgun' | 'rail';
 export type GKind = 'rifle' | 'charger' | 'sniper' | 'turret' | 'drone' | 'boss' | 'heavy' | 'dog';
 export type FeelKey = WeaponId | 'melee' | 'door' | 'bomb';
 const f = (sec: number): number => Math.round(sec * 60);   // 초 → 틱
@@ -19,6 +19,7 @@ export interface WeaponDef { name: string; dmg: number; cd: number; speed: numbe
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   pistol:  { name: '권총',       dmg: 34,  cd: f(0.26),  speed: 1050 / 60, spread: 0.02, pellets: 1, life: 90, noise: 600, move: 255 / 60, muzzle: [13, 2], ammo: Infinity, pierce: 0, seq: [['shoot', f(0.1)]] },
   rifle:   { name: '소총',       dmg: 20,  cd: f(0.11),  speed: 1200 / 60, spread: 0.03, pellets: 1, life: 90, noise: 700, move: 255 / 60, muzzle: [14, 0], ammo: 60,       pierce: 0, seq: [['shoot', f(0.07)]] },
+  silenced: { name: '소음기 권총', dmg: 30, cd: f(0.28), speed: 1000 / 60, spread: 0.02, pellets: 1, life: 90, noise: 60, move: 250 / 60, muzzle: [21, 2], ammo: 24, pierce: 0, seq: [['shoot', f(0.1)]] },   // 소음 거의 0: 바로 옆이 아니면 아무도 못 듣는다
   smg:     { name: 'SMG',        dmg: 13,  cd: f(0.075), speed: 1100 / 60, spread: 0.07, pellets: 1, life: 90, noise: 700, move: 190 / 60, muzzle: [21, 0], ammo: 90,       pierce: 0, seq: [['shoot_a', f(0.06)], ['aim', f(0.3)]] },
   shotgun: { name: '샷건',       dmg: 22,  cd: 0,        speed: 870 / 60,  spread: 0.2,  pellets: 6, life: 25, noise: 800, move: 125 / 60, muzzle: [20, 1], ammo: 8,        pierce: 0, seq: [['shoot', f(0.09)], ['pump_back', f(0.14), 'casing'], ['pump_fwd', f(0.14)], ['aim', f(0.32)]] },
   rail:    { name: '레일 라이플', dmg: 140, cd: f(0.97),  speed: 1800 / 60, spread: 0,    pellets: 1, life: 60, noise: 800, move: 225 / 60, muzzle: [14, 0], ammo: 8,        pierce: 6, seq: [['shoot', f(0.13)]] },
@@ -29,6 +30,7 @@ export interface Feel { dmg: number; knock: number; stun: number; pose: number; 
 export const FEEL: Record<FeelKey, Feel> = {
   pistol:  { dmg: 34, knock: 260, stun: f(0.25), pose: f(0.14), flash: f(0.07), blood: [9, 3],  spread: 0.55, mist: 1, stamp: 10, shake: 3.5, stop: f(0.03),  dKnock: 430,  dBlood: 24, dMist: 3, dGibs: 0, dPool: 30, dShake: 6,  dStop: f(0.05), dSlow: 0 },
   rifle:   { dmg: 20, knock: 110, stun: f(0.12), pose: f(0.09), flash: f(0.05), blood: [5, 2],  spread: 0.6,  mist: 0, stamp: 7,  shake: 1.5, stop: 0,        dKnock: 300,  dBlood: 16, dMist: 2, dGibs: 0, dPool: 26, dShake: 4,  dStop: f(0.04), dSlow: 0 },
+  silenced: { dmg: 30, knock: 240, stun: f(0.25), pose: f(0.14), flash: f(0.05), blood: [8, 3], spread: 0.5, mist: 1, stamp: 9, shake: 1.5, stop: f(0.03), dKnock: 380, dBlood: 22, dMist: 3, dGibs: 0, dPool: 28, dShake: 3, dStop: f(0.05), dSlow: 0 },
   smg:     { dmg: 13, knock: 50,  stun: f(0.07), pose: f(0.06), flash: f(0.04), blood: [3, 1],  spread: 0.7,  mist: 0, stamp: 5,  shake: 1,   stop: 0,        dKnock: 220,  dBlood: 12, dMist: 1, dGibs: 0, dPool: 24, dShake: 3,  dStop: f(0.03), dSlow: 0 },
   shotgun: { dmg: 22, knock: 210, stun: f(0.4),  pose: f(0.2),  flash: f(0.09), blood: [7, 3],  spread: 0.8,  mist: 1, stamp: 12, shake: 4,   stop: f(0.045), dKnock: 740,  dBlood: 36, dMist: 5, dGibs: 4, dPool: 40, dShake: 11, dStop: f(0.09), dSlow: 250 },
   rail:    { dmg: 140, knock: 600, stun: f(0.6), pose: f(0.2),  flash: f(0.1),  blood: [14, 5], spread: 0.35, mist: 2, stamp: 14, shake: 6,   stop: f(0.05),  dKnock: 900,  dBlood: 30, dMist: 4, dGibs: 2, dPool: 36, dShake: 9,  dStop: f(0.07), dSlow: 150 },
@@ -100,7 +102,7 @@ const ENEMY_DEF: Record<GKind, { hp: number; pts: number; speed: number }> = {
   dog: { hp: 50, pts: 120, speed: 270 / 60 }, turret: { hp: 220, pts: 220, speed: 0 }, drone: { hp: 20, pts: 40, speed: 230 / 60 }, boss: { hp: 2400, pts: 4000, speed: 80 / 60 },
 };
 /** 총알 종류별 피해 배율: 중장갑(헤비·포탑)은 소구경탄에 강하다 */
-const ARMOR: Partial<Record<GKind, Partial<Record<FeelKey, number>>>> = { heavy: { pistol: 0.55, rifle: 0.55, smg: 0.55, shotgun: 0.8 }, turret: { pistol: 0.6, rifle: 0.6, smg: 0.6, shotgun: 0.8 }, boss: {} };
+const ARMOR: Partial<Record<GKind, Partial<Record<FeelKey, number>>>> = { heavy: { pistol: 0.55, silenced: 0.55, rifle: 0.55, smg: 0.55, shotgun: 0.8 }, turret: { pistol: 0.6, rifle: 0.6, smg: 0.6, shotgun: 0.8 }, boss: {} };
 const DROPS: Partial<Record<GKind, { w: WeaponId; p: number }>> = { rifle: { w: 'smg', p: 0.35 }, heavy: { w: 'shotgun', p: 0.7 }, sniper: { w: 'rail', p: 0.4 }, charger: { w: 'rifle', p: 0.3 } };
 /** 폭탄 드랍 확률(적 종류별, 아주 낮게). 소지 한도는 GROUND.grenadeMax */
 const BOMB_DROP: Partial<Record<GKind, number>> = { rifle: 0.07, charger: 0.1, sniper: 0.12, heavy: 0.25, turret: 0.12 };
@@ -218,7 +220,7 @@ export class GroundSim {
   }
   canSee(ax: number, ay: number, bx: number, by: number): boolean { return this.los(ax, ay, bx, by); }
   private rayEnd(ax: number, ay: number, ang: number, max: number): [number, number] {   // 마지막 빈 지점 (폭탄 경로)
-    let lx = ax, ly = ay; for (let d = 10; d <= max; d += 10) { const x = ax + Math.cos(ang) * d, y = ay + Math.sin(ang) * d; if (this.obstacleAt(x, y)) break; lx = x; ly = y; }
+    let lx = ax, ly = ay; for (let d = 10; d <= max; d += 10) { const x = ax + Math.cos(ang) * d, y = ay + Math.sin(ang) * d; const ob = this.obstacleAt(x, y); if (ob && ob.type !== 'window') break; lx = x; ly = y; }   // 유리창은 폭탄이 깨고 지나간다
     return [lx, ly];
   }
   walkable = (c: number, r: number): boolean => {
@@ -457,6 +459,7 @@ export class GroundSim {
   private updateBombs(): void {
     for (let i = this.bombs.length - 1; i >= 0; i--) {
       const b = this.bombs[i]; b.t++; const u = Math.min(1, b.t / b.flight); b.x = b.sx + (b.tx - b.sx) * u; b.y = b.sy + (b.ty - b.sy) * u;
+      const ob = this.obstacleAt(b.x, b.y); if (ob?.type === 'window') this.breakWindow(ob.o as GWindow);   // 날아가다 유리창에 닿으면 깨지는 소리가 난다
       if (b.t >= b.fuse) { this.bombs.splice(i, 1); if (b.type === 'flash') this.flashBang(b.x, b.y); else if (b.type === 'smoke') this.smokeBomb(b.x, b.y); else this.explode(b.x, b.y, false); }
     }
   }
