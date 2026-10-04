@@ -228,7 +228,7 @@ export class GroundScene extends Phaser.Scene {
   private isTouch(): boolean { return this.touchMode || this.sys.game.device.input.touch; }
   /** 화면 방향에 맞춰 논리 화면 크기(세로 450×800 / 가로 800×450)와 HUD·컨트롤 배치를 다시 잡는다 */
   private applyLayout(force = false): void {
-    const wide = window.innerWidth > window.innerHeight * 1.1, pref = loadLay(), land = this.test?.layout === 'landscape' ? true : this.test?.layout === 'portrait' ? false : pref ? pref === 'land' : wide;
+    const wide = window.innerWidth > window.innerHeight * 1.1, pref = loadLay(), land = pref ? pref === 'land' : wide;
     const asp = Math.max(16 / 9, Math.min(2.3, Math.max(window.innerWidth, window.innerHeight) / Math.max(1, Math.min(window.innerWidth, window.innerHeight)))), vw = land ? Math.round((450 * asp) / 2) * 2 : W, vh = land ? 450 : H, changed = vw !== this.vw || vh !== this.vh;
     this.landscape = land; this.vw = vw; this.vh = vh;
     if (changed || force) { this.scale.setGameSize(vw * R, vh * R); this.cameras.main.setSize(vw * R, vh * R); }
