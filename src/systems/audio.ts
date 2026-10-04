@@ -25,6 +25,9 @@ class AudioSystem {
   private unlocked = false;
   private lastPlayed: Partial<Record<SfxName, number>> = {};
   private suspended = false;
+  private musicMul = 1;      // 은신 중에는 음악을 거의 끈다 (부드럽게 오르내림)
+  private stealth: number | null = null;   // 은신 긴장도 0~1 (null = 은신 아님)
+  private hbMs = 0; private drone: { g: GainNode } | null = null;
   private duckUntil = 0;     // BGM 덕킹: 이 시각까지 음악 볼륨을 낮춘다
   private duckAmt = 1;
 
@@ -213,15 +216,37 @@ class AudioSystem {
     else if (p && p.catch) p.catch(() => { /* 무시 */ });
   }
 
+  /** 은신 긴장도: 소음기 은신 중이면 0~1(가까운 적일수록 큼), 아니면 null. 음악을 10%로 낮추고 저음 드론 + 심장 박동을 깐다 */
+  setStealth(level: number | null): void { this.stealth = level; }
+  /** 매 프레임(dt ms) 호출: 드론 볼륨과 심장 박동 */
+  tickStealth(dtMs: number): void {
+    const ctx = this.ctx, on = this.stealth !== null && !this.muted && !this.suspended && !!ctx && ctx.state === 'running';
+    if (!ctx || (!on && !this.drone)) return;
+    if (!this.drone && on) {   // 낮은 두 음(52·78Hz)이 천천히 맥놀이치는 드론
+      const g = ctx.createGain(); g.gain.value = 0; g.connect(ctx.destination);
+      for (const [fr, vol] of [[52, 1], [55.5, 0.8], [78, 0.35]] as const) { const o = ctx.createOscillator(), og = ctx.createGain(); o.type = 'sine'; o.frequency.value = fr; og.gain.value = vol; o.connect(og); og.connect(g); o.start(); }
+      this.drone = { g };
+    }
+    if (this.drone && ctx) this.drone.g.gain.setTargetAtTime(on ? 0.05 : 0, ctx.currentTime, 0.6);
+    if (!on || !ctx) { this.hbMs = 0; return; }
+    const k = this.stealth ?? 0;
+    this.hbMs += dtMs;
+    if (this.hbMs >= 1150 - 620 * k) {   // 적이 가까울수록 심장이 빨라진다
+      this.hbMs = 0; const t = ctx.currentTime, v = 0.16 + 0.14 * k;
+      this.layer(ctx, 'sine', 72, 40, 0.14, v, t); this.layer(ctx, 'sine', 64, 36, 0.12, v * 0.65, t + 0.17);
+    }
+  }
+
   /** 매 틱(60Hz) 호출: want 트랙으로 크로스페이드, null이면 페이드아웃 */
   updateMusic(want: BgmName | null): void {
     if (!this.unlocked || this.suspended) return;
+    this.musicMul += ((this.stealth !== null ? 0.1 : 1) - this.musicMul) * (this.stealth !== null ? 0.03 : 0.05);
     if (want === 'boss' && this.tracks.boss?.failed) want = 'normal';
     for (const name of Object.keys(BGM_TRACKS) as BgmName[]) {
       const cfg = BGM_TRACKS[name];
       const t = name === want ? this.get(name) : this.tracks[name];
       if (!t || t.failed) continue;
-      const target = name === want && !this.muted ? cfg.vol * (performance.now() < this.duckUntil ? this.duckAmt : 1) : 0;
+      const target = name === want && !this.muted ? cfg.vol * this.musicMul * (performance.now() < this.duckUntil ? this.duckAmt : 1) : 0;
       const dv = target - t.vol;
       this.setVol(t, Math.max(0, Math.min(1, t.vol + dv * 0.06 + Math.sign(dv) * 0.002)));
       if (target > 0 && t.el.paused) this.play(t);

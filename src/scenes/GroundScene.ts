@@ -164,7 +164,7 @@ export class GroundScene extends Phaser.Scene {
     this.world.setVisible(false); this.ui.setVisible(false);
     if (this.test?.skipIntro) { this.world.setVisible(true); this.ui.setVisible(true); this.veil.setAlpha(0); this.stage = 'PLAY'; this.tutorialT = 60 * 7; }
     else this.runIntro();
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { audio.resume(); });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { audio.setStealth(null); audio.tickStealth(0); audio.resume(); });
   }
 
   // ---------------------------------------------------------------- 월드 구성: 구역마다 바닥/벽 캔버스(도트 해상도) + 데칼 RT
@@ -492,6 +492,7 @@ export class GroundScene extends Phaser.Scene {
         if (this.hitStop > 0) { this.hitStop--; this.tickFx(0.2); continue; }   // 히트스톱: 시뮬레이션은 멈추고 입자만 아주 느리게
         this.tick();
       }
+      audio.setStealth(this.g.stealthLevel); audio.tickStealth(Math.min(delta, 50));
       audio.updateMusic(this.g.isBossRoom ? 'boss' : 'solar');
     }
     if (this.stage === 'DEAD' && this.deadTimer > 0) this.deadTimer--;

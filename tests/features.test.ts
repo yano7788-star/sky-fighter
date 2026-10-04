@@ -96,3 +96,15 @@ describe('소음기 권총 · 유리창 투척', () => {
     expect(foe.state).toBe('alert');   // 유리 깨지는 소리
   });
 });
+
+describe('은신 긴장도 (소음기 → 음악 약화)', () => {
+  it('소음기를 들고 경계 전 적이 있으면 긴장도가 나오고, 가까울수록 크며, 들키면 null', () => {
+    const g = new GroundSim({ seed: 6 }); clean(g);
+    expect(g.stealthLevel).toBeNull();   // 일반 권총
+    g.p.weapon = 'silenced'; g.p.ammo = 24; expect(g.stealthLevel).toBeNull();   // 적 없음
+    const e = add(g, 'rifle', g.p.x, g.p.y - 700); e.state = 'idle'; const far = g.stealthLevel!;
+    e.y = g.p.y - 200; const near = g.stealthLevel!;
+    expect(far).toBeGreaterThanOrEqual(0); expect(near).toBeGreaterThan(far);
+    (g as any).alertEnemy(e); expect(g.stealthLevel).toBeNull();
+  });
+});

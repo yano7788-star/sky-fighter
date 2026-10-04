@@ -1,5 +1,5 @@
 // 오프라인 플레이용 서비스워커. 배포 시 VERSION을 올리면 이전 캐시가 정리된다.
-const VERSION = 'sf-v10';
+const VERSION = 'sf-v11';
 const CORE = ['./', 'index.html', 'manifest.webmanifest',
   'assets/icons/icon-192.png', 'assets/icons/icon-512.png'];
 

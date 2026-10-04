@@ -448,6 +448,13 @@ export class GroundSim {
     c.broken = true; this.emit({ t: 'crateBreak', x: c.x, y: c.y, barrel: c.kind === 'barrel' });
     if (c.kind === 'barrel') this.explode(c.x, c.y, true);   // 통: 폭발 (연쇄)
   }
+  /** 은신 긴장도(소음기 은신 중에만): 같은 구역에서 경계 전인 가장 가까운 적이 가까울수록 1에 가깝다. 아니면 null (→ 음악 복귀) */
+  get stealthLevel(): number | null {
+    const p = this.p, s = this.section;
+    if (p.weapon !== 'silenced' || this.alerted[s] || this.isBossRoom) return null;
+    let d = 1e9; for (const e of this.enemies) if (e.section === s && e.state === 'idle' && !e.dying) d = Math.min(d, Math.hypot(e.x - p.x, e.y - p.y));
+    return d >= 1e9 ? null : Math.max(0, Math.min(1, 1 - d / 800));
+  }
   bombCount(t: BombType): number { return t === 'frag' ? this.p.grenades : t === 'flash' ? this.p.flashes : this.p.smokes; }
   private swapBomb(): void { const i = BOMB_TYPES.indexOf(this.p.gsel); this.p.gsel = BOMB_TYPES[(i + 1) % 3]; this.emit({ t: 'swap', to: this.p.gsel }); }
   private releaseBomb(): void {
