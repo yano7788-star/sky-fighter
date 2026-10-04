@@ -1,6 +1,6 @@
 import { store } from './storage';
 
-export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak' | 'gPistol' | 'gShotgun' | 'gSmg' | 'gRail' | 'gRoll' | 'gHurt' | 'gEnemyShot' | 'gHit' | 'gKill' | 'gStyle' | 'gThrow' | 'gRifle' | 'gSwing' | 'gMelee' | 'gDoor' | 'gDoorKick' | 'gDoorBreak' | 'gGlass' | 'gCrate' | 'gCasing' | 'gPump' | 'gBeep' | 'gDodge' | 'gBombLand';
+export type SfxName = 'laser' | 'missile' | 'boom' | 'enrage' | 'item' | 'heal' | 'missileHit' | 'laserCharge' | 'laserBeam' | 'bossHit' | 'bossHeavy' | 'laserHit' | 'bossBreak' | 'gPistol' | 'gSilenced' | 'gSiren' | 'gShotgun' | 'gSmg' | 'gRail' | 'gRoll' | 'gHurt' | 'gEnemyShot' | 'gHit' | 'gKill' | 'gStyle' | 'gThrow' | 'gRifle' | 'gSwing' | 'gMelee' | 'gDoor' | 'gDoorKick' | 'gDoorBreak' | 'gGlass' | 'gCrate' | 'gCasing' | 'gPump' | 'gBeep' | 'gDodge' | 'gBombLand';
 export type BgmName = 'normal' | 'solar' | 'boss';
 
 const BASE = import.meta.env.BASE_URL;
@@ -25,6 +25,9 @@ class AudioSystem {
   private unlocked = false;
   private lastPlayed: Partial<Record<SfxName, number>> = {};
   private suspended = false;
+  private musicMul = 1;      // 은신 중에는 음악을 거의 끈다 (부드럽게 오르내림)
+  private stealth: number | null = null;   // 은신 긴장도 0~1 (null = 은신 아님)
+  private hbMs = 0; private drone: { g: GainNode } | null = null;
   private duckUntil = 0;     // BGM 덕킹: 이 시각까지 음악 볼륨을 낮춘다
   private duckAmt = 1;
 
@@ -127,6 +130,8 @@ class AudioSystem {
       }
       // ---- 지상전 효과음 (합성): 총마다 소리 성격을 달리하고 피치를 살짝 비튼다
       case 'gPistol': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'square', 900 * pr, 240, 0.06, 0.09, t); this.noise(ctx, 0.05, 0.16, 4200, t); break; }
+      case 'gSilenced': { const pr = 0.95 + Math.random() * 0.1; this.layer(ctx, 'triangle', 360 * pr, 130, 0.05, 0.05, t); this.noise(ctx, 0.035, 0.05, 1600, t); this.layer(ctx, 'square', 2300, 1500, 0.012, 0.022, t + 0.012); break; }   // 소음기: 낮고 작은 "퓻" + 슬라이드 철컥
+      case 'gSiren': { this.layer(ctx, 'sawtooth', 620, 900, 0.34, 0.035, t); this.layer(ctx, 'sawtooth', 900, 620, 0.34, 0.035, t + 0.36); break; }   // 경보 사이렌
       case 'gShotgun': { this.noise(ctx, 0.16, 0.42, 3200, t); this.layer(ctx, 'sine', 150, 46, 0.22, 0.4, t); this.layer(ctx, 'sawtooth', 520, 120, 0.1, 0.12, t); break; }
       case 'gSmg': { const pr = 0.92 + Math.random() * 0.16; this.layer(ctx, 'square', 760 * pr, 280, 0.04, 0.06, t); this.noise(ctx, 0.03, 0.1, 5000, t); break; }
       case 'gRail': { this.layer(ctx, 'sawtooth', 2000, 220, 0.3, 0.18, t); this.layer(ctx, 'sine', 100, 38, 0.35, 0.45, t); this.noise(ctx, 0.2, 0.2, 6000, t); this.duck(200, 0.5); break; }
@@ -212,15 +217,37 @@ class AudioSystem {
     else if (p && p.catch) p.catch(() => { /* 무시 */ });
   }
 
+  /** 은신 긴장도: 소음기 은신 중이면 0~1(가까운 적일수록 큼), 아니면 null. 음악을 10%로 낮추고 저음 드론 + 심장 박동을 깐다 */
+  setStealth(level: number | null): void { this.stealth = level; }
+  /** 매 프레임(dt ms) 호출: 드론 볼륨과 심장 박동 */
+  tickStealth(dtMs: number): void {
+    const ctx = this.ctx, on = this.stealth !== null && !this.muted && !this.suspended && !!ctx && ctx.state === 'running';
+    if (!ctx || (!on && !this.drone)) return;
+    if (!this.drone && on) {   // 낮은 두 음(52·78Hz)이 천천히 맥놀이치는 드론
+      const g = ctx.createGain(); g.gain.value = 0; g.connect(ctx.destination);
+      for (const [fr, vol] of [[52, 1], [55.5, 0.8], [78, 0.35]] as const) { const o = ctx.createOscillator(), og = ctx.createGain(); o.type = 'sine'; o.frequency.value = fr; og.gain.value = vol; o.connect(og); og.connect(g); o.start(); }
+      this.drone = { g };
+    }
+    if (this.drone && ctx) this.drone.g.gain.setTargetAtTime(on ? 0.05 : 0, ctx.currentTime, 0.6);
+    if (!on || !ctx) { this.hbMs = 0; return; }
+    const k = this.stealth ?? 0;
+    this.hbMs += dtMs;
+    if (this.hbMs >= 1150 - 620 * k) {   // 적이 가까울수록 심장이 빨라진다
+      this.hbMs = 0; const t = ctx.currentTime, v = 0.16 + 0.14 * k;
+      this.layer(ctx, 'sine', 72, 40, 0.14, v, t); this.layer(ctx, 'sine', 64, 36, 0.12, v * 0.65, t + 0.17);
+    }
+  }
+
   /** 매 틱(60Hz) 호출: want 트랙으로 크로스페이드, null이면 페이드아웃 */
   updateMusic(want: BgmName | null): void {
     if (!this.unlocked || this.suspended) return;
+    this.musicMul += ((this.stealth !== null ? 0.1 : 1) - this.musicMul) * (this.stealth !== null ? 0.03 : 0.05);
     if (want === 'boss' && this.tracks.boss?.failed) want = 'normal';
     for (const name of Object.keys(BGM_TRACKS) as BgmName[]) {
       const cfg = BGM_TRACKS[name];
       const t = name === want ? this.get(name) : this.tracks[name];
       if (!t || t.failed) continue;
-      const target = name === want && !this.muted ? cfg.vol * (performance.now() < this.duckUntil ? this.duckAmt : 1) : 0;
+      const target = name === want && !this.muted ? cfg.vol * this.musicMul * (performance.now() < this.duckUntil ? this.duckAmt : 1) : 0;
       const dv = target - t.vol;
       this.setVol(t, Math.max(0, Math.min(1, t.vol + dv * 0.06 + Math.sign(dv) * 0.002)));
       if (target > 0 && t.el.paused) this.play(t);

@@ -90,6 +90,10 @@ export class Sim {
   // 지상전(강하): 3스테이지 보스 격파 후 씬이 GroundSim 을 돌린다. 씬이 켜기 전(groundEnabled=false)에는 건너뛴다 (테스트·시뮬레이션)
   groundEnabled = false; groundRequest = false; groundActive = false; groundReturn = false; private groundOffered = false;
   groundResult: { win: boolean; score: number; rooms: number } | null = null;
+  // 인질 구출 임무: 4스테이지 클리어 직후 선택 임무(실패해도 게임오버 없이 5스테이지로)
+  rescueRequest = false; rescueActive = false; private rescueOffered = false;
+  rescueResult: { rescued: boolean; score: number } | null = null;
+  rescueUnlocked: 0 | 1 | 2 = 0;   // 이번 구출로 새로 해금된 자매(1=언니, 2=동생). 본편 복귀 때 알림용
   overload = false;      // 3스테이지 보스가 쓰러진 뒤 자폭 카운트다운 중 (지상전 연결 연출)
   damaged = false;       // 자폭에 휘말려 기체가 불타는 중
   ejectLeft = 0;         // 탈출 버튼이 떠 있는 남은 틱 (0 이면 자동 탈출)                       // 인해전술 예고 남은 프레임 (HUD 경고 표시)
@@ -225,9 +229,24 @@ export class Sim {
   /** 지상전에 넘길 옵션: 현재 빌드의 화력·연사·체력을 반영 */
   groundOpts(seed: number): GroundOpts {
     const st = this.stats, pilot = this.meta.pilot === 'sister1' ? 1 : this.meta.pilot === 'sister2' ? 2 : 0;
-    return { seed, pilot, dmgMult: Math.min(2, st.dmgMult), rateMult: Math.min(1.8, st.rateMult), maxHp: GROUND.hp + (st.maxEnergyBonus > 0 ? 1 : 0), grenades: 2 + (this.hasRelic('r_bombpack') ? 1 : 0), assist: false };
+    return { seed, pilot, dmgMult: Math.min(2, st.dmgMult), rateMult: Math.min(1.8, st.rateMult), maxHp: GROUND.hp + (st.maxEnergyBonus > 0 ? 1 : 0), grenades: 2 + (this.hasRelic('r_bombpack') ? 1 : 0), assist: false, mission: 'assault', hostageWho: 2 };
   }
   startGround(): void { this.groundRequest = false; this.groundActive = true; }
+  /** 납치된 자매: 언니를 타면 동생, 동생을 타면 언니, 에이스는 매 판 무작위(시드) */
+  rescueWho(): 1 | 2 { return this.meta.pilot === 'sister1' ? 2 : this.meta.pilot === 'sister2' ? 1 : (this.rescueSeed & 1 ? 1 : 2); }
+  private rescueSeed = 0;
+  rescueOpts(seed: number): GroundOpts { this.rescueSeed = seed; return { ...this.groundOpts(seed), mission: 'rescue', hostageWho: this.rescueWho() }; }
+  startRescue(): void { this.rescueRequest = false; this.rescueActive = true; }
+  /** 구출 성공(점수·체력 회복·유물) / 실패(보상 없이 5스테이지로, 게임오버 아님) */
+  finishRescue(r: { rescued: boolean; score: number }): void {
+    this.rescueActive = false; this.rescueResult = r; this.enemyBullets.length = 0; this.vacuum = 0;
+    const p = this.player; p.invincible = Math.max(p.invincible, 200);
+    if (!r.rescued) { this.emit({ t: 'sfx', name: 'enrage' }); this.beginNextStage(); return; }
+    this.score += r.score; p.energy = Math.min(p.maxEnergy, p.energy + p.maxEnergy * 0.5);
+    const offer = offerRelics(this.build, this.rng);
+    if (offer.length) { this.pending = offer; this.groundReturn = true; this.emit({ t: 'sfx', name: 'item' }); }
+    else this.beginNextStage();
+  }
   /** 지상전 중 사망 시 목숨 하나로 이어하기. 없으면 false → 본편 게임오버 */
   useGroundLife(): boolean { if (this.lives > 0) { this.lives--; return true; } return false; }
   groundFail(): void {
@@ -251,7 +270,7 @@ export class Sim {
   step(inp: SimInput): void {
     if (this.state !== 'PLAYING') return;
     if (this.pending) return;                                   // 카드 선택 중에는 정지
-    if (this.groundRequest || this.groundActive) return;        // 지상전 진행 중에는 본편 정지
+    if (this.groundRequest || this.groundActive || this.rescueRequest || this.rescueActive) return;        // 지상전·구출 임무 진행 중에는 본편 정지
     if (this.ult.phase === 'CUTIN' || this.ult.phase === 'FALL') { this.stepUltCinematic(); return; }
 
     this.frame++;
@@ -599,6 +618,7 @@ export class Sim {
         if (--this.phaseTimer <= 0) {
           if (this.bossTier >= MAX_TIER && !this.endless) { this.state = 'GAMECLEAR'; this.emit({ t: 'gameclear' }); }
           else if (this.groundEnabled && !this.groundOffered && this.stageTier === 3) { this.groundOffered = true; this.groundRequest = true; this.enemyBullets.length = 0; }   // 3스테이지 보스 직후: 강하
+          else if (this.groundEnabled && !this.rescueOffered && !this.endless && this.stageTier === 4) { this.rescueOffered = true; this.rescueRequest = true; this.enemyBullets.length = 0; }   // 4스테이지 직후: 인질 구출 임무
           else this.beginNextStage();
         }
         break;
@@ -630,7 +650,7 @@ export class Sim {
     this.stageFrames = 0; this.hordeDone = []; this.hordeWarn = 0; this.formWarn = null; this.formPlan = null; this.formNext = FORMATION.first; this.formRec.clear();
     this.stagePhase = 'INTRO'; this.phaseTimer = PHASE_FRAMES.INTRO;
     this.midDone = false; this.stageHits = 0; this.stageRank = null;
-    this.route = null; this.groundOffered = false;
+    this.route = null; this.groundOffered = false; this.rescueOffered = false;
     this.pending = offerRoutes(this.rng);   // 다음 스테이지로 가는 항로 선택 (안전 1 + 위험 1)
     for (const c of [this.comp.cat, this.comp.dog]) { c.used = false; c.pity = 0; }   // 동료는 스테이지마다 다시 사용 가능
   }

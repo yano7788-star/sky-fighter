@@ -74,3 +74,97 @@ describe('지상전: 폭탄 종류 · 무음 처치 · 연막', () => {
     expect(g.drain().some(x => x.t === 'ghost')).toBe(true);
   });
 });
+
+describe('소음기 권총 · 유리창 투척', () => {
+  it('소음기 권총은 근처(300px)의 적도 깨우지 않지만 일반 권총은 깨운다', () => {
+    const shoot = (weapon: 'pistol' | 'silenced') => {
+      const g = new GroundSim({ seed: 6 }); clean(g); g.p.weapon = weapon; g.p.ammo = weapon === 'pistol' ? Infinity : 24;
+      const e = add(g, 'rifle', g.p.x + 300, g.p.y); e.state = 'idle'; e.ang = 0;
+      for (let i = 0; i < 20; i++) g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 });
+      return e.state;
+    };
+    expect(shoot('pistol')).toBe('alert'); expect(shoot('silenced')).toBe('idle');
+  });
+  it('폭탄류는 유리창을 깨고 지나가 반대쪽에 떨어진다 (깨질 때 소리가 난다)', () => {
+    const g = new GroundSim({ seed: 6 }); clean(g); for (const w of g.windows) w.broken = false;
+    const w = g.windows.find(x => x.o === 'v' && x.section === 1)!;
+    const wy = (w.y0 + w.y1) / 2; g.p.x = w.x0 - 120; g.p.y = wy; g.p.aim = 0; g.p.gsel = 'smoke';
+    const foe = add(g, 'rifle', w.x1 + 200, wy); foe.state = 'idle';
+    g.step({ ...NO_INPUT, bomb: true, ax: 1, ay: 0, aimDist: 300 }); for (let i = 0; i < 90; i++) g.step(NO_INPUT);
+    expect(w.broken).toBe(true);
+    expect(g.smokes.length).toBe(1); expect(g.smokes[0].x).toBeGreaterThan(w.x1);
+    expect(foe.state).toBe('alert');   // 유리 깨지는 소리
+  });
+});
+
+describe('은신 긴장도 (소음기 → 음악 약화)', () => {
+  it('소음기를 들고 경계 전 적이 있으면 긴장도가 나오고, 가까울수록 크며, 들키면 null', () => {
+    const g = new GroundSim({ seed: 6 }); clean(g);
+    expect(g.stealthLevel).toBeNull();   // 일반 권총
+    g.p.weapon = 'silenced'; g.p.ammo = 24; expect(g.stealthLevel).toBeNull();   // 적 없음
+    const e = add(g, 'rifle', g.p.x, g.p.y - 700); e.state = 'idle'; const far = g.stealthLevel!;
+    e.y = g.p.y - 200; const near = g.stealthLevel!;
+    expect(far).toBeGreaterThanOrEqual(0); expect(near).toBeGreaterThan(far);
+    (g as any).alertEnemy(e); expect(g.stealthLevel).toBeNull();
+  });
+});
+
+describe('인질 구출 임무 (4스테이지 뒤)', () => {
+  const mk = (who: 1 | 2 = 2) => new GroundSim({ seed: 3, mission: 'rescue', hostageWho: who });
+  it('소음기 권총 + 섬광·연막 2개로 시작, 인질은 감방에 갇혀 있고 아래 두 문은 열려 있다', () => {
+    const g = mk();
+    expect(g.p.weapon).toBe('silenced'); expect(g.p.flashes).toBe(2); expect(g.p.smokes).toBe(2);
+    expect(g.hostage?.state).toBe('caged'); expect(g.secs[2].name).toBe('감방동');
+    const locked = g.doors.filter(d => d.locked).map(d => d.kind); expect(locked.sort()).toEqual(['exit', 'gate']);   // 감방동→헬기장 문과 출구만 잠김
+  });
+  it('인질 곁에 1.2초 머물면 풀려나고 경보·증원·문 해제', () => {
+    const g = mk(); const h = g.hostage!; g.enemies.length = 0; g.p.x = h.x - 60; g.p.y = h.y; g.p.invuln = 99999;
+    run(g, 80); expect(h.state).toBe('free'); expect(g.alarm).toBe(true);
+    expect(g.drain().some(e => e.t === 'hostageFree')).toBe(true);
+    expect(g.doors.filter(d => d.locked).length).toBe(0);
+    run(g, 130); expect(g.enemies.some(e => e.state === 'alert')).toBe(true);   // 1차 증원
+  });
+  it('인질과 함께 헬기장 위쪽에 도착하면 승리(구출 성공), 인질 없이는 승리하지 않는다', () => {
+    const g = mk(); const h = g.hostage!; g.enemies.length = 0; g.p.invuln = 99999;
+    g.p.x = 9 * TILE; g.p.y = 1.5 * TILE; run(g, 5); expect(g.state).toBe('PLAY');
+    g.p.x = h.x - 60; g.p.y = h.y; run(g, 80); expect(h.state).toBe('free'); g.enemies.length = 0;
+    g.p.x = 9 * TILE; g.p.y = 1.8 * TILE; h.x = 9 * TILE; h.y = 2.6 * TILE; run(g, 3);
+    expect(g.state).toBe('WIN'); expect(g.result().rescued).toBe(true);
+  });
+  it('풀린 인질은 플레이어를 따라온다', () => {
+    const g = mk(); const h = g.hostage!; g.enemies.length = 0; g.p.invuln = 99999; g.p.x = h.x - 60; g.p.y = h.y; run(g, 80);
+    g.p.x = 9 * TILE; g.p.y = 62 * TILE; const d0 = Math.hypot(h.x - g.p.x, h.y - g.p.y); run(g, 240);
+    expect(Math.hypot(h.x - g.p.x, h.y - g.p.y)).toBeLessThan(Math.max(130, d0 * 0.5));
+  });
+  it('Sim: 4스테이지 클리어 직후 구출 임무가 열리고, 성공하면 유물 보상 / 실패해도 게임오버 없이 5스테이지로', () => {
+    const mkS = () => { const s = new Sim(3, metaParams({} as any, 'sister1', null)); s.groundEnabled = true; s.startAtTier(4); s.bossTier = 4; s.stagePhase = 'CLEAR'; s.phaseTimer = 1; s.player.invincible = 99999; return s; };
+    const s = mkS(); s.step(idle(s)); s.step(idle(s)); expect(s.rescueRequest).toBe(true); expect(s.rescueWho()).toBe(2);
+    expect(new Sim(3, metaParams({} as any, 'sister2', null)).rescueWho()).toBe(1);
+    s.startRescue(); expect(s.rescueActive).toBe(true); const sc0 = s.score;
+    s.finishRescue({ rescued: true, score: 3000 }); expect(s.score).toBe(sc0 + 3000); expect(s.pending?.length).toBeGreaterThan(0);
+    const t = mkS(); t.step(idle(t)); t.step(idle(t)); t.startRescue(); t.finishRescue({ rescued: false, score: 0 });
+    expect(t.state).toBe('PLAYING'); expect(t.stageTier).toBe(5); expect(t.rescueActive).toBe(false);
+  });
+});
+
+describe('조심 접근 · 암살', () => {
+  const setup = (seed = 8) => { const g = new GroundSim({ seed }); clean(g); g.p.invuln = 99999; return g; };
+  it('적 등 뒤 사각지대: 정면 80px에서는 들키지만 등 뒤 80px에서는 안 들키고, 55px 안에서는 들킨다', () => {
+    const front = setup(); const a = add(front, 'rifle', front.p.x, front.p.y - 80, Math.PI / 2); a.state = 'idle'; run(front, 40); expect(a.state).toBe('alert');   // 적이 아래(플레이어 쪽)를 본다
+    const back = setup(); const b = add(back, 'rifle', back.p.x, back.p.y - 80, -Math.PI / 2); b.state = 'idle'; run(back, 40); expect(b.state).toBe('idle');      // 적이 위(반대쪽)를 본다
+    const close = setup(); const c = add(close, 'rifle', close.p.x, close.p.y - 40, -Math.PI / 2); c.state = 'idle'; run(close, 40); expect(c.state).toBe('alert');
+  });
+  it('평소 걸음은 소리가 나고(150px) 조심 걷기는 소리가 없다', () => {
+    const walk = (sneak: boolean) => { const g = setup(); const e = add(g, 'rifle', g.p.x + 110, g.p.y, 0); e.state = 'idle'; for (let i = 0; i < 70; i++) g.step({ ...NO_INPUT, mx: 0, my: -1, sneak }); return e.state; };   // 적은 오른쪽(바깥)을 보고 있어 등 뒤 110px
+    expect(walk(false)).toBe('alert'); expect(walk(true)).toBe('idle');
+  });
+  it('등 뒤에서 근접 → 암살: 경계 전·가까움·등 뒤일 때만, 소리 없이 즉사 + 보너스', () => {
+    const g = setup(); const e = add(g, 'rifle', g.p.x, g.p.y - 70, -Math.PI / 2); e.state = 'idle';
+    expect(g.stabTarget()).toBe(e);
+    const sc0 = g.score; g.step({ ...NO_INPUT, melee: true }); run(g, 30);
+    const evs = g.drain(); expect(evs.some(x => x.t === 'assassinate')).toBe(true); expect(g.enemies.includes(e)).toBe(false); expect(g.score).toBeGreaterThan(sc0 + 150);
+    const f = setup(); const h = add(f, 'rifle', f.p.x, f.p.y - 70, Math.PI / 2); h.state = 'idle'; expect(f.stabTarget()).toBeNull();   // 정면
+    const k = setup(); const hv = add(k, 'heavy', k.p.x, k.p.y - 70, -Math.PI / 2); hv.state = 'idle'; expect(k.stabTarget()).toBeNull();   // 헤비 제외
+    const m = setup(); const al = add(m, 'rifle', m.p.x, m.p.y - 70, -Math.PI / 2); al.state = 'alert'; expect(m.stabTarget()).toBeNull();   // 경계 중
+  });
+});

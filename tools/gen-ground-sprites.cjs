@@ -129,6 +129,7 @@ function bossFrame(kind) {   // 64×64, 오른쪽을 본다
 function bladeSprite() { const p = new Pix(22, 8); p.rect(0, 3, 4, 4, C.dark); p.rect(5, 2, 20, 5, '#ff3030'); p.rect(5, 3, 21, 4, '#ffd0d0'); p.rect(6, 1, 18, 1, '#ff606088'.slice(0, 7)); p.outline(); return p; }
 function longGunSprite() { const p = new Pix(30, 7); p.rect(0, 2, 29, 4, C.dark); p.rect(0, 2, 29, 2, C.steelL); p.rect(8, 0, 13, 1, '#3a414d'); p.rect(26, 1, 29, 5, '#2a2d34'); p.outline(); return p; }
 function shieldSprite() { const p = new Pix(10, 26); p.rect(0, 0, 8, 24, C.steel); p.rect(0, 0, 8, 1, C.steelL); p.rect(7, 0, 8, 24, C.steelD); p.rect(2, 8, 5, 16, '#2f3540'); p.outline(); return p; }
+function silencedIcon() { const p = new Pix(22, 9); p.rect(0, 4, 4, 8, '#5c3a1e'); p.rect(0, 4, 4, 5, '#80542e'); p.rect(3, 1, 13, 4, '#34343a'); p.rect(3, 1, 13, 1, '#737380'); p.rect(14, 2, 20, 3, '#22252d'); p.rect(14, 2, 20, 2, '#5c6472'); p.rect(21, 2, 21, 3, '#12141a'); p.rect(8, 5, 10, 6, '#2a2a30'); p.outline(); return p; }
 function rifleIcon() { const p = new Pix(38, 10); p.rect(0, 3, 9, 7, '#5c3a1e'); p.rect(0, 3, 9, 3, '#80542e'); p.rect(10, 3, 31, 6, '#34343a'); p.rect(10, 3, 31, 3, '#737380'); p.rect(14, 6, 17, 9, '#2a2a30'); p.rect(30, 4, 36, 5, '#20242c'); p.rect(12, 1, 16, 2, '#34343a'); p.outline(); return p; }
 
 (async () => {
@@ -140,13 +141,34 @@ function rifleIcon() { const p = new Pix(38, 10); p.rect(0, 3, 9, 7, '#5c3a1e');
     return frames;
   };
   await mk('shotgun_spritesheet.png', 'gs_shotgun', 64);
-  await mk('pistol_spritesheet.png', 'gs_pistol', 48);
+  const GUN = new Set(['52,52,58', '115,115,128', '118,118,132', '105,105,118']);
+  const pistol = await mk('pistol_spritesheet.png', 'gs_pistol', 48);
+  // 소음기 권총: 권총 프레임의 총구 끝에 소음기(원통)를 붙이고, 발사 프레임의 총구 화염은 지운다
+  const SUP = [[34, 38, 46], [92, 100, 114], [22, 24, 30]];
+  const supFrames = pistol.map((f, fi) => {
+    const p = new Pix(48, 48); let maxX = 0, my = 24;
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) { const i = (y * 48 + x) * 4; if (!f.d[i + 3]) continue; const key = `${f.d[i]},${f.d[i + 1]},${f.d[i + 2]}`; if (key === '255,150,40' || key === '255,240,130' || key === '255,232,90') continue; p.set(x, y, [f.d[i], f.d[i + 1], f.d[i + 2]]); if (GUN.has(key) && x > maxX) { maxX = x; my = y; } }
+    if (fi <= 3 && maxX > 0) { for (let x = maxX + 1; x <= Math.min(47, maxX + 7); x++) { p.set(x, my - 1, SUP[1]); p.set(x, my, SUP[0]); p.set(x, my + 1, SUP[2]); } p.set(Math.min(47, maxX + 8), my, SUP[2]); p.set(maxX + 3, my, SUP[1]); p.set(maxX + 5, my, SUP[1]); }
+    return p;
+  });
+  await writeSheet('gs_silenced', supFrames, 48);
+  // 암살 동작: 권총 근접 프레임(4~6) 위에 단검을 붙이고, 가운데 프레임은 몸을 앞으로 내민다(돌진 찌르기)
+  const stabFrames = [4, 5, 6].map((fi, k) => {
+    const src = pistol[fi], p = new Pix(48, 48), shift = k === 1 ? 3 : k === 0 ? -1 : 1; let maxX = 0, my = 24;
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) { const i = (y * 48 + x) * 4; if (!src.d[i + 3]) continue; p.set(x + shift, y, [src.d[i], src.d[i + 1], src.d[i + 2]]); if (x + shift > maxX) { maxX = x + shift; my = y; } }
+    const len = k === 1 ? 10 : k === 0 ? 4 : 6;
+    for (let x = maxX + 1; x <= Math.min(47, maxX + len); x++) { p.set(x, my, [214, 222, 236]); p.set(x, my - 1, [96, 104, 120]); }
+    p.set(Math.min(47, maxX + len + 1), my, [255, 255, 255]); p.set(maxX, my + 1, [70, 50, 30]); p.set(maxX, my - 2, [70, 50, 30]);   // 손잡이/날 받침
+    return p;
+  });
+  await writeSheet('gs_stab', stabFrames, 48);
+  await writeSheet('i_silenced', [silencedIcon()], 9, 22);
   const rifle = await mk('rifle_spritesheet.png', 'gs_rifle', 48);
   await mk('smg_spritesheet.png', 'gs_smg', 64);
   await mk('throw_spritesheet.png', 'gs_throw', 48);
   await mk('roll_spritesheet.png', 'gs_roll', 48);
   // 레일 라이플: 소총 프레임의 총 부분을 청색 코일 총으로 바꾸고 총신을 6픽셀 늘린다 (몸은 그대로)
-  const GUN = new Set(['52,52,58', '115,115,128', '118,118,132', '105,105,118', '52,52,58']), RAIL = [[28, 70, 92], [56, 208, 255], [190, 244, 255]];
+  const RAIL = [[28, 70, 92], [56, 208, 255], [190, 244, 255]];
   const railFrames = rifle.map((f, fi) => {
     const p = new Pix(48, 48); let maxX = 0, my = 24;
     for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) { const i = (y * 48 + x) * 4; if (!f.d[i + 3]) continue; const key = `${f.d[i]},${f.d[i + 1]},${f.d[i + 2]}`; if (GUN.has(key)) { const l = (x + y) % 4 === 0 ? RAIL[2] : (x % 3 === 0 ? RAIL[1] : RAIL[0]); p.set(x, y, l); if (x > maxX) { maxX = x; my = y; } } else if (key === '255,150,40' || key === '255,240,130' || key === '255,232,90') p.set(x, y, [110, 231, 255]); else p.set(x, y, [f.d[i], f.d[i + 1], f.d[i + 2]]); }
@@ -158,6 +180,17 @@ function rifleIcon() { const p = new Pix(38, 10); p.rect(0, 3, 9, 7, '#5c3a1e');
   for (const [k, map] of Object.entries(FOE)) {
     const img = recolor(await loadRaw(path.join(SRC, 'enemy_spritesheet.png')), map);
     await writeSheet('gs_foe_' + k, rightColumn(img, 64), 64);
+  }
+  // 2-b) 구출 대상 자매(인질): 보병 시트를 언니(검정+적색)/동생(백색+금색)으로 칠하고, 4번째 프레임은 밧줄에 묶인 자세
+  const SIS = {
+    sister1: { '#802e28': '#24242c', '#960e14': '#c81e2e', '#ce3430': '#ff4a5a', '#581e1c': '#14141a', '#68080e': '#8a1220' },
+    sister2: { '#802e28': '#e8e4d8', '#960e14': '#d6a62c', '#ce3430': '#ffd860', '#581e1c': '#b8b4a6', '#68080e': '#a07818' },
+  };
+  for (const [k, map] of Object.entries(SIS)) {
+    const fr = rightColumn(recolor(await loadRaw(path.join(SRC, 'enemy_spritesheet.png')), map), 64).slice(0, 3);
+    const bound = new Pix(64, 64); bound.blit(fr[0], 0, 0);
+    bound.rect(24, 30, 40, 31, '#8a6a3a'); bound.rect(24, 34, 40, 35, '#6e5230'); bound.set(41, 30, '#8a6a3a'); bound.set(41, 34, '#6e5230');   // 밧줄
+    await writeSheet('gs_' + k, [...fr, bound], 64);
   }
   // 3) 새로 그린 스프라이트
   await writeSheet('gs_dog', ['idle', 'run_a', 'run_b', 'bite', 'hit', 'dead'].map(dogFrame), 32);

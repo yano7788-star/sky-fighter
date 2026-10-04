@@ -13,11 +13,11 @@ const IMAGES = [
 
 // 지상전 픽셀 아트 (tools/gen-ground-sprites.cjs 가 만든 시트, NEAREST 필터로 그린다): [키, 프레임 크기(가로 세로)]
 export const GROUND_SHEETS: [string, number, number][] = [
-  ['gs_shotgun', 64, 64], ['gs_pistol', 48, 48], ['gs_rifle', 48, 48], ['gs_rail', 48, 48], ['gs_smg', 64, 64], ['gs_throw', 48, 48], ['gs_roll', 48, 48],
+  ['gs_shotgun', 64, 64], ['gs_pistol', 48, 48], ['gs_silenced', 48, 48], ['gs_stab', 48, 48], ['gs_sister1', 64, 64], ['gs_sister2', 64, 64], ['gs_rifle', 48, 48], ['gs_rail', 48, 48], ['gs_smg', 64, 64], ['gs_throw', 48, 48], ['gs_roll', 48, 48],
   ['gs_foe_rifle', 64, 64], ['gs_foe_charger', 64, 64], ['gs_foe_sniper', 64, 64], ['gs_foe_heavy', 64, 64], ['gs_dog', 32, 32], ['gs_drone', 24, 24], ['gs_turret', 40, 40], ['gs_boss', 64, 64],
   ['gs_explosion', 64, 64], ['gs_bomb', 12, 12],
 ];
-export const GROUND_IMAGES = ['gs_blade', 'gs_longgun', 'gs_shield', 'i_pistol', 'i_smg', 'i_shotgun', 'i_rail', 'i_rifle', 'i_grenade', 'i_medkit', 'i_ammo', 'i_crate'];
+export const GROUND_IMAGES = ['gs_blade', 'gs_longgun', 'gs_shield', 'i_pistol', 'i_silenced', 'i_smg', 'i_shotgun', 'i_rail', 'i_rifle', 'i_grenade', 'i_medkit', 'i_ammo', 'i_crate'];
 
 /** 이미지 로딩 + 공용 텍스처 생성. 로딩 진행 바를 보여준다. */
 export class BootScene extends Phaser.Scene {
