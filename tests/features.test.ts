@@ -69,7 +69,7 @@ describe('지상전: 폭탄 종류 · 무음 처치 · 연막', () => {
     expect(g.drain().some(x => x.t === 'stealth')).toBe(false);
   });
   it('들키지 않고 구역을 정리하면 GHOST CLEAR', () => {
-    const g = new GroundSim({ seed: 4 }); for (const e of g.enemies.slice()) if (e.section === 0) (g as any).killEnemy(e, 'pistol', 0);
+    const g = new GroundSim({ seed: 4 }); g.enemies = g.enemies.filter(e => e.section !== 0);   // 들키지 않고 정리(목격자 없음)
     g.drain(); g.step(NO_INPUT);
     expect(g.drain().some(x => x.t === 'ghost')).toBe(true);
   });
@@ -228,11 +228,13 @@ describe('경보 해제', () => {
 });
 
 describe('소음기 처치는 경보 없음 · 탄 8발', () => {
-  it('눈치채지 못한 보병을 소음기로 쏴 죽이면 경보도 동료 경계도 없다', () => {
-    const g = new GroundSim({ seed: 5, mission: 'rescue', hostageWho: 1 }); g.enemies.length = 0; g.p.invuln = 99999; g.p.x = 10 * TILE; g.p.y = 129.4 * TILE;
-    expect(g.p.ammo).toBe(8);
-    const t = add(g, 'rifle', g.p.x, g.p.y - 200, -Math.PI / 2); t.state = 'idle'; const nb = add(g, 'rifle', g.p.x + 70, g.p.y - 210, -Math.PI / 2); nb.state = 'idle';
-    for (let i = 0; i < 14; i++) g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 });
-    expect(g.enemies.includes(t)).toBe(false); expect(g.alarm).toBe(false); expect(nb.state).toBe('idle'); expect(g.p.ammo).toBeLessThan(8);
+  it('눈치채지 못한 보병을 소음기로 쏴 죽이면 경보 없음 — 시야 밖의 동료는 모르고, 시야 안의 동료는 목격하고 경계한다', () => {
+    const mk = () => { const g = new GroundSim({ seed: 5, mission: 'rescue', hostageWho: 1 }); g.enemies.length = 0; g.p.invuln = 99999; g.p.x = 10 * TILE; g.p.y = 129.4 * TILE; return g; };
+    const fire = (g: GroundSim) => { for (let i = 0; i < 14; i++) g.step({ ...NO_INPUT, fire: true, ax: 0, ay: -1 }); };
+    const a = mk(); expect(a.p.ammo).toBe(8);
+    const t = add(a, 'rifle', a.p.x, a.p.y - 200, -Math.PI / 2); t.state = 'idle'; const far = add(a, 'rifle', a.p.x + 330, a.p.y - 210, -Math.PI / 2); far.state = 'idle';
+    fire(a); expect(a.enemies.includes(t)).toBe(false); expect(a.alarm).toBe(false); expect(far.state).toBe('idle'); expect(a.p.ammo).toBeLessThan(8);
+    const b = mk(); const t2 = add(b, 'rifle', b.p.x, b.p.y - 200, -Math.PI / 2); t2.state = 'idle'; const near = add(b, 'rifle', b.p.x + 50, b.p.y - 200, Math.PI); near.state = 'idle';   // 왼쪽(희생자 쪽)을 보고 있다
+    fire(b); expect(b.enemies.includes(t2)).toBe(false); expect(near.state).toBe('alert'); expect(b.alarm).toBe(true);
   });
 });
